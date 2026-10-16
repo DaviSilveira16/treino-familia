@@ -695,25 +695,33 @@ export default function App() {
 
         <Pilha.Screen name="treinos">
           {({ navigation }) => (
-            <MeusTreinos onVoltar={() => navigation.goBack()} />
+            <TelaComGestoVoltar navigation={navigation}>
+              <MeusTreinos onVoltar={() => navigation.goBack()} />
+            </TelaComGestoVoltar>
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="evolucao">
           {({ navigation }) => (
-            <EvolucaoFisica onVoltar={() => navigation.goBack()} />
+            <TelaComGestoVoltar navigation={navigation}>
+              <EvolucaoFisica onVoltar={() => navigation.goBack()} />
+            </TelaComGestoVoltar>
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="historico">
           {({ navigation }) => (
-            <HistoricoTreinos onVoltar={() => navigation.goBack()} />
+            <TelaComGestoVoltar navigation={navigation}>
+              <HistoricoTreinos onVoltar={() => navigation.goBack()} />
+            </TelaComGestoVoltar>
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="programacao">
           {({ navigation }) => (
-            <ProgramacaoSemanal onVoltar={() => navigation.goBack()} />
+            <TelaComGestoVoltar navigation={navigation}>
+              <ProgramacaoSemanal onVoltar={() => navigation.goBack()} />
+            </TelaComGestoVoltar>
           )}
         </Pilha.Screen>
 
@@ -722,28 +730,32 @@ export default function App() {
             const tela = telas.find((item) => item.id === "frequencia");
 
             return (
-              <View style={estilos.container}>
-                <View style={estilos.topoInterno}>
-                  <TouchableOpacity
-                    style={estilos.botaoVoltar}
-                    onPress={() => navigation.goBack()}
-                  >
-                    <Text style={estilos.textoVoltar}>‹ Voltar</Text>
-                  </TouchableOpacity>
+              <TelaComGestoVoltar navigation={navigation}>
+                <View style={estilos.container}>
+                  <View style={estilos.topoInterno}>
+                    <TouchableOpacity
+                      style={estilos.botaoVoltar}
+                      onPress={() => navigation.goBack()}
+                    >
+                      <Text style={estilos.textoVoltar}>‹ Voltar</Text>
+                    </TouchableOpacity>
 
-                  <Text style={estilos.tituloInterno}>{tela?.titulo}</Text>
+                    <Text style={estilos.tituloInterno}>{tela?.titulo}</Text>
+                  </View>
+
+                  <View style={estilos.conteudoPlaceholder}>
+                    <Text style={estilos.emojiPlaceholder}>{tela?.emoji}</Text>
+
+                    <Text style={estilos.tituloPlaceholder}>
+                      {tela?.titulo}
+                    </Text>
+
+                    <Text style={estilos.descricaoPlaceholder}>
+                      Esta área será desenvolvida na próxima etapa.
+                    </Text>
+                  </View>
                 </View>
-
-                <View style={estilos.conteudoPlaceholder}>
-                  <Text style={estilos.emojiPlaceholder}>{tela?.emoji}</Text>
-
-                  <Text style={estilos.tituloPlaceholder}>{tela?.titulo}</Text>
-
-                  <Text style={estilos.descricaoPlaceholder}>
-                    Esta área será desenvolvida na próxima etapa.
-                  </Text>
-                </View>
-              </View>
+              </TelaComGestoVoltar>
             );
           }}
         </Pilha.Screen>
