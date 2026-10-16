@@ -31,6 +31,7 @@ import TreinoDoDia from "./telas/TreinoDoDia";
 import MeusTreinos from "./telas/MeusTreinos";
 import EvolucaoFisica from "./telas/EvolucaoFisica";
 import HistoricoTreinos from "./telas/HistoricoTreinos";
+import GestoVoltarWeb from "./componentes/GestoVoltarWeb";
 import ProgramacaoSemanal from "./telas/ProgramacaoSemanal";
 
 type ModoAutenticacao = "login" | "cadastro" | "recuperar";
@@ -545,7 +546,7 @@ export default function App() {
             },
           },
           cardStyle: {
-            backgroundColor: "#101312",
+            backgroundColor: Platform.OS === "web" ? "transparent" : "#101312",
           },
         }}
       >
@@ -655,10 +656,15 @@ export default function App() {
 
         <Pilha.Screen name="perfil">
           {({ navigation }) => (
-            <Perfil
-              usuario={sessao.user}
+            <GestoVoltarWeb
+              podeVoltar={navigation.canGoBack()}
               onVoltar={() => navigation.goBack()}
-            />
+            >
+              <Perfil
+                usuario={sessao.user}
+                onVoltar={() => navigation.goBack()}
+              />
+            </GestoVoltarWeb>
           )}
         </Pilha.Screen>
 
