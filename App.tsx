@@ -3,8 +3,10 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  Dimensions,
   Image,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   ScrollView,
   StatusBar,
@@ -76,6 +78,54 @@ const telas = [
     emoji: "🗓️",
   },
 ] as const;
+
+function TelaComGestoVoltar({
+  children,
+  navigation,
+}: {
+  children: React.ReactNode;
+  navigation: {
+    canGoBack: () => boolean;
+    goBack: () => void;
+  };
+}) {
+  const larguraTela = Dimensions.get("window").width;
+
+  const responder = React.useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+
+      onMoveShouldSetPanResponder: (_, gesto) => {
+        if (Platform.OS !== "web") {
+          return false;
+        }
+
+        return (
+          gesto.x0 <= 30 &&
+          gesto.dx > 12 &&
+          Math.abs(gesto.dx) > Math.abs(gesto.dy) * 1.5
+        );
+      },
+
+      onPanResponderRelease: (_, gesto) => {
+        if (
+          gesto.x0 <= 30 &&
+          gesto.dx > Math.min(larguraTela * 0.2, 100) &&
+          Math.abs(gesto.dx) > Math.abs(gesto.dy) * 1.5 &&
+          navigation.canGoBack()
+        ) {
+          navigation.goBack();
+        }
+      },
+    }),
+  ).current;
+
+  return (
+    <View style={estilos.telaComGesto} {...responder.panHandlers}>
+      {children}
+    </View>
+  );
+}
 
 export default function App() {
   const versaoAvisada = useRef<string | null>(null);
@@ -634,10 +684,12 @@ export default function App() {
 
         <Pilha.Screen name="perfil">
           {({ navigation }) => (
-            <Perfil
-              usuario={sessao.user}
-              onVoltar={() => navigation.goBack()}
-            />
+            <TelaComGestoVoltar navigation={navigation}>
+              <Perfil
+                usuario={sessao.user}
+                onVoltar={() => navigation.goBack()}
+              />
+            </TelaComGestoVoltar>
           )}
         </Pilha.Screen>
 
@@ -701,8 +753,14 @@ export default function App() {
 }
 
 const estilos = StyleSheet.create({
+  telaComGesto: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: "#101312",
+  },
   container: {
     flex: 1,
+    minHeight: 0,
     backgroundColor: "#101312",
   },
   carregando: {
