@@ -194,7 +194,8 @@ export default function Perfil({ usuario, onVoltar }: Props) {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
-        contentContainerStyle={estilos.conteudo}
+        style={{ flex: 1, minHeight: 0 }}
+        contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >

@@ -632,8 +632,9 @@ export default function MeusTreinos({ onVoltar }: Props) {
   return (
     <View style={estilos.container}>
       <ScrollView
+        style={{ flex: 1, minHeight: 0 }}
         ref={scrollViewRef}
-        contentContainerStyle={estilos.conteudo}
+        contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         onContentSizeChange={() => {

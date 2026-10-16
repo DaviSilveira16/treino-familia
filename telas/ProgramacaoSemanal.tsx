@@ -201,7 +201,8 @@ export default function ProgramacaoSemanal({ onVoltar }: Props) {
     <View style={estilos.container}>
       <StatusBar barStyle="light-content" backgroundColor="#101312" />
       <ScrollView
-        contentContainerStyle={estilos.conteudo}
+        style={{ flex: 1, minHeight: 0 }}
+        contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}
         showsVerticalScrollIndicator={false}
       >
         <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar}>

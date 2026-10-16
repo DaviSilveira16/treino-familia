@@ -268,8 +268,8 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
 
   return (
     <ScrollView
-      style={styles.tela}
-      contentContainerStyle={styles.conteudo}
+      style={[styles.tela, { flex: 1, minHeight: 0 }]}
+      contentContainerStyle={[styles.conteudo, { flexGrow: 1 }]}
       keyboardShouldPersistTaps="handled"
     >
       <View style={styles.cabecalho}>
