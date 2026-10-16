@@ -8,6 +8,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Platform,
 } from "react-native";
 import { supabase } from "../supabase";
 
@@ -35,6 +36,39 @@ type Props = {
 };
 
 export default function MeusTreinos({ onVoltar }: Props) {
+  function mostrarMensagem(titulo: string, mensagem: string) {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      window.alert(`${titulo}\n\n${mensagem}`);
+      return;
+    }
+
+    Alert.alert(titulo, mensagem);
+  }
+
+  function confirmarExclusao(
+    titulo: string,
+    mensagem: string,
+  ): Promise<boolean> {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      return Promise.resolve(window.confirm(`${titulo}\n\n${mensagem}`));
+    }
+
+    return new Promise((resolve) => {
+      Alert.alert(titulo, mensagem, [
+        {
+          text: "Cancelar",
+          style: "cancel",
+          onPress: () => resolve(false),
+        },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: () => resolve(true),
+        },
+      ]);
+    });
+  }
+
   const [usuarioId, setUsuarioId] = useState("");
   const [treinos, setTreinos] = useState<Treino[]>([]);
   const [treinoSelecionado, setTreinoSelecionado] = useState<Treino | null>(
@@ -192,121 +226,115 @@ export default function MeusTreinos({ onVoltar }: Props) {
     }
   }
 
-  function excluirTreino(treino: Treino) {
-    Alert.alert(
+  async function excluirTreino(treino: Treino) {
+    const confirmado = await confirmarExclusao(
       "Excluir treino inteiro?",
       `Tem certeza de que deseja excluir o treino "${treino.name}" inteiro? Todos os exercícios cadastrados nele também serão excluídos. O histórico de cargas será preservado, mas ficará sem vínculo com esse treino.`,
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Excluir treino",
-          style: "destructive",
-          onPress: async () => {
-            setSalvando(true);
-            try {
-              const { data: exerciciosDoTreino, error: erroBusca } =
-                await supabase
-                  .from("exercises")
-                  .select("id")
-                  .eq("plan_id", treino.id)
-                  .eq("user_id", usuarioId);
-
-              if (erroBusca) {
-                Alert.alert(
-                  "Erro",
-                  `Não foi possível localizar os exercícios: ${erroBusca.message}`,
-                );
-                return;
-              }
-
-              const idsExercicios = (exerciciosDoTreino ?? []).map(
-                (item) => item.id,
-              );
-
-              if (idsExercicios.length > 0) {
-                const { error: erroDesvincularCargas } = await supabase
-                  .from("workout_sets")
-                  .update({ exercise_id: null })
-                  .eq("user_id", usuarioId)
-                  .in("exercise_id", idsExercicios);
-
-                if (erroDesvincularCargas) {
-                  Alert.alert(
-                    "Erro",
-                    `Não foi possível preservar o histórico de cargas: ${erroDesvincularCargas.message}`,
-                  );
-                  return;
-                }
-              }
-
-              const { error: erroDesvincularSessoes } = await supabase
-                .from("workout_sessions")
-                .update({ plan_id: null })
-                .eq("user_id", usuarioId)
-                .eq("plan_id", treino.id);
-
-              if (erroDesvincularSessoes) {
-                Alert.alert(
-                  "Erro",
-                  `Não foi possível preservar o histórico do treino: ${erroDesvincularSessoes.message}`,
-                );
-                return;
-              }
-
-              const { error: erroExcluirExercicios } = await supabase
-                .from("exercises")
-                .delete()
-                .eq("plan_id", treino.id)
-                .eq("user_id", usuarioId);
-
-              if (erroExcluirExercicios) {
-                Alert.alert(
-                  "Erro",
-                  `Não foi possível remover os exercícios do treino: ${erroExcluirExercicios.message}`,
-                );
-                return;
-              }
-
-              const { error: erroExcluirTreino } = await supabase
-                .from("workout_plans")
-                .delete()
-                .eq("id", treino.id)
-                .eq("user_id", usuarioId);
-
-              if (erroExcluirTreino) {
-                Alert.alert(
-                  "Erro",
-                  `Não foi possível remover o treino: ${erroExcluirTreino.message}`,
-                );
-                return;
-              }
-
-              setTreinos((atuais) =>
-                atuais.filter((item) => item.id !== treino.id),
-              );
-              if (treinoSelecionado?.id === treino.id) {
-                setTreinoSelecionado(null);
-                setMostrarFormularioExercicio(false);
-                setExercicios([]);
-                setExercicioEditando(null);
-                setExercicioParaCarga(null);
-              }
-              Alert.alert(
-                "Treino removido",
-                "O treino foi removido. Os registros anteriores de cargas foram preservados.",
-              );
-            } catch {
-              Alert.alert(
-                "Erro",
-                "Não foi possível conectar ao Supabase para remover o treino.",
-              );
-            } finally {
-              setSalvando(false);
-            }
-          },
-        },
-      ],
     );
+
+    if (!confirmado) return;
+
+    setSalvando(true);
+
+    try {
+      const { data: exerciciosDoTreino, error: erroBusca } = await supabase
+        .from("exercises")
+        .select("id")
+        .eq("plan_id", treino.id)
+        .eq("user_id", usuarioId);
+
+      if (erroBusca) {
+        mostrarMensagem(
+          "Erro",
+          `Não foi possível localizar os exercícios: ${erroBusca.message}`,
+        );
+        return;
+      }
+
+      const idsExercicios = (exerciciosDoTreino ?? []).map((item) => item.id);
+
+      if (idsExercicios.length > 0) {
+        const { error: erroDesvincularCargas } = await supabase
+          .from("workout_sets")
+          .update({ exercise_id: null })
+          .eq("user_id", usuarioId)
+          .in("exercise_id", idsExercicios);
+
+        if (erroDesvincularCargas) {
+          mostrarMensagem(
+            "Erro",
+            `Não foi possível preservar o histórico de cargas: ${erroDesvincularCargas.message}`,
+          );
+          return;
+        }
+      }
+
+      const { error: erroDesvincularSessoes } = await supabase
+        .from("workout_sessions")
+        .update({ plan_id: null })
+        .eq("user_id", usuarioId)
+        .eq("plan_id", treino.id);
+
+      if (erroDesvincularSessoes) {
+        mostrarMensagem(
+          "Erro",
+          `Não foi possível preservar o histórico do treino: ${erroDesvincularSessoes.message}`,
+        );
+        return;
+      }
+
+      const { error: erroExcluirExercicios } = await supabase
+        .from("exercises")
+        .delete()
+        .eq("plan_id", treino.id)
+        .eq("user_id", usuarioId);
+
+      if (erroExcluirExercicios) {
+        mostrarMensagem(
+          "Erro",
+          `Não foi possível remover os exercícios do treino: ${erroExcluirExercicios.message}`,
+        );
+        return;
+      }
+
+      const { error: erroExcluirTreino } = await supabase
+        .from("workout_plans")
+        .delete()
+        .eq("id", treino.id)
+        .eq("user_id", usuarioId);
+
+      if (erroExcluirTreino) {
+        mostrarMensagem(
+          "Erro",
+          `Não foi possível remover o treino: ${erroExcluirTreino.message}`,
+        );
+        return;
+      }
+
+      setTreinos((atuais) => atuais.filter((item) => item.id !== treino.id));
+
+      if (treinoSelecionado?.id === treino.id) {
+        setTreinoSelecionado(null);
+        setMostrarFormularioExercicio(false);
+        setExercicios([]);
+        setExercicioEditando(null);
+        setExercicioParaCarga(null);
+      }
+
+      mostrarMensagem(
+        "Treino removido",
+        "O treino foi removido. Os registros anteriores de cargas foram preservados.",
+      );
+    } catch (erro) {
+      mostrarMensagem(
+        "Erro",
+        erro instanceof Error
+          ? `Não foi possível remover o treino: ${erro.message}`
+          : "Não foi possível conectar ao Supabase para remover o treino.",
+      );
+    } finally {
+      setSalvando(false);
+    }
   }
 
   async function adicionarExercicio() {
@@ -421,44 +449,54 @@ export default function MeusTreinos({ onVoltar }: Props) {
     }
   }
 
-  function excluirExercicio(exercicio: Exercicio) {
-    Alert.alert(
+  async function excluirExercicio(exercicio: Exercicio) {
+    const confirmado = await confirmarExclusao(
       "Excluir exercício",
       `Deseja excluir "${exercicio.name}" deste treino?`,
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Excluir",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from("exercises")
-                .delete()
-                .eq("id", exercicio.id)
-                .eq("plan_id", exercicio.plan_id)
-                .eq("user_id", usuarioId);
-              if (error) {
-                Alert.alert(
-                  "Erro",
-                  `Não foi possível excluir o exercício: ${error.message}`,
-                );
-                return;
-              }
-              setExercicios((atuais) =>
-                atuais.filter((item) => item.id !== exercicio.id),
-              );
-              if (exercicioEditando?.id === exercicio.id)
-                setExercicioEditando(null);
-              if (exercicioParaCarga?.id === exercicio.id)
-                setExercicioParaCarga(null);
-            } catch {
-              Alert.alert("Erro", "Não foi possível conectar ao Supabase.");
-            }
-          },
-        },
-      ],
     );
+
+    if (!confirmado) return;
+
+    try {
+      const { error } = await supabase
+        .from("exercises")
+        .delete()
+        .eq("id", exercicio.id)
+        .eq("plan_id", exercicio.plan_id)
+        .eq("user_id", usuarioId);
+
+      if (error) {
+        mostrarMensagem(
+          "Erro",
+          `Não foi possível excluir o exercício: ${error.message}`,
+        );
+        return;
+      }
+
+      setExercicios((atuais) =>
+        atuais.filter((item) => item.id !== exercicio.id),
+      );
+
+      if (exercicioEditando?.id === exercicio.id) {
+        setExercicioEditando(null);
+      }
+
+      if (exercicioParaCarga?.id === exercicio.id) {
+        setExercicioParaCarga(null);
+      }
+
+      mostrarMensagem(
+        "Exercício removido",
+        "O exercício foi excluído com sucesso.",
+      );
+    } catch (erro) {
+      mostrarMensagem(
+        "Erro",
+        erro instanceof Error
+          ? `Não foi possível excluir o exercício: ${erro.message}`
+          : "Não foi possível conectar ao Supabase.",
+      );
+    }
   }
 
   async function abrirRegistroCarga(exercicio: Exercicio) {
