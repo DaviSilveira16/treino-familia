@@ -525,7 +525,7 @@ export default function App() {
         initialRouteName="Inicio"
         screenOptions={{
           headerShown: false,
-          gestureEnabled: true,
+          gestureEnabled: Platform.OS !== "web",
           gestureDirection: "horizontal",
           gestureResponseDistance: 40,
           gestureVelocityImpact: 0.3,
