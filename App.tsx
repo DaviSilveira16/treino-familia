@@ -31,7 +31,7 @@ import TreinoDoDia from "./telas/TreinoDoDia";
 import MeusTreinos from "./telas/MeusTreinos";
 import EvolucaoFisica from "./telas/EvolucaoFisica";
 import HistoricoTreinos from "./telas/HistoricoTreinos";
-import GestoVoltarWeb from "./componentes/GestoVoltarWeb";
+// import GestoVoltarWeb from "./componentes/GestoVoltarWeb";
 import ProgramacaoSemanal from "./telas/ProgramacaoSemanal";
 
 type ModoAutenticacao = "login" | "cadastro" | "recuperar";
@@ -84,7 +84,6 @@ const telas = [
 export default function App() {
   const versaoAvisada = useRef<string | null>(null);
   const verificacaoEmAndamento = useRef(false);
-
   const [sessao, setSessao] = useState<Session | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [modo, setModo] = useState<ModoAutenticacao>("login");
@@ -546,7 +545,7 @@ export default function App() {
             },
           },
           cardStyle: {
-            backgroundColor: Platform.OS === "web" ? "transparent" : "#101312",
+            backgroundColor: "#101312",
           },
         }}
       >
@@ -656,15 +655,10 @@ export default function App() {
 
         <Pilha.Screen name="perfil">
           {({ navigation }) => (
-            <GestoVoltarWeb
-              podeVoltar={navigation.canGoBack()}
+            <Perfil
+              usuario={sessao.user}
               onVoltar={() => navigation.goBack()}
-            >
-              <Perfil
-                usuario={sessao.user}
-                onVoltar={() => navigation.goBack()}
-              />
-            </GestoVoltarWeb>
+            />
           )}
         </Pilha.Screen>
 
