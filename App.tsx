@@ -19,7 +19,10 @@ import {
   avisarAtualizacao,
   verificarAtualizacao,
 } from "./servicos/atualizacao";
-import { NavigationContainer } from "@react-navigation/native";
+import {
+  createNavigationContainerRef,
+  NavigationContainer,
+} from "@react-navigation/native";
 import {
   CardStyleInterpolators,
   createStackNavigator,
@@ -46,17 +49,9 @@ type Rotas = {
   programacao: undefined;
 };
 
-const estiloRolagemWeb =
-  Platform.OS === "web"
-    ? ({
-        flex: 1,
-        minHeight: 0,
-        touchAction: "pan-y",
-        WebkitOverflowScrolling: "touch",
-      } as any)
-    : { flex: 1, minHeight: 0 };
-
 const Pilha = createStackNavigator<Rotas>();
+
+const referenciaNavegacao = createNavigationContainerRef<Rotas>();
 
 const telas = [
   {
@@ -101,6 +96,64 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const toqueInicialWeb = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof document === "undefined") {
+      return;
+    }
+
+    function iniciarToque(evento: TouchEvent) {
+      if (evento.touches.length !== 1) {
+        toqueInicialWeb.current = null;
+        return;
+      }
+
+      const toque = evento.touches[0];
+
+      toqueInicialWeb.current =
+        toque.clientX <= 36 ? { x: toque.clientX, y: toque.clientY } : null;
+    }
+
+    function finalizarToque(evento: TouchEvent) {
+      const inicio = toqueInicialWeb.current;
+      toqueInicialWeb.current = null;
+
+      if (!inicio || evento.changedTouches.length !== 1) {
+        return;
+      }
+
+      const toque = evento.changedTouches[0];
+      const deslocamentoX = toque.clientX - inicio.x;
+      const deslocamentoY = toque.clientY - inicio.y;
+
+      const eDeslizeParaVoltar =
+        deslocamentoX >= 65 &&
+        Math.abs(deslocamentoX) > Math.abs(deslocamentoY) * 1.3;
+
+      if (
+        eDeslizeParaVoltar &&
+        referenciaNavegacao.isReady() &&
+        referenciaNavegacao.canGoBack()
+      ) {
+        referenciaNavegacao.goBack();
+      }
+    }
+
+    function cancelarToque() {
+      toqueInicialWeb.current = null;
+    }
+
+    document.addEventListener("touchstart", iniciarToque, { passive: true });
+    document.addEventListener("touchend", finalizarToque, { passive: true });
+    document.addEventListener("touchcancel", cancelarToque, { passive: true });
+
+    return () => {
+      document.removeEventListener("touchstart", iniciarToque);
+      document.removeEventListener("touchend", finalizarToque);
+      document.removeEventListener("touchcancel", cancelarToque);
+    };
+  }, []);
 
   useEffect(() => {
     let componenteAtivo = true;
@@ -361,7 +414,6 @@ export default function App() {
         <StatusBar barStyle="light-content" backgroundColor="#101312" />
 
         <ScrollView
-          style={estiloRolagemWeb}
           contentContainerStyle={estilos.conteudoAutenticacao}
           keyboardShouldPersistTaps="handled"
         >
@@ -529,7 +581,7 @@ export default function App() {
       : null;
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={referenciaNavegacao}>
       <StatusBar barStyle="light-content" backgroundColor="#101312" />
 
       <Pilha.Navigator
@@ -564,7 +616,6 @@ export default function App() {
           {({ navigation }) => (
             <View style={estilos.container}>
               <ScrollView
-                style={estiloRolagemWeb}
                 contentContainerStyle={estilos.conteudoHome}
                 showsVerticalScrollIndicator={false}
               >
