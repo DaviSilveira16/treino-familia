@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Alert,
   AppState,
   Dimensions,
@@ -90,13 +91,14 @@ function TelaComGestoVoltar({
   };
 }) {
   const larguraTela = Dimensions.get("window").width;
+  const deslocamento = React.useRef(new Animated.Value(0)).current;
 
   const responder = React.useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
 
       onMoveShouldSetPanResponder: (_, gesto) => {
-        if (Platform.OS !== "web") {
+        if (Platform.OS !== "web" || !navigation.canGoBack()) {
           return false;
         }
 
@@ -107,23 +109,59 @@ function TelaComGestoVoltar({
         );
       },
 
+      onPanResponderMove: (_, gesto) => {
+        deslocamento.setValue(Math.max(0, gesto.dx));
+      },
+
       onPanResponderRelease: (_, gesto) => {
-        if (
+        const concluirVolta =
           gesto.x0 <= 30 &&
           gesto.dx > Math.min(larguraTela * 0.2, 100) &&
           Math.abs(gesto.dx) > Math.abs(gesto.dy) * 1.5 &&
-          navigation.canGoBack()
-        ) {
-          navigation.goBack();
+          navigation.canGoBack();
+
+        if (concluirVolta) {
+          Animated.timing(deslocamento, {
+            toValue: larguraTela,
+            duration: 180,
+            useNativeDriver: false,
+          }).start(({ finished }) => {
+            if (finished) {
+              deslocamento.setValue(0);
+              navigation.goBack();
+            }
+          });
+        } else {
+          Animated.spring(deslocamento, {
+            toValue: 0,
+            speed: 24,
+            bounciness: 2,
+            useNativeDriver: false,
+          }).start();
         }
+      },
+
+      onPanResponderTerminate: () => {
+        Animated.spring(deslocamento, {
+          toValue: 0,
+          speed: 24,
+          bounciness: 2,
+          useNativeDriver: false,
+        }).start();
       },
     }),
   ).current;
 
   return (
-    <View style={estilos.telaComGesto} {...responder.panHandlers}>
+    <Animated.View
+      style={[
+        estilos.telaComGesto,
+        { transform: [{ translateX: deslocamento }] },
+      ]}
+      {...responder.panHandlers}
+    >
       {children}
-    </View>
+    </Animated.View>
   );
 }
 
