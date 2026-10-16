@@ -9,8 +9,19 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Platform,
 } from "react-native";
 import { supabase } from "../supabase";
+
+const estiloRolagemWeb =
+  Platform.OS === "web"
+    ? ({
+        flex: 1,
+        minHeight: 0,
+        touchAction: "pan-y",
+        WebkitOverflowScrolling: "touch",
+      } as any)
+    : { flex: 1, minHeight: 0 };
 
 type SessaoTreino = {
   id: string;
@@ -204,7 +215,7 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
       <StatusBar barStyle="light-content" backgroundColor="#101312" />
 
       <ScrollView
-        style={{ flex: 1, minHeight: 0 }}
+        style={estiloRolagemWeb}
         contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={

@@ -8,8 +8,19 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Platform,
 } from "react-native";
 import { supabase } from "../supabase";
+
+const estiloRolagemWeb =
+  Platform.OS === "web"
+    ? ({
+        flex: 1,
+        minHeight: 0,
+        touchAction: "pan-y",
+        WebkitOverflowScrolling: "touch",
+      } as any)
+    : { flex: 1, minHeight: 0 };
 
 type Medicao = {
   id: string;
@@ -268,7 +279,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
 
   return (
     <ScrollView
-      style={[styles.tela, { flex: 1, minHeight: 0 }]}
+      style={[styles.tela, estiloRolagemWeb]}
       contentContainerStyle={[styles.conteudo, { flexGrow: 1 }]}
       keyboardShouldPersistTaps="handled"
     >

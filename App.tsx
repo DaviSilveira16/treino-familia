@@ -46,6 +46,16 @@ type Rotas = {
   programacao: undefined;
 };
 
+const estiloRolagemWeb =
+  Platform.OS === "web"
+    ? ({
+        flex: 1,
+        minHeight: 0,
+        touchAction: "pan-y",
+        WebkitOverflowScrolling: "touch",
+      } as any)
+    : { flex: 1, minHeight: 0 };
+
 const Pilha = createStackNavigator<Rotas>();
 
 const telas = [
@@ -351,6 +361,7 @@ export default function App() {
         <StatusBar barStyle="light-content" backgroundColor="#101312" />
 
         <ScrollView
+          style={estiloRolagemWeb}
           contentContainerStyle={estilos.conteudoAutenticacao}
           keyboardShouldPersistTaps="handled"
         >
@@ -553,6 +564,7 @@ export default function App() {
           {({ navigation }) => (
             <View style={estilos.container}>
               <ScrollView
+                style={estiloRolagemWeb}
                 contentContainerStyle={estilos.conteudoHome}
                 showsVerticalScrollIndicator={false}
               >

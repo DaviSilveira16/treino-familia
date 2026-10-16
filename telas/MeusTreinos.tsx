@@ -12,6 +12,16 @@ import {
 } from "react-native";
 import { supabase } from "../supabase";
 
+const estiloRolagemWeb =
+  Platform.OS === "web"
+    ? ({
+        flex: 1,
+        minHeight: 0,
+        touchAction: "pan-y",
+        WebkitOverflowScrolling: "touch",
+      } as any)
+    : { flex: 1, minHeight: 0 };
+
 type Treino = {
   id: string;
   name: string;
@@ -632,7 +642,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
   return (
     <View style={estilos.container}>
       <ScrollView
-        style={{ flex: 1, minHeight: 0 }}
+        style={estiloRolagemWeb}
         ref={scrollViewRef}
         contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}
         keyboardShouldPersistTaps="handled"

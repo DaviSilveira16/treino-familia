@@ -16,6 +16,16 @@ import * as ImagePicker from "expo-image-picker";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
 
+const estiloRolagemWeb =
+  Platform.OS === "web"
+    ? ({
+        flex: 1,
+        minHeight: 0,
+        touchAction: "pan-y",
+        WebkitOverflowScrolling: "touch",
+      } as any)
+    : { flex: 1, minHeight: 0 };
+
 type Props = {
   usuario: User;
   onVoltar: () => void;
@@ -194,7 +204,7 @@ export default function Perfil({ usuario, onVoltar }: Props) {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
-        style={{ flex: 1, minHeight: 0 }}
+        style={estiloRolagemWeb}
         contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}

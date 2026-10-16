@@ -33,6 +33,16 @@
       body {
         overflow: hidden;
         overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      #root,
+      #root * {
+        touch-action: pan-y;
+      }
+
+      #root [style*="overflow"] {
+        -webkit-overflow-scrolling: touch;
       }
 
       #root {
