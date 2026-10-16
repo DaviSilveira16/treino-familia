@@ -1,0 +1,5 @@
+npx expo export --platform web //Confirme que a compilação terminou sem erros.
+git add .
+git commit -m "Atualiza aplicativo" // 2. Salve as alterações no commit
+//Atenção: confira antes se o .env não será incluído.
+git push// envia pro git hub
