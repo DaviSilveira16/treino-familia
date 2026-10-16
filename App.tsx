@@ -20,7 +20,10 @@ import {
   verificarAtualizacao,
 } from "./servicos/atualizacao";
 import { NavigationContainer } from "@react-navigation/native";
-import { CardStyleInterpolators, createStackNavigator } from "@react-navigation/stack";
+import {
+  CardStyleInterpolators,
+  createStackNavigator,
+} from "@react-navigation/stack";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import Perfil from "./telas/Perfil";
@@ -524,12 +527,26 @@ export default function App() {
           headerShown: false,
           gestureEnabled: true,
           gestureDirection: "horizontal",
+          gestureResponseDistance: 40,
+          gestureVelocityImpact: 0.3,
           cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
           transitionSpec: {
-            open: { animation: "timing", config: { duration: 280 } },
-            close: { animation: "timing", config: { duration: 240 } },
+            open: {
+              animation: "timing",
+              config: {
+                duration: 280,
+              },
+            },
+            close: {
+              animation: "timing",
+              config: {
+                duration: 240,
+              },
+            },
           },
-          cardStyle: { backgroundColor: "#101312" },
+          cardStyle: {
+            backgroundColor: "#101312",
+          },
         }}
       >
         <Pilha.Screen name="Inicio">
@@ -675,29 +692,27 @@ export default function App() {
 
             return (
               <View style={estilos.container}>
-                  <View style={estilos.topoInterno}>
-                    <TouchableOpacity
-                      style={estilos.botaoVoltar}
-                      onPress={() => navigation.goBack()}
-                    >
-                      <Text style={estilos.textoVoltar}>‹ Voltar</Text>
-                    </TouchableOpacity>
+                <View style={estilos.topoInterno}>
+                  <TouchableOpacity
+                    style={estilos.botaoVoltar}
+                    onPress={() => navigation.goBack()}
+                  >
+                    <Text style={estilos.textoVoltar}>‹ Voltar</Text>
+                  </TouchableOpacity>
 
-                    <Text style={estilos.tituloInterno}>{tela?.titulo}</Text>
-                  </View>
-
-                  <View style={estilos.conteudoPlaceholder}>
-                    <Text style={estilos.emojiPlaceholder}>{tela?.emoji}</Text>
-
-                    <Text style={estilos.tituloPlaceholder}>
-                      {tela?.titulo}
-                    </Text>
-
-                    <Text style={estilos.descricaoPlaceholder}>
-                      Esta área será desenvolvida na próxima etapa.
-                    </Text>
-                  </View>
+                  <Text style={estilos.tituloInterno}>{tela?.titulo}</Text>
                 </View>
+
+                <View style={estilos.conteudoPlaceholder}>
+                  <Text style={estilos.emojiPlaceholder}>{tela?.emoji}</Text>
+
+                  <Text style={estilos.tituloPlaceholder}>{tela?.titulo}</Text>
+
+                  <Text style={estilos.descricaoPlaceholder}>
+                    Esta área será desenvolvida na próxima etapa.
+                  </Text>
+                </View>
+              </View>
             );
           }}
         </Pilha.Screen>
