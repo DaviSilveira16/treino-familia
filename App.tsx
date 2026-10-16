@@ -608,6 +608,7 @@ export default function App() {
             },
           },
           cardStyle: {
+            flex: 1,
             backgroundColor: "#101312",
           },
         }}
