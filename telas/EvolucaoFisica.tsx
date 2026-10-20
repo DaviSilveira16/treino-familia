@@ -71,10 +71,18 @@ function formatarData(valor: string) {
 
 function formatarValor(valor: number | null, unidade: string) {
   if (valor === null || valor === undefined) return "—";
-  return `${valor.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} ${unidade}`;
+  return `${valor.toLocaleString("pt-BR", {
+    maximumFractionDigits: 1,
+  })} ${unidade}`;
 }
 
-export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
+export default function EvolucaoFisica({
+  onVoltar,
+  corTema = "#35D07F",
+}: {
+  onVoltar: () => void;
+  corTema?: string;
+}) {
   const [usuarioId, setUsuarioId] = useState<string | null>(null);
   const [medicoes, setMedicoes] = useState<Medicao[]>([]);
   const [campos, setCampos] = useState<CamposMedicao>(camposVazios);
@@ -111,6 +119,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
 
     async function iniciar() {
       const { data, error } = await supabase.auth.getUser();
+
       if (!ativo) return;
 
       if (error || !data.user) {
@@ -124,10 +133,12 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
 
       setUsuarioId(data.user.id);
       await carregarMedicoes(data.user.id);
+
       if (ativo) setCarregando(false);
     }
 
     iniciar();
+
     return () => {
       ativo = false;
     };
@@ -135,11 +146,14 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
 
   const resumoPeso = useMemo(() => {
     const registrosComPeso = medicoes.filter((item) => item.weight_kg !== null);
+
     if (registrosComPeso.length === 0) return null;
+
     const atual = registrosComPeso[0];
     const anterior = registrosComPeso.find(
       (item) => item.id !== atual.id && item.weight_kg !== null,
     );
+
     return {
       atual: atual.weight_kg as number,
       diferenca: anterior
@@ -175,6 +189,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
     }
 
     const peso = converterNumero(campos.weight_kg);
+
     if (peso === null || peso <= 0 || peso > 500) {
       Alert.alert("Peso obrigatório", "Informe um peso válido em quilogramas.");
       return;
@@ -209,6 +224,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
       dados.arm_cm,
       dados.thigh_cm,
     ];
+
     if (valoresNumericos.some((valor) => valor !== null && valor <= 0)) {
       Alert.alert(
         "Valor inválido",
@@ -216,6 +232,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
       );
       return;
     }
+
     if (dados.body_fat_percentage !== null && dados.body_fat_percentage > 100) {
       Alert.alert(
         "Valor inválido",
@@ -225,23 +242,29 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
     }
 
     setSalvando(true);
-    const { error } = await supabase
-      .from("physical_measurements")
-      .insert(dados);
-    setSalvando(false);
 
-    if (error) {
-      Alert.alert(
-        "Erro ao salvar",
-        "Não foi possível salvar a medição. Verifique a tabela e as políticas RLS no Supabase.",
-      );
-      return;
+    try {
+      const { error } = await supabase
+        .from("physical_measurements")
+        .insert(dados);
+
+      if (error) {
+        Alert.alert(
+          "Erro ao salvar",
+          "Não foi possível salvar a medição. Verifique a tabela e as políticas RLS no Supabase.",
+        );
+        return;
+      }
+
+      setCampos(camposVazios);
+      setDataMedicao(new Date().toISOString().slice(0, 10));
+
+      await carregarMedicoes(usuarioId);
+
+      Alert.alert("Medição salva", "Sua evolução física foi atualizada.");
+    } finally {
+      setSalvando(false);
     }
-
-    setCampos(camposVazios);
-    setDataMedicao(new Date().toISOString().slice(0, 10));
-    await carregarMedicoes(usuarioId);
-    Alert.alert("Medição salva", "Sua evolução física foi atualizada.");
   }
 
   function campoMedicao(
@@ -252,6 +275,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
     return (
       <View style={styles.campoContainer} key={campo}>
         <Text style={styles.rotulo}>{rotulo}</Text>
+
         <View style={styles.inputLinha}>
           <TextInput
             style={styles.input}
@@ -262,6 +286,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
             placeholderTextColor="#6F7972"
             accessibilityLabel={rotulo}
           />
+
           {unidade ? <Text style={styles.unidade}>{unidade}</Text> : null}
         </View>
       </View>
@@ -271,7 +296,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
   if (carregando) {
     return (
       <View style={styles.carregando}>
-        <ActivityIndicator size="large" color="#35D07F" />
+        <ActivityIndicator size="large" color={corTema} />
         <Text style={styles.textoSecundario}>Carregando sua evolução...</Text>
       </View>
     );
@@ -285,9 +310,13 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
     >
       <View style={styles.cabecalho}>
         <TouchableOpacity onPress={onVoltar} style={styles.botaoVoltar}>
-          <Text style={styles.botaoVoltarTexto}>‹ Voltar</Text>
+          <Text style={[styles.botaoVoltarTexto, { color: corTema }]}>
+            ‹ Voltar
+          </Text>
         </TouchableOpacity>
+
         <Text style={styles.titulo}>Evolução física</Text>
+
         <Text style={styles.subtitulo}>
           Registre suas medidas e acompanhe as mudanças ao longo do tempo.
         </Text>
@@ -296,12 +325,15 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
       {resumoPeso ? (
         <View style={styles.cartaoResumo}>
           <Text style={styles.rotuloPequeno}>ÚLTIMO PESO REGISTRADO</Text>
-          <Text style={styles.pesoDestaque}>
+
+          <Text style={[styles.pesoDestaque, { color: corTema }]}>
             {formatarValor(resumoPeso.atual, "kg")}
           </Text>
+
           <Text style={styles.textoSecundario}>
             Em {formatarData(resumoPeso.data)}
           </Text>
+
           {resumoPeso.diferenca !== null ? (
             <Text
               style={[
@@ -309,7 +341,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
                 resumoPeso.diferenca > 0
                   ? styles.variacaoAlta
                   : resumoPeso.diferenca < 0
-                    ? styles.variacaoBaixa
+                    ? { color: corTema }
                     : null,
               ]}
             >
@@ -325,7 +357,9 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
 
       <View style={styles.cartao}>
         <Text style={styles.tituloCartao}>Nova medição</Text>
+
         <Text style={styles.rotulo}>Data da medição (AAAA-MM-DD)</Text>
+
         <TextInput
           style={styles.inputData}
           value={dataMedicao}
@@ -335,6 +369,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
           keyboardType="numbers-and-punctuation"
           maxLength={10}
         />
+
         <View style={styles.gradeCampos}>
           {campoMedicao("Peso", "weight_kg", "kg")}
           {campoMedicao("Gordura corporal", "body_fat_percentage", "%")}
@@ -344,7 +379,9 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
           {campoMedicao("Braço", "arm_cm", "cm")}
           {campoMedicao("Coxa", "thigh_cm", "cm")}
         </View>
+
         <Text style={styles.rotulo}>Observações (opcional)</Text>
+
         <TextInput
           style={[styles.inputData, styles.inputObservacoes]}
           value={campos.notes}
@@ -354,8 +391,13 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
           multiline
           maxLength={500}
         />
+
         <TouchableOpacity
-          style={[styles.botaoSalvar, salvando && styles.botaoDesabilitado]}
+          style={[
+            styles.botaoSalvar,
+            { backgroundColor: corTema },
+            salvando && styles.botaoDesabilitado,
+          ]}
           onPress={salvarMedicao}
           disabled={salvando}
         >
@@ -370,15 +412,18 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
       {dadosGrafico.length > 1 ? (
         <View style={styles.cartao}>
           <Text style={styles.tituloCartao}>Variação do peso</Text>
+
           <Text style={styles.textoSecundario}>
             Últimas {dadosGrafico.length} medições registradas
           </Text>
+
           <View style={styles.grafico}>
             {dadosGrafico.map((item) => {
               const altura = Math.max(
                 8,
                 ((item.weight_kg ?? 0) / pesoMaximo) * 120,
               );
+
               return (
                 <View style={styles.colunaGrafico} key={item.id}>
                   <Text style={styles.valorGrafico}>
@@ -386,9 +431,16 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
                       maximumFractionDigits: 1,
                     })}
                   </Text>
+
                   <View style={styles.baseBarra}>
-                    <View style={[styles.barra, { height: altura }]} />
+                    <View
+                      style={[
+                        styles.barra,
+                        { height: altura, backgroundColor: corTema },
+                      ]}
+                    />
                   </View>
+
                   <Text style={styles.dataGrafico}>
                     {formatarData(item.measured_at).slice(0, 5)}
                   </Text>
@@ -401,6 +453,7 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
 
       <View style={styles.cartao}>
         <Text style={styles.tituloCartao}>Histórico de medições</Text>
+
         {medicoes.length === 0 ? (
           <Text style={styles.textoSecundario}>
             Você ainda não registrou medições. Salve a primeira acima para
@@ -413,42 +466,50 @@ export default function EvolucaoFisica({ onVoltar }: { onVoltar: () => void }) {
                 <Text style={styles.dataHistorico}>
                   {formatarData(item.measured_at)}
                 </Text>
-                <Text style={styles.pesoHistorico}>
+
+                <Text style={[styles.pesoHistorico, { color: corTema }]}>
                   {formatarValor(item.weight_kg, "kg")}
                 </Text>
               </View>
+
               <View style={styles.medidasHistorico}>
                 {item.body_fat_percentage !== null ? (
                   <Text style={styles.medidaTexto}>
                     Gordura: {formatarValor(item.body_fat_percentage, "%")}
                   </Text>
                 ) : null}
+
                 {item.chest_cm !== null ? (
                   <Text style={styles.medidaTexto}>
                     Peito: {formatarValor(item.chest_cm, "cm")}
                   </Text>
                 ) : null}
+
                 {item.waist_cm !== null ? (
                   <Text style={styles.medidaTexto}>
                     Cintura: {formatarValor(item.waist_cm, "cm")}
                   </Text>
                 ) : null}
+
                 {item.hip_cm !== null ? (
                   <Text style={styles.medidaTexto}>
                     Quadril: {formatarValor(item.hip_cm, "cm")}
                   </Text>
                 ) : null}
+
                 {item.arm_cm !== null ? (
                   <Text style={styles.medidaTexto}>
                     Braço: {formatarValor(item.arm_cm, "cm")}
                   </Text>
                 ) : null}
+
                 {item.thigh_cm !== null ? (
                   <Text style={styles.medidaTexto}>
                     Coxa: {formatarValor(item.thigh_cm, "cm")}
                   </Text>
                 ) : null}
               </View>
+
               {item.notes ? (
                 <Text style={styles.observacaoHistorico}>{item.notes}</Text>
               ) : null}
@@ -476,7 +537,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingRight: 14,
   },
-  botaoVoltarTexto: { color: "#35D07F", fontSize: 16, fontWeight: "700" },
+  botaoVoltarTexto: {
+    fontSize: 16,
+    fontWeight: "700",
+  },
   titulo: { color: "#F0F3F1", fontSize: 28, fontWeight: "800" },
   subtitulo: { color: "#A4ADA7", fontSize: 14, lineHeight: 20 },
   cartao: {
@@ -501,11 +565,15 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 1,
   },
-  pesoDestaque: { color: "#35D07F", fontSize: 34, fontWeight: "800" },
+  pesoDestaque: { fontSize: 34, fontWeight: "800" },
   textoSecundario: { color: "#A4ADA7", fontSize: 13, lineHeight: 19 },
-  variacao: { color: "#D6DDD8", fontSize: 13, fontWeight: "600", marginTop: 4 },
+  variacao: {
+    color: "#D6DDD8",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 4,
+  },
   variacaoAlta: { color: "#FFB4A8" },
-  variacaoBaixa: { color: "#35D07F" },
   tituloCartao: { color: "#F0F3F1", fontSize: 18, fontWeight: "800" },
   rotulo: {
     color: "#D6DDD8",
@@ -544,7 +612,6 @@ const styles = StyleSheet.create({
   unidade: { color: "#A4ADA7", fontSize: 12, marginLeft: 4 },
   inputObservacoes: { minHeight: 70, textAlignVertical: "top" },
   botaoSalvar: {
-    backgroundColor: "#35D07F",
     borderRadius: 12,
     minHeight: 48,
     alignItems: "center",
@@ -575,7 +642,6 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
   },
   barra: {
-    backgroundColor: "#35D07F",
     borderTopLeftRadius: 5,
     borderTopRightRadius: 5,
     width: "100%",
@@ -595,8 +661,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   dataHistorico: { color: "#D6DDD8", fontSize: 14, fontWeight: "700" },
-  pesoHistorico: { color: "#35D07F", fontSize: 16, fontWeight: "800" },
+  pesoHistorico: { fontSize: 16, fontWeight: "800" },
   medidasHistorico: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   medidaTexto: { color: "#A4ADA7", fontSize: 12 },
-  observacaoHistorico: { color: "#D6DDD8", fontSize: 13, fontStyle: "italic" },
+  observacaoHistorico: {
+    color: "#D6DDD8",
+    fontSize: 13,
+    fontStyle: "italic",
+  },
 });

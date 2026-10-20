@@ -50,6 +50,7 @@ type TreinoHistorico = SessaoTreino & {
 
 type Props = {
   onVoltar: () => void;
+  corTema?: string;
 };
 
 function formatarData(valor: string) {
@@ -87,7 +88,18 @@ function chaveExercicio(serie: SerieTreino) {
   );
 }
 
-export default function HistoricoTreinos({ onVoltar }: Props) {
+function corComTransparencia(cor: string, transparencia: string) {
+  if (/^#[0-9a-fA-F]{6}$/.test(cor)) {
+    return `${cor}${transparencia}`;
+  }
+
+  return cor;
+}
+
+export default function HistoricoTreinos({
+  onVoltar,
+  corTema = "#35D07F",
+}: Props) {
   const [historico, setHistorico] = useState<TreinoHistorico[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
@@ -266,7 +278,7 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
     return (
       <View style={estilos.centralizado}>
         <StatusBar barStyle="light-content" backgroundColor="#101312" />
-        <ActivityIndicator size="large" color="#35D07F" />
+        <ActivityIndicator size="large" color={corTema} />
         <Text style={estilos.textoSecundario}>Carregando seu histórico...</Text>
       </View>
     );
@@ -284,23 +296,35 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
           <RefreshControl
             refreshing={atualizando}
             onRefresh={() => carregarHistorico(true)}
-            tintColor="#35D07F"
-            colors={["#35D07F"]}
+            tintColor={corTema}
+            colors={[corTema]}
           />
         }
       >
         <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar}>
-          <Text style={estilos.textoVoltar}>‹ Voltar</Text>
+          <Text style={[estilos.textoVoltar, { color: corTema }]}>
+            ‹ Voltar
+          </Text>
         </TouchableOpacity>
 
-        <Text style={estilos.marca}>TREINO FAMÍLIA</Text>
+        <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
         <Text style={estilos.titulo}>Histórico de treinos</Text>
         <Text style={estilos.subtitulo}>
           Acompanhe suas cargas, repetições e evoluções em cada exercício.
         </Text>
 
-        <View style={estilos.resumo}>
-          <Text style={estilos.resumoNumero}>{historico.length}</Text>
+        <View
+          style={[
+            estilos.resumo,
+            {
+              backgroundColor: corComTransparencia(corTema, "20"),
+              borderColor: corComTransparencia(corTema, "66"),
+            },
+          ]}
+        >
+          <Text style={[estilos.resumoNumero, { color: corTema }]}>
+            {historico.length}
+          </Text>
           <Text style={estilos.resumoTexto}>
             {historico.length === 1
               ? "registro encontrado"
@@ -308,14 +332,22 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
           </Text>
         </View>
 
-        <View style={estilos.legendaProgresso}>
+        <View
+          style={[
+            estilos.legendaProgresso,
+            { borderColor: corComTransparencia(corTema, "66") },
+          ]}
+        >
           <Text style={estilos.legendaTitulo}>COMO LER SUA EVOLUÇÃO</Text>
           <Text style={estilos.legendaTexto}>
-            <Text style={estilos.textoVerde}>↑ +kg</Text> aumento de carga
+            <Text style={[estilos.textoVerde, { color: corTema }]}>↑ +kg</Text>{" "}
+            aumento de carga
           </Text>
           <Text style={estilos.legendaTexto}>
-            <Text style={estilos.textoVerde}>↑ +reps</Text> aumento de
-            repetições
+            <Text style={[estilos.textoVerde, { color: corTema }]}>
+              ↑ +reps
+            </Text>{" "}
+            aumento de repetições
           </Text>
         </View>
 
@@ -356,6 +388,10 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                   (serie.progressoReps ?? 0) > 0,
               );
 
+              const quantidadeExerciciosComProgresso = new Set(
+                seriesComProgresso.map(chaveExercicio),
+              ).size;
+
               return (
                 <View key={sessao.id} style={estilos.cartao}>
                   <TouchableOpacity
@@ -363,7 +399,14 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                     onPress={() => alternarDetalhes(sessao.id)}
                     activeOpacity={0.8}
                   >
-                    <View style={estilos.iconeData}>
+                    <View
+                      style={[
+                        estilos.iconeData,
+                        {
+                          backgroundColor: corComTransparencia(corTema, "25"),
+                        },
+                      ]}
+                    >
                       <Text style={estilos.iconeDataTexto}>📅</Text>
                     </View>
 
@@ -381,7 +424,7 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                           ? ` – ${formatarHora(sessao.finished_at)}`
                           : ""}
                       </Text>
-                      <Text style={estilos.resumoSessao}>
+                      <Text style={[estilos.resumoSessao, { color: corTema }]}>
                         {exercicios.length}{" "}
                         {exercicios.length === 1 ? "exercício" : "exercícios"} ·{" "}
                         {sessao.series.length}{" "}
@@ -391,15 +434,26 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                       </Text>
 
                       {seriesComProgresso.length > 0 && (
-                        <View style={estilos.destaqueEvolucao}>
-                          <Text style={estilos.destaqueEvolucaoTexto}>
-                            ↑ EVOLUÇÃO EM{" "}
+                        <View
+                          style={[
+                            estilos.destaqueEvolucao,
                             {
-                              new Set(seriesComProgresso.map(chaveExercicio))
-                                .size
-                            }{" "}
-                            {new Set(seriesComProgresso.map(chaveExercicio))
-                              .size === 1
+                              backgroundColor: corComTransparencia(
+                                corTema,
+                                "20",
+                              ),
+                              borderColor: corComTransparencia(corTema, "80"),
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              estilos.destaqueEvolucaoTexto,
+                              { color: corTema },
+                            ]}
+                          >
+                            ↑ EVOLUÇÃO EM {quantidadeExerciciosComProgresso}{" "}
+                            {quantidadeExerciciosComProgresso === 1
                               ? "EXERCÍCIO"
                               : "EXERCÍCIOS"}
                           </Text>
@@ -407,7 +461,9 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                       )}
                     </View>
 
-                    <Text style={estilos.seta}>{expandida ? "⌃" : "⌄"}</Text>
+                    <Text style={[estilos.seta, { color: corTema }]}>
+                      {expandida ? "⌃" : "⌄"}
+                    </Text>
                   </TouchableOpacity>
 
                   {expandida && (
@@ -442,25 +498,71 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                               </Text>
 
                               {(teveProgressoCarga || teveProgressoReps) && (
-                                <View style={estilos.faixaProgresso}>
-                                  <Text style={estilos.faixaProgressoTitulo}>
-                                    <Text style={estilos.textoVerde}>↑ </Text>
-                                    VOCÊ EVOLUIU NESTE EXERCÍCIO
+                                <View
+                                  style={[
+                                    estilos.faixaProgresso,
+                                    {
+                                      backgroundColor: corComTransparencia(
+                                        corTema,
+                                        "18",
+                                      ),
+                                      borderColor: corComTransparencia(
+                                        corTema,
+                                        "80",
+                                      ),
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      estilos.faixaProgressoTitulo,
+                                      { color: corTema },
+                                    ]}
+                                  >
+                                    ↑ VOCÊ EVOLUIU NESTE EXERCÍCIO
                                   </Text>
                                   <View style={estilos.etiquetasProgresso}>
                                     {teveProgressoCarga && (
-                                      <View style={estilos.etiquetaProgresso}>
+                                      <View
+                                        style={[
+                                          estilos.etiquetaProgresso,
+                                          {
+                                            backgroundColor:
+                                              corComTransparencia(
+                                                corTema,
+                                                "30",
+                                              ),
+                                          },
+                                        ]}
+                                      >
                                         <Text
-                                          style={estilos.etiquetaProgressoTexto}
+                                          style={[
+                                            estilos.etiquetaProgressoTexto,
+                                            { color: corTema },
+                                          ]}
                                         >
                                           ↑ CARGA
                                         </Text>
                                       </View>
                                     )}
                                     {teveProgressoReps && (
-                                      <View style={estilos.etiquetaProgresso}>
+                                      <View
+                                        style={[
+                                          estilos.etiquetaProgresso,
+                                          {
+                                            backgroundColor:
+                                              corComTransparencia(
+                                                corTema,
+                                                "30",
+                                              ),
+                                          },
+                                        ]}
+                                      >
                                         <Text
-                                          style={estilos.etiquetaProgressoTexto}
+                                          style={[
+                                            estilos.etiquetaProgressoTexto,
+                                            { color: corTema },
+                                          ]}
                                         >
                                           ↑ REPETIÇÕES
                                         </Text>
@@ -493,8 +595,12 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                                   style={[
                                     estilos.linhaTabela,
                                     ((serie.progressoCarga ?? 0) > 0 ||
-                                      (serie.progressoReps ?? 0) > 0) &&
-                                      estilos.linhaComProgresso,
+                                      (serie.progressoReps ?? 0) > 0) && {
+                                      backgroundColor: corComTransparencia(
+                                        corTema,
+                                        "15",
+                                      ),
+                                    },
                                   ]}
                                 >
                                   <Text
@@ -510,14 +616,21 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                                     <Text
                                       style={[
                                         estilos.celula,
-                                        (serie.progressoReps ?? 0) > 0 &&
-                                          estilos.valorComProgresso,
+                                        (serie.progressoReps ?? 0) > 0 && {
+                                          color: corTema,
+                                          fontWeight: "900",
+                                        },
                                       ]}
                                     >
                                       {serie.reps}
                                     </Text>
                                     {(serie.progressoReps ?? 0) > 0 && (
-                                      <Text style={estilos.indicadorProgresso}>
+                                      <Text
+                                        style={[
+                                          estilos.indicadorProgresso,
+                                          { color: corTema },
+                                        ]}
+                                      >
                                         ↑ +{formatarCarga(serie.progressoReps!)}
                                       </Text>
                                     )}
@@ -527,14 +640,21 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                                     <Text
                                       style={[
                                         estilos.celula,
-                                        (serie.progressoCarga ?? 0) > 0 &&
-                                          estilos.valorComProgresso,
+                                        (serie.progressoCarga ?? 0) > 0 && {
+                                          color: corTema,
+                                          fontWeight: "900",
+                                        },
                                       ]}
                                     >
                                       {formatarCarga(Number(serie.weight_kg))}
                                     </Text>
                                     {(serie.progressoCarga ?? 0) > 0 && (
-                                      <Text style={estilos.indicadorProgresso}>
+                                      <Text
+                                        style={[
+                                          estilos.indicadorProgresso,
+                                          { color: corTema },
+                                        ]}
+                                      >
                                         ↑ +
                                         {formatarCarga(serie.progressoCarga!)}{" "}
                                         kg
@@ -548,11 +668,18 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                         })
                       )}
 
-                      <View style={estilos.rodapeDetalhes}>
+                      <View
+                        style={[
+                          estilos.rodapeDetalhes,
+                          {
+                            borderColor: corComTransparencia(corTema, "50"),
+                          },
+                        ]}
+                      >
                         <Text style={estilos.volumeLabel}>
                           Volume registrado
                         </Text>
-                        <Text style={estilos.volumeValor}>
+                        <Text style={[estilos.volumeValor, { color: corTema }]}>
                           {formatarCarga(volumeTotal)} kg × repetições
                         </Text>
                       </View>
@@ -788,9 +915,6 @@ const estilos = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#2B332E",
   },
-  linhaComProgresso: {
-    backgroundColor: "#14251A",
-  },
   celulaCabecalho: {
     color: "#A4ADA7",
     fontSize: 11,
@@ -812,10 +936,6 @@ const estilos = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  valorComProgresso: {
-    color: "#55E693",
-    fontWeight: "900",
-  },
   indicadorProgresso: {
     color: "#55E693",
     fontSize: 10,
@@ -831,6 +951,8 @@ const estilos = StyleSheet.create({
   rodapeDetalhes: {
     backgroundColor: "#101512",
     borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#28573A",
     padding: 12,
     marginTop: 2,
   },

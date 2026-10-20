@@ -26,12 +26,24 @@ const estiloRolagemWeb =
       } as any)
     : { flex: 1, minHeight: 0 };
 
+const TEMAS = [
+  { nome: "Verde", cor: "#35D07F" },
+  { nome: "Azul escuro", cor: "#0878D1" },
+  { nome: "Rosa", cor: "#FF5CA8" },
+  { nome: "Roxo", cor: "#A78BFA" },
+  { nome: "Vermelho", cor: "#F05252" },
+  { nome: "Laranja", cor: "#FB923C" },
+  { nome: "Ciano", cor: "#22D3EE" },
+  { nome: "Amarelo", cor: "#FACC15" },
+];
+
 type Props = {
   usuario: User;
   onVoltar: () => void;
+  onTemaAlterado?: (cor: string) => void;
 };
 
-export default function Perfil({ usuario, onVoltar }: Props) {
+export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
   const nomeAtual =
     typeof usuario.user_metadata?.nome === "string"
       ? usuario.user_metadata.nome
@@ -42,13 +54,21 @@ export default function Perfil({ usuario, onVoltar }: Props) {
       ? usuario.user_metadata.foto_url
       : null;
 
+  const temaAtual =
+    typeof usuario.user_metadata?.tema_cor === "string" &&
+    TEMAS.some((tema) => tema.cor === usuario.user_metadata.tema_cor)
+      ? usuario.user_metadata.tema_cor
+      : "#35D07F";
+
   const [nome, setNome] = useState(nomeAtual);
   const [fotoUrl, setFotoUrl] = useState<string | null>(fotoAtual);
+  const [corTema, setCorTema] = useState(temaAtual);
   const [senhaAtualizada, setSenhaAtualizada] = useState("");
   const [confirmacaoSenha, setConfirmacaoSenha] = useState("");
   const [salvandoNome, setSalvandoNome] = useState(false);
   const [enviandoFoto, setEnviandoFoto] = useState(false);
   const [alterandoSenha, setAlterandoSenha] = useState(false);
+  const [salvandoTema, setSalvandoTema] = useState(false);
 
   async function salvarNome() {
     if (!nome.trim()) {
@@ -76,6 +96,33 @@ export default function Perfil({ usuario, onVoltar }: Props) {
       Alert.alert("Erro", "Não foi possível atualizar seu nome.");
     } finally {
       setSalvandoNome(false);
+    }
+  }
+
+  async function salvarTema() {
+    setSalvandoTema(true);
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          ...usuario.user_metadata,
+          nome: nome.trim() || nomeAtual,
+          tema_cor: corTema,
+        },
+      });
+
+      if (error) {
+        Alert.alert("Erro", error.message);
+        return;
+      }
+
+      onTemaAlterado?.(corTema);
+
+      Alert.alert("Sucesso", "Sua cor de tema foi salva.");
+    } catch {
+      Alert.alert("Erro", "Não foi possível salvar a cor do tema.");
+    } finally {
+      setSalvandoTema(false);
     }
   }
 
@@ -210,10 +257,12 @@ export default function Perfil({ usuario, onVoltar }: Props) {
         showsVerticalScrollIndicator={false}
       >
         <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar}>
-          <Text style={estilos.textoVoltar}>‹ Voltar</Text>
+          <Text style={[estilos.textoVoltar, { color: corTema }]}>
+            ‹ Voltar
+          </Text>
         </TouchableOpacity>
 
-        <Text style={estilos.marca}>TREINO FAMÍLIA</Text>
+        <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
         <Text style={estilos.titulo}>Meu perfil</Text>
         <Text style={estilos.subtitulo}>
           Gerencie suas informações pessoais.
@@ -226,10 +275,21 @@ export default function Perfil({ usuario, onVoltar }: Props) {
             disabled={enviandoFoto}
           >
             {fotoUrl ? (
-              <Image source={{ uri: fotoUrl }} style={estilos.foto} />
+              <Image
+                source={{ uri: fotoUrl }}
+                style={[estilos.foto, { borderColor: corTema }]}
+              />
             ) : (
-              <View style={estilos.fotoVazia}>
-                <Text style={estilos.letraAvatar}>
+              <View
+                style={[
+                  estilos.fotoVazia,
+                  {
+                    backgroundColor: `${corTema}30`,
+                    borderColor: corTema,
+                  },
+                ]}
+              >
+                <Text style={[estilos.letraAvatar, { color: corTema }]}>
                   {(nome.trim() || usuario.email || "A")
                     .charAt(0)
                     .toUpperCase()}
@@ -237,20 +297,108 @@ export default function Perfil({ usuario, onVoltar }: Props) {
               </View>
             )}
 
-            <View style={estilos.botaoCamera}>
+            <View
+              style={[
+                estilos.botaoCamera,
+                {
+                  backgroundColor: corTema,
+                  borderColor: "#191E1B",
+                },
+              ]}
+            >
               <Text style={estilos.iconeCamera}>✎</Text>
             </View>
           </TouchableOpacity>
 
           {enviandoFoto ? (
-            <ActivityIndicator color="#35D07F" style={estilos.carregandoFoto} />
+            <ActivityIndicator color={corTema} style={estilos.carregandoFoto} />
           ) : (
             <TouchableOpacity onPress={escolherFoto}>
-              <Text style={estilos.linkFoto}>Alterar foto</Text>
+              <Text style={[estilos.linkFoto, { color: corTema }]}>
+                Alterar foto
+              </Text>
             </TouchableOpacity>
           )}
 
           <Text style={estilos.email}>{usuario.email}</Text>
+        </View>
+
+        <View style={estilos.cartao}>
+          <Text style={estilos.tituloSecao}>Personalizar tema</Text>
+          <Text style={estilos.descricaoSecao}>
+            Escolha sua cor favorita. O fundo do aplicativo continuará preto.
+          </Text>
+
+          <View style={estilos.gradeTemas}>
+            {TEMAS.map((tema) => {
+              const selecionado = corTema === tema.cor;
+
+              return (
+                <TouchableOpacity
+                  key={tema.cor}
+                  style={[
+                    estilos.opcaoTema,
+                    selecionado && {
+                      borderColor: tema.cor,
+                      backgroundColor: `${tema.cor}18`,
+                    },
+                  ]}
+                  onPress={() => setCorTema(tema.cor)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Selecionar tema ${tema.nome}`}
+                  accessibilityState={{ selected: selecionado }}
+                >
+                  <View
+                    style={[
+                      estilos.amostraCor,
+                      {
+                        backgroundColor: tema.cor,
+                        borderColor: selecionado ? "#F0F3F1" : tema.cor,
+                      },
+                    ]}
+                  >
+                    {selecionado && (
+                      <Text style={estilos.marcaSelecionado}>✓</Text>
+                    )}
+                  </View>
+                  <Text
+                    style={[
+                      estilos.nomeTema,
+                      selecionado && { color: tema.cor },
+                    ]}
+                  >
+                    {tema.nome}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={estilos.previaTema}>
+            <View style={[estilos.pontoPrevia, { backgroundColor: corTema }]} />
+            <Text style={estilos.textoPrevia}>
+              Tema selecionado:{" "}
+              <Text style={{ color: corTema, fontWeight: "800" }}>
+                {TEMAS.find((tema) => tema.cor === corTema)?.nome}
+              </Text>
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              estilos.botaoPrincipal,
+              { backgroundColor: corTema },
+              salvandoTema && estilos.botaoDesabilitado,
+            ]}
+            onPress={salvarTema}
+            disabled={salvandoTema}
+          >
+            {salvandoTema ? (
+              <ActivityIndicator color="#101312" />
+            ) : (
+              <Text style={estilos.textoBotaoPrincipal}>Salvar tema</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
         <View style={estilos.cartao}>
@@ -270,6 +418,7 @@ export default function Perfil({ usuario, onVoltar }: Props) {
           <TouchableOpacity
             style={[
               estilos.botaoPrincipal,
+              { backgroundColor: corTema },
               salvandoNome && estilos.botaoDesabilitado,
             ]}
             onPress={salvarNome}
@@ -316,6 +465,7 @@ export default function Perfil({ usuario, onVoltar }: Props) {
           <TouchableOpacity
             style={[
               estilos.botaoPrincipal,
+              { backgroundColor: corTema },
               alterandoSenha && estilos.botaoDesabilitado,
             ]}
             onPress={alterarSenha}
@@ -350,12 +500,10 @@ const estilos = StyleSheet.create({
     marginBottom: 22,
   },
   textoVoltar: {
-    color: "#35D07F",
     fontSize: 16,
     fontWeight: "700",
   },
   marca: {
-    color: "#35D07F",
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 2,
@@ -390,20 +538,16 @@ const estilos = StyleSheet.create({
     height: 112,
     borderRadius: 56,
     borderWidth: 2,
-    borderColor: "#35D07F",
   },
   fotoVazia: {
     width: 112,
     height: 112,
     borderRadius: 56,
-    backgroundColor: "#244C36",
     borderWidth: 2,
-    borderColor: "#35D07F",
     alignItems: "center",
     justifyContent: "center",
   },
   letraAvatar: {
-    color: "#35D07F",
     fontSize: 44,
     fontWeight: "800",
   },
@@ -414,11 +558,9 @@ const estilos = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "#35D07F",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 3,
-    borderColor: "#191E1B",
   },
   iconeCamera: {
     color: "#101312",
@@ -426,7 +568,6 @@ const estilos = StyleSheet.create({
     fontWeight: "800",
   },
   linkFoto: {
-    color: "#35D07F",
     fontSize: 14,
     fontWeight: "700",
   },
@@ -459,6 +600,58 @@ const estilos = StyleSheet.create({
     marginBottom: 18,
     lineHeight: 19,
   },
+  gradeTemas: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  opcaoTema: {
+    width: "47%",
+    minHeight: 94,
+    backgroundColor: "#101312",
+    borderWidth: 1,
+    borderColor: "#354039",
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+  },
+  amostraCor: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  marcaSelecionado: {
+    color: "#101312",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  nomeTema: {
+    color: "#E5EAE6",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  previaTema: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 18,
+    marginBottom: 10,
+    gap: 8,
+  },
+  pontoPrevia: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  textoPrevia: {
+    color: "#A4ADA7",
+    fontSize: 13,
+  },
   rotulo: {
     color: "#E5EAE6",
     fontSize: 14,
@@ -478,7 +671,6 @@ const estilos = StyleSheet.create({
     marginBottom: 12,
   },
   botaoPrincipal: {
-    backgroundColor: "#35D07F",
     paddingVertical: 15,
     borderRadius: 12,
     alignItems: "center",

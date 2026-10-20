@@ -48,8 +48,28 @@ type Rotas = {
 };
 
 const Pilha = createStackNavigator<Rotas>();
-
 const referenciaNavegacao = createNavigationContainerRef<Rotas>();
+
+const COR_PADRAO = "#35D07F";
+
+const CORES_TEMA = [
+  "#35D07F",
+  "#0878D1",
+  "#FF5CA8",
+  "#A78BFA",
+  "#F05252",
+  "#FB923C",
+  "#22D3EE",
+  "#FACC15",
+];
+
+function obterCorTema(valor: unknown): string {
+  if (typeof valor === "string" && CORES_TEMA.includes(valor)) {
+    return valor;
+  }
+
+  return COR_PADRAO;
+}
 
 const telas = [
   {
@@ -81,6 +101,8 @@ const telas = [
 export default function App() {
   const versaoAvisada = useRef<string | null>(null);
   const verificacaoEmAndamento = useRef(false);
+  const toqueInicialWeb = useRef<{ x: number; y: number } | null>(null);
+
   const [sessao, setSessao] = useState<Session | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [modo, setModo] = useState<ModoAutenticacao>("login");
@@ -88,7 +110,12 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [enviando, setEnviando] = useState(false);
-  const toqueInicialWeb = useRef<{ x: number; y: number } | null>(null);
+  const [corTema, setCorTema] = useState(COR_PADRAO);
+
+  function atualizarSessao(novaSessao: Session | null) {
+    setSessao(novaSessao);
+    setCorTema(obterCorTema(novaSessao?.user.user_metadata?.tema_cor));
+  }
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof document === "undefined") {
@@ -159,7 +186,7 @@ export default function App() {
         }
 
         if (componenteAtivo) {
-          setSessao(data.session);
+          atualizarSessao(data.session);
           setCarregando(false);
         }
       } catch {
@@ -175,7 +202,7 @@ export default function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_evento, novaSessao) => {
-      setSessao(novaSessao);
+      atualizarSessao(novaSessao);
       setCarregando(false);
     });
 
@@ -315,6 +342,7 @@ export default function App() {
         options: {
           data: {
             nome: nome.trim(),
+            tema_cor: COR_PADRAO,
           },
         },
       });
@@ -383,13 +411,14 @@ export default function App() {
     setEmail("");
     setSenha("");
     setModo("login");
+    setCorTema(COR_PADRAO);
   }
 
   if (carregando) {
     return (
       <View style={estilos.carregando}>
         <StatusBar barStyle="light-content" backgroundColor="#101312" />
-        <ActivityIndicator size="large" color="#35D07F" />
+        <ActivityIndicator size="large" color={corTema} />
         <Text style={estilos.textoCarregando}>
           Carregando Treino Família...
         </Text>
@@ -483,6 +512,7 @@ export default function App() {
             <TouchableOpacity
               style={[
                 estilos.botaoPrincipal,
+                { backgroundColor: corTema },
                 enviando && estilos.botaoDesabilitado,
               ]}
               onPress={() => {
@@ -515,7 +545,9 @@ export default function App() {
                 onPress={() => setModo("recuperar")}
                 disabled={enviando}
               >
-                <Text style={estilos.link}>Esqueci minha senha</Text>
+                <Text style={[estilos.link, { color: corTema }]}>
+                  Esqueci minha senha
+                </Text>
               </TouchableOpacity>
             )}
 
@@ -530,14 +562,14 @@ export default function App() {
             </Text>
 
             <TouchableOpacity
-              style={estilos.botaoSecundario}
+              style={[estilos.botaoSecundario, { borderColor: corTema }]}
               onPress={() => {
                 setModo(modo === "cadastro" ? "login" : "cadastro");
                 setSenha("");
               }}
               disabled={enviando || modo === "recuperar"}
             >
-              <Text style={estilos.textoBotaoSecundario}>
+              <Text style={[estilos.textoBotaoSecundario, { color: corTema }]}>
                 {modo === "cadastro" ? "Fazer login" : "Criar uma conta"}
               </Text>
             </TouchableOpacity>
@@ -547,7 +579,9 @@ export default function App() {
                 style={estilos.linkContainer}
                 onPress={() => setModo("login")}
               >
-                <Text style={estilos.link}>Voltar para o login</Text>
+                <Text style={[estilos.link, { color: corTema }]}>
+                  Voltar para o login
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -614,7 +648,9 @@ export default function App() {
               >
                 <View style={estilos.topoHome}>
                   <View style={estilos.informacoesUsuario}>
-                    <Text style={estilos.marcaPequena}>TREINO FAMÍLIA</Text>
+                    <Text style={[estilos.marcaPequena, { color: corTema }]}>
+                      TREINO FAMÍLIA
+                    </Text>
 
                     <Text
                       style={estilos.tituloHome}
@@ -630,7 +666,13 @@ export default function App() {
                   </View>
 
                   <TouchableOpacity
-                    style={estilos.avatar}
+                    style={[
+                      estilos.avatar,
+                      {
+                        backgroundColor: `${corTema}30`,
+                        borderColor: corTema,
+                      },
+                    ]}
                     onPress={() => navigation.navigate("perfil")}
                     activeOpacity={0.8}
                   >
@@ -640,14 +682,22 @@ export default function App() {
                         style={estilos.imagemAvatar}
                       />
                     ) : (
-                      <Text style={estilos.avatarTexto}>
+                      <Text style={[estilos.avatarTexto, { color: corTema }]}>
                         {nomeUsuario.charAt(0).toUpperCase()}
                       </Text>
                     )}
                   </TouchableOpacity>
                 </View>
 
-                <View style={estilos.banner}>
+                <View
+                  style={[
+                    estilos.banner,
+                    {
+                      backgroundColor: `${corTema}18`,
+                      borderColor: `${corTema}70`,
+                    },
+                  ]}
+                >
                   <Text style={estilos.bannerEmoji}>🔥</Text>
 
                   <View style={estilos.bannerTextoContainer}>
@@ -664,6 +714,7 @@ export default function App() {
                 <TreinoDoDia
                   onAbrirProgramacao={() => navigation.navigate("frequencia")}
                   onAbrirTreino={() => navigation.navigate("treinos")}
+                  corTema={corTema}
                 />
 
                 <Text style={estilos.tituloSecao}>Seu espaço de treino</Text>
@@ -676,7 +727,12 @@ export default function App() {
                       onPress={() => navigation.navigate(tela.id)}
                       activeOpacity={0.8}
                     >
-                      <View style={estilos.iconeCartao}>
+                      <View
+                        style={[
+                          estilos.iconeCartao,
+                          { backgroundColor: `${corTema}20` },
+                        ]}
+                      >
                         <Text style={estilos.emojiCartao}>{tela.emoji}</Text>
                       </View>
 
@@ -688,7 +744,9 @@ export default function App() {
                         </Text>
                       </View>
 
-                      <Text style={estilos.setaCartao}>›</Text>
+                      <Text style={[estilos.setaCartao, { color: corTema }]}>
+                        ›
+                      </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -714,31 +772,45 @@ export default function App() {
             <Perfil
               usuario={sessao.user}
               onVoltar={() => navigation.goBack()}
+              onTemaAlterado={setCorTema}
+              corTema={corTema}
             />
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="treinos">
           {({ navigation }) => (
-            <MeusTreinos onVoltar={() => navigation.goBack()} />
+            <MeusTreinos
+              onVoltar={() => navigation.goBack()}
+              corTema={corTema}
+            />
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="evolucao">
           {({ navigation }) => (
-            <EvolucaoFisica onVoltar={() => navigation.goBack()} />
+            <EvolucaoFisica
+              onVoltar={() => navigation.goBack()}
+              corTema={corTema}
+            />
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="historico">
           {({ navigation }) => (
-            <HistoricoTreinos onVoltar={() => navigation.goBack()} />
+            <HistoricoTreinos
+              onVoltar={() => navigation.goBack()}
+              corTema={corTema}
+            />
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="frequencia">
           {({ navigation }) => (
-            <Frequencia onVoltar={() => navigation.goBack()} />
+            <Frequencia
+              onVoltar={() => navigation.goBack()}
+              corTema={corTema}
+            />
           )}
         </Pilha.Screen>
       </Pilha.Navigator>
@@ -747,11 +819,6 @@ export default function App() {
 }
 
 const estilos = StyleSheet.create({
-  telaComGesto: {
-    flex: 1,
-    minHeight: 0,
-    backgroundColor: "#101312",
-  },
   container: {
     flex: 1,
     minHeight: 0,
@@ -833,7 +900,7 @@ const estilos = StyleSheet.create({
     color: "#F0F3F1",
   },
   botaoPrincipal: {
-    backgroundColor: "#35D07F",
+    backgroundColor: COR_PADRAO,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: "center",
@@ -852,7 +919,7 @@ const estilos = StyleSheet.create({
     paddingTop: 18,
   },
   link: {
-    color: "#35D07F",
+    color: COR_PADRAO,
     fontWeight: "600",
     fontSize: 14,
   },
@@ -868,14 +935,14 @@ const estilos = StyleSheet.create({
   },
   botaoSecundario: {
     borderWidth: 1,
-    borderColor: "#35D07F",
+    borderColor: COR_PADRAO,
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: "center",
     marginTop: 13,
   },
   textoBotaoSecundario: {
-    color: "#35D07F",
+    color: COR_PADRAO,
     fontWeight: "700",
     fontSize: 15,
   },
@@ -902,7 +969,7 @@ const estilos = StyleSheet.create({
     minWidth: 0,
   },
   marcaPequena: {
-    color: "#35D07F",
+    color: COR_PADRAO,
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 2,
@@ -924,7 +991,7 @@ const estilos = StyleSheet.create({
     borderRadius: 25,
     backgroundColor: "#244C36",
     borderWidth: 1,
-    borderColor: "#35D07F",
+    borderColor: COR_PADRAO,
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
@@ -936,7 +1003,7 @@ const estilos = StyleSheet.create({
     borderRadius: 25,
   },
   avatarTexto: {
-    color: "#35D07F",
+    color: COR_PADRAO,
     fontSize: 22,
     fontWeight: "800",
   },
@@ -1013,7 +1080,7 @@ const estilos = StyleSheet.create({
     lineHeight: 17,
   },
   setaCartao: {
-    color: "#35D07F",
+    color: COR_PADRAO,
     fontSize: 28,
     marginLeft: 8,
   },
@@ -1035,48 +1102,5 @@ const estilos = StyleSheet.create({
     fontSize: 12,
     textAlign: "center",
     marginTop: 22,
-  },
-  topoInterno: {
-    paddingTop: 60,
-    paddingHorizontal: 22,
-  },
-  botaoVoltar: {
-    alignSelf: "flex-start",
-    paddingVertical: 8,
-    paddingRight: 16,
-    marginBottom: 18,
-  },
-  textoVoltar: {
-    color: "#35D07F",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  tituloInterno: {
-    color: "#F0F3F1",
-    fontSize: 27,
-    fontWeight: "800",
-  },
-  conteudoPlaceholder: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 32,
-  },
-  emojiPlaceholder: {
-    fontSize: 58,
-    marginBottom: 20,
-  },
-  tituloPlaceholder: {
-    color: "#F0F3F1",
-    fontSize: 23,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-  descricaoPlaceholder: {
-    color: "#A4ADA7",
-    fontSize: 15,
-    textAlign: "center",
-    lineHeight: 23,
-    marginTop: 12,
   },
 });

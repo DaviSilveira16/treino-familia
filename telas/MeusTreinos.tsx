@@ -43,9 +43,10 @@ type SerieCarga = {
 
 type Props = {
   onVoltar: () => void;
+  corTema?: string;
 };
 
-export default function MeusTreinos({ onVoltar }: Props) {
+export default function MeusTreinos({ onVoltar, corTema = "#35D07F" }: Props) {
   function mostrarMensagem(titulo: string, mensagem: string) {
     if (Platform.OS === "web" && typeof window !== "undefined") {
       window.alert(`${titulo}\n\n${mensagem}`);
@@ -111,15 +112,18 @@ export default function MeusTreinos({ onVoltar }: Props) {
   useEffect(() => {
     async function carregarTreinos() {
       setCarregando(true);
+
       try {
         const { data: usuarioData, error: usuarioErro } =
           await supabase.auth.getUser();
+
         if (usuarioErro || !usuarioData.user) {
-          Alert.alert("Sessão inválida", "Entre novamente na sua conta.");
+          mostrarMensagem("Sessão inválida", "Entre novamente na sua conta.");
           return;
         }
 
         setUsuarioId(usuarioData.user.id);
+
         const { data, error } = await supabase
           .from("workout_plans")
           .select("id, name")
@@ -127,13 +131,13 @@ export default function MeusTreinos({ onVoltar }: Props) {
           .order("created_at", { ascending: true });
 
         if (error) {
-          Alert.alert("Erro", "Não foi possível carregar seus treinos.");
+          mostrarMensagem("Erro", "Não foi possível carregar seus treinos.");
           return;
         }
 
         setTreinos((data ?? []) as Treino[]);
       } catch {
-        Alert.alert("Erro", "Não foi possível conectar ao Supabase.");
+        mostrarMensagem("Erro", "Não foi possível conectar ao Supabase.");
       } finally {
         setCarregando(false);
       }
@@ -151,6 +155,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
       }
 
       setCarregandoExercicios(true);
+
       try {
         const { data, error } = await supabase
           .from("exercises")
@@ -160,13 +165,15 @@ export default function MeusTreinos({ onVoltar }: Props) {
           .order("position");
 
         if (error) {
-          Alert.alert("Erro", "Não foi possível carregar os exercícios.");
+          mostrarMensagem("Erro", "Não foi possível carregar os exercícios.");
           return;
         }
 
         const lista = (data ?? []) as Exercicio[];
         setExercicios(lista);
+
         const cargas: Record<string, number> = {};
+
         await Promise.all(
           lista.map(async (exercicio) => {
             const { data: registros } = await supabase
@@ -174,15 +181,20 @@ export default function MeusTreinos({ onVoltar }: Props) {
               .select("weight_kg")
               .eq("user_id", usuarioId)
               .eq("exercise_id", exercicio.id);
+
             const valores = (registros ?? [])
               .map((registro) => Number(registro.weight_kg))
               .filter((valor) => Number.isFinite(valor));
-            if (valores.length > 0) cargas[exercicio.id] = Math.max(...valores);
+
+            if (valores.length > 0) {
+              cargas[exercicio.id] = Math.max(...valores);
+            }
           }),
         );
+
         setMaioresCargas((atuais) => ({ ...atuais, ...cargas }));
       } catch {
-        Alert.alert("Erro", "Não foi possível conectar ao Supabase.");
+        mostrarMensagem("Erro", "Não foi possível conectar ao Supabase.");
       } finally {
         setCarregandoExercicios(false);
       }
@@ -193,16 +205,19 @@ export default function MeusTreinos({ onVoltar }: Props) {
 
   async function criarTreino() {
     const nome = nomeNovoTreino.trim();
+
     if (!nome) {
-      Alert.alert("Atenção", "Digite o nome do novo treino.");
+      mostrarMensagem("Atenção", "Digite o nome do novo treino.");
       return;
     }
+
     if (!usuarioId) {
-      Alert.alert("Sessão inválida", "Entre novamente na sua conta.");
+      mostrarMensagem("Sessão inválida", "Entre novamente na sua conta.");
       return;
     }
 
     setSalvando(true);
+
     try {
       const { data, error } = await supabase
         .from("workout_plans")
@@ -212,17 +227,19 @@ export default function MeusTreinos({ onVoltar }: Props) {
 
       if (error) {
         if (error.code === "23505") {
-          Alert.alert(
+          mostrarMensagem(
             "Nome já utilizado",
             "Você já tem um treino com esse nome. Escolha outro.",
           );
         } else {
-          Alert.alert("Erro ao criar treino", error.message);
+          mostrarMensagem("Erro ao criar treino", error.message);
         }
+
         return;
       }
 
       const novoTreino = data as Treino;
+
       setTreinos((atuais) =>
         [...atuais, novoTreino].sort((a, b) => a.name.localeCompare(b.name)),
       );
@@ -230,7 +247,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
       setMostrarFormularioExercicio(false);
       setNomeNovoTreino("");
     } catch {
-      Alert.alert("Erro", "Não foi possível criar o treino.");
+      mostrarMensagem("Erro", "Não foi possível criar o treino.");
     } finally {
       setSalvando(false);
     }
@@ -353,23 +370,27 @@ export default function MeusTreinos({ onVoltar }: Props) {
     const reps = repeticoes.trim();
 
     if (!treinoSelecionado) {
-      Alert.alert("Atenção", "Selecione um treino primeiro.");
+      mostrarMensagem("Atenção", "Selecione um treino primeiro.");
       return;
     }
+
     if (!nome) {
-      Alert.alert("Atenção", "Digite o nome do exercício.");
+      mostrarMensagem("Atenção", "Digite o nome do exercício.");
       return;
     }
+
     if (!Number.isInteger(series) || series < 1 || series > 20) {
-      Alert.alert("Atenção", "Informe entre 1 e 20 séries.");
+      mostrarMensagem("Atenção", "Informe entre 1 e 20 séries.");
       return;
     }
+
     if (!reps) {
-      Alert.alert("Atenção", "Informe a quantidade de repetições.");
+      mostrarMensagem("Atenção", "Informe a quantidade de repetições.");
       return;
     }
 
     setSalvando(true);
+
     try {
       const { data, error } = await supabase
         .from("exercises")
@@ -385,7 +406,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
         .single();
 
       if (error) {
-        Alert.alert("Erro ao salvar", error.message);
+        mostrarMensagem("Erro ao salvar", error.message);
         return;
       }
 
@@ -396,7 +417,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
       setQuantidadeSeries("3");
       setRepeticoes("8-12");
     } catch {
-      Alert.alert("Erro", "Não foi possível salvar o exercício.");
+      mostrarMensagem("Erro", "Não foi possível salvar o exercício.");
     } finally {
       setSalvando(false);
     }
@@ -412,6 +433,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
 
   async function salvarEdicao() {
     if (!exercicioEditando) return;
+
     const nome = nomeEdicao.trim();
     const series = Number(seriesEdicao);
     const reps = repeticoesEdicao.trim();
@@ -423,7 +445,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
       series < 1 ||
       series > 20
     ) {
-      Alert.alert(
+      mostrarMensagem(
         "Dados inválidos",
         "Informe o nome, entre 1 e 20 séries e as repetições.",
       );
@@ -431,6 +453,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
     }
 
     setSalvando(true);
+
     try {
       const { data, error } = await supabase
         .from("exercises")
@@ -442,7 +465,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
         .single();
 
       if (error) {
-        Alert.alert("Erro ao editar", error.message);
+        mostrarMensagem("Erro ao editar", error.message);
         return;
       }
 
@@ -453,7 +476,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
       );
       setExercicioEditando(null);
     } catch {
-      Alert.alert("Erro", "Não foi possível editar o exercício.");
+      mostrarMensagem("Erro", "Não foi possível editar o exercício.");
     } finally {
       setSalvando(false);
     }
@@ -462,12 +485,26 @@ export default function MeusTreinos({ onVoltar }: Props) {
   async function excluirExercicio(exercicio: Exercicio) {
     const confirmado = await confirmarExclusao(
       "Excluir exercício",
-      `Deseja excluir "${exercicio.name}" deste treino?`,
+      `Deseja excluir "${exercicio.name}" deste treino? O histórico de cargas será preservado.`,
     );
 
     if (!confirmado) return;
 
     try {
+      const { error: erroDesvincularCargas } = await supabase
+        .from("workout_sets")
+        .update({ exercise_id: null })
+        .eq("user_id", usuarioId)
+        .eq("exercise_id", exercicio.id);
+
+      if (erroDesvincularCargas) {
+        mostrarMensagem(
+          "Erro",
+          `Não foi possível preservar o histórico de cargas: ${erroDesvincularCargas.message}`,
+        );
+        return;
+      }
+
       const { error } = await supabase
         .from("exercises")
         .delete()
@@ -497,7 +534,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
 
       mostrarMensagem(
         "Exercício removido",
-        "O exercício foi excluído com sucesso.",
+        "O exercício foi excluído. O histórico de cargas foi preservado.",
       );
     } catch (erro) {
       mostrarMensagem(
@@ -521,7 +558,10 @@ export default function MeusTreinos({ onVoltar }: Props) {
         .eq("exercise_id", exercicio.id);
 
       if (erroRegistros) {
-        Alert.alert("Erro", "Não foi possível carregar as séries anteriores.");
+        mostrarMensagem(
+          "Erro",
+          "Não foi possível carregar as séries anteriores.",
+        );
 
         setSeriesCarga(
           Array.from({ length: exercicio.sets_goal }, () => ({
@@ -556,11 +596,10 @@ export default function MeusTreinos({ onVoltar }: Props) {
         .order("started_at", { ascending: false });
 
       if (erroSessoes) {
-        Alert.alert(
+        mostrarMensagem(
           "Erro",
           "Não foi possível localizar o último registro do exercício.",
         );
-
         return;
       }
 
@@ -589,7 +628,10 @@ export default function MeusTreinos({ onVoltar }: Props) {
         }),
       );
     } catch {
-      Alert.alert("Erro", "Não foi possível carregar as séries anteriores.");
+      mostrarMensagem(
+        "Erro",
+        "Não foi possível carregar as séries anteriores.",
+      );
 
       setSeriesCarga(
         Array.from({ length: exercicio.sets_goal }, () => ({
@@ -630,13 +672,14 @@ export default function MeusTreinos({ onVoltar }: Props) {
       );
       return;
     }
+
     if (
       seriesCarga.length === 0 ||
       seriesCarga.some(
         (serie) => !serie.repeticoes.trim() || !serie.carga.trim(),
       )
     ) {
-      Alert.alert(
+      mostrarMensagem(
         "Preencha as séries",
         "Informe as repetições realizadas e a carga em kg de cada série. Use 0 se não utilizou peso adicional.",
       );
@@ -647,6 +690,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
       reps: Number(serie.repeticoes),
       weight_kg: Number(serie.carga.replace(",", ".")),
     }));
+
     if (
       seriesValidadas.some(
         (serie) =>
@@ -656,7 +700,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
           serie.weight_kg < 0,
       )
     ) {
-      Alert.alert(
+      mostrarMensagem(
         "Valores inválidos",
         "As repetições devem ser inteiros positivos e a carga deve ser um número igual ou maior que zero.",
       );
@@ -664,8 +708,10 @@ export default function MeusTreinos({ onVoltar }: Props) {
     }
 
     setSalvando(true);
+
     try {
       const agora = new Date().toISOString();
+
       const { data: sessao, error: erroSessao } = await supabase
         .from("workout_sessions")
         .insert({
@@ -679,7 +725,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
         .single();
 
       if (erroSessao || !sessao) {
-        Alert.alert(
+        mostrarMensagem(
           "Erro ao registrar",
           erroSessao?.message ?? "Não foi possível criar o registro do treino.",
         );
@@ -695,18 +741,20 @@ export default function MeusTreinos({ onVoltar }: Props) {
         reps: serie.reps,
         weight_kg: serie.weight_kg,
       }));
+
       const { error: erroSeries } = await supabase
         .from("workout_sets")
         .insert(registros);
 
       if (erroSeries) {
-        Alert.alert("Erro ao salvar as séries", erroSeries.message);
+        mostrarMensagem("Erro ao salvar as séries", erroSeries.message);
         return;
       }
 
       const maiorCargaNova = Math.max(
         ...seriesValidadas.map((serie) => serie.weight_kg),
       );
+
       setMaioresCargas((atuais) => ({
         ...atuais,
         [exercicioParaCarga.id]: Math.max(
@@ -714,13 +762,15 @@ export default function MeusTreinos({ onVoltar }: Props) {
           maiorCargaNova,
         ),
       }));
+
       setExercicioParaCarga(null);
-      Alert.alert(
+
+      mostrarMensagem(
         "Cargas salvas",
         "As séries foram registradas no seu histórico.",
       );
     } catch {
-      Alert.alert("Erro", "Não foi possível conectar ao Supabase.");
+      mostrarMensagem("Erro", "Não foi possível conectar ao Supabase.");
     } finally {
       setSalvando(false);
     }
@@ -729,7 +779,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
   if (carregando) {
     return (
       <View style={estilos.centralizado}>
-        <ActivityIndicator size="large" color="#35D07F" />
+        <ActivityIndicator size="large" color={corTema} />
         <Text style={estilos.textoSecundario}>Carregando seus treinos...</Text>
       </View>
     );
@@ -752,17 +802,22 @@ export default function MeusTreinos({ onVoltar }: Props) {
         }}
       >
         <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar}>
-          <Text style={estilos.textoVoltar}>‹ Voltar</Text>
+          <Text style={[estilos.textoVoltar, { color: corTema }]}>
+            ‹ Voltar
+          </Text>
         </TouchableOpacity>
 
-        <Text style={estilos.marca}>TREINO FAMÍLIA</Text>
+        <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
+
         <Text style={estilos.titulo}>Meus treinos</Text>
+
         <Text style={estilos.subtitulo}>
           Crie quantos treinos quiser e acompanhe suas cargas.
         </Text>
 
         <View style={estilos.formulario}>
           <Text style={estilos.rotulo}>Nome do novo treino</Text>
+
           <TextInput
             style={estilos.input}
             placeholder="Ex.: Peito e tríceps, Treino E..."
@@ -772,16 +827,18 @@ export default function MeusTreinos({ onVoltar }: Props) {
             editable={!salvando}
             maxLength={80}
           />
+
           <TouchableOpacity
             style={[
               estilos.botaoAdicionar,
+              { backgroundColor: corTema },
               salvando && estilos.botaoDesabilitado,
             ]}
             onPress={criarTreino}
             disabled={salvando}
           >
             {salvando ? (
-              <ActivityIndicator color="#101312" />
+              <ActivityIndicator color="#FFFFFF" />
             ) : (
               <Text style={estilos.textoBotaoAdicionar}>+ Criar treino</Text>
             )}
@@ -789,6 +846,7 @@ export default function MeusTreinos({ onVoltar }: Props) {
         </View>
 
         <Text style={estilos.tituloSecao}>Seus treinos ({treinos.length})</Text>
+
         {treinos.length === 0 ? (
           <View style={estilos.vazio}>
             <Text style={estilos.vazioEmoji}>🏋️</Text>
@@ -803,12 +861,16 @@ export default function MeusTreinos({ onVoltar }: Props) {
           <View style={estilos.listaTreinos}>
             {treinos.map((treino, indice) => {
               const selecionado = treinoSelecionado?.id === treino.id;
+
               return (
                 <View
                   key={treino.id}
                   style={[
                     estilos.cartaoTreino,
-                    selecionado && estilos.cartaoTreinoSelecionado,
+                    selecionado && {
+                      borderColor: corTema,
+                      backgroundColor: `${corTema}20`,
+                    },
                   ]}
                 >
                   <TouchableOpacity
@@ -821,11 +883,12 @@ export default function MeusTreinos({ onVoltar }: Props) {
                     <View
                       style={[
                         estilos.letraTreino,
-                        selecionado && estilos.letraTreinoSelecionada,
+                        selecionado && { backgroundColor: corTema },
                       ]}
                     >
                       <Text style={estilos.letraTreinoTexto}>{indice + 1}</Text>
                     </View>
+
                     <View style={estilos.infoTreino}>
                       <Text style={estilos.nomeTreino}>{treino.name}</Text>
                       <Text style={estilos.descricaoTreino}>
@@ -834,20 +897,33 @@ export default function MeusTreinos({ onVoltar }: Props) {
                           : "Toque para visualizar"}
                       </Text>
                     </View>
-                    <Text style={estilos.seta}>{selecionado ? "✓" : "›"}</Text>
+
+                    <Text style={[estilos.seta, { color: corTema }]}>
+                      {selecionado ? "✓" : "›"}
+                    </Text>
                   </TouchableOpacity>
+
                   <View style={estilos.acoesTreino}>
                     <TouchableOpacity
-                      style={estilos.botaoAdicionarTreino}
+                      style={[
+                        estilos.botaoAdicionarTreino,
+                        { borderColor: corTema },
+                      ]}
                       onPress={() => {
                         setTreinoSelecionado(treino);
                         setMostrarFormularioExercicio(true);
                       }}
                     >
-                      <Text style={estilos.textoBotaoAdicionarTreino}>
+                      <Text
+                        style={[
+                          estilos.textoBotaoAdicionarTreino,
+                          { color: corTema },
+                        ]}
+                      >
                         + Adicionar exercício
                       </Text>
                     </TouchableOpacity>
+
                     <TouchableOpacity
                       style={estilos.botaoExcluirTreino}
                       onPress={() => excluirTreino(treino)}
@@ -863,267 +939,308 @@ export default function MeusTreinos({ onVoltar }: Props) {
         )}
 
         {treinoSelecionado && (
-          <>
-            <View>
-              <Text style={estilos.tituloSecao}>
-                Exercícios — {treinoSelecionado.name}
-              </Text>
-              {mostrarFormularioExercicio && (
-                <View style={estilos.formulario}>
-                  <View style={estilos.cabecalhoFormulario}>
-                    <Text style={estilos.rotulo}>
-                      Novo exercício para {treinoSelecionado.name}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => setMostrarFormularioExercicio(false)}
-                    >
-                      <Text style={estilos.textoCancelarFormulario}>
-                        Cancelar
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                  <Text style={estilos.rotulo}>Nome do exercício</Text>
-                  <TextInput
-                    style={estilos.input}
-                    placeholder="Ex.: Supino reto"
-                    placeholderTextColor="#828A85"
-                    value={nomeExercicio}
-                    onChangeText={setNomeExercicio}
-                    editable={!salvando}
-                  />
-                  <View style={estilos.linhaCampos}>
-                    <View style={estilos.campoPequeno}>
-                      <Text style={estilos.rotulo}>Séries previstas</Text>
-                      <TextInput
-                        style={estilos.input}
-                        value={quantidadeSeries}
-                        onChangeText={setQuantidadeSeries}
-                        keyboardType="number-pad"
-                        placeholder="3"
-                        placeholderTextColor="#828A85"
-                        editable={!salvando}
-                      />
-                    </View>
-                    <View style={estilos.campoGrande}>
-                      <Text style={estilos.rotulo}>Repetições previstas</Text>
-                      <TextInput
-                        style={estilos.input}
-                        value={repeticoes}
-                        onChangeText={setRepeticoes}
-                        placeholder="8-12"
-                        placeholderTextColor="#828A85"
-                        editable={!salvando}
-                      />
-                    </View>
-                  </View>
+          <View>
+            <Text style={estilos.tituloSecao}>
+              Exercícios — {treinoSelecionado.name}
+            </Text>
+
+            {mostrarFormularioExercicio && (
+              <View style={estilos.formulario}>
+                <View style={estilos.cabecalhoFormulario}>
+                  <Text style={estilos.rotulo}>
+                    Novo exercício para {treinoSelecionado.name}
+                  </Text>
+
                   <TouchableOpacity
-                    style={[
-                      estilos.botaoAdicionar,
-                      salvando && estilos.botaoDesabilitado,
-                    ]}
-                    onPress={adicionarExercicio}
-                    disabled={salvando}
+                    onPress={() => setMostrarFormularioExercicio(false)}
                   >
-                    {salvando ? (
-                      <ActivityIndicator color="#101312" />
-                    ) : (
-                      <Text style={estilos.textoBotaoAdicionar}>
-                        + Adicionar exercício
-                      </Text>
-                    )}
+                    <Text style={estilos.textoCancelarFormulario}>
+                      Cancelar
+                    </Text>
                   </TouchableOpacity>
                 </View>
-              )}
 
-              <Text style={estilos.tituloSecao}>
-                Exercícios cadastrados ({exercicios.length})
-              </Text>
-              {carregandoExercicios ? (
-                <ActivityIndicator
-                  size="large"
-                  color="#35D07F"
-                  style={estilos.carregandoLista}
+                <Text style={estilos.rotulo}>Nome do exercício</Text>
+
+                <TextInput
+                  style={estilos.input}
+                  placeholder="Ex.: Supino reto"
+                  placeholderTextColor="#828A85"
+                  value={nomeExercicio}
+                  onChangeText={setNomeExercicio}
+                  editable={!salvando}
                 />
-              ) : exercicios.length === 0 ? (
-                <View style={estilos.vazio}>
-                  <Text style={estilos.vazioEmoji}>🏋️</Text>
-                  <Text style={estilos.vazioTitulo}>
-                    Nenhum exercício ainda
-                  </Text>
-                  <Text style={estilos.textoSecundario}>
-                    Use o botão “+ Adicionar exercício” neste treino para
-                    cadastrar o primeiro.
-                  </Text>
+
+                <View style={estilos.linhaCampos}>
+                  <View style={estilos.campoPequeno}>
+                    <Text style={estilos.rotulo}>Séries previstas</Text>
+                    <TextInput
+                      style={estilos.input}
+                      value={quantidadeSeries}
+                      onChangeText={setQuantidadeSeries}
+                      keyboardType="number-pad"
+                      placeholder="3"
+                      placeholderTextColor="#828A85"
+                      editable={!salvando}
+                    />
+                  </View>
+
+                  <View style={estilos.campoGrande}>
+                    <Text style={estilos.rotulo}>Repetições previstas</Text>
+                    <TextInput
+                      style={estilos.input}
+                      value={repeticoes}
+                      onChangeText={setRepeticoes}
+                      placeholder="8-12"
+                      placeholderTextColor="#828A85"
+                      editable={!salvando}
+                    />
+                  </View>
                 </View>
-              ) : (
-                <View style={estilos.listaExercicios}>
-                  {exercicios.map((exercicio, indice) => (
-                    <View key={exercicio.id} style={estilos.cartaoExercicio}>
-                      <View style={estilos.numeroExercicio}>
-                        <Text style={estilos.numeroTexto}>{indice + 1}</Text>
-                      </View>
-                      <View style={estilos.infoExercicio}>
-                        <Text style={estilos.nomeExercicio}>
-                          {exercicio.name}
-                        </Text>
-                        <Text style={estilos.detalheExercicio}>
-                          {exercicio.sets_goal} séries · {exercicio.reps_goal}{" "}
-                          repetições
-                        </Text>
-                        <Text style={estilos.detalheRecorde}>
-                          Maior carga:{" "}
-                          {maioresCargas[exercicio.id] !== undefined
-                            ? `${maioresCargas[exercicio.id]} kg`
-                            : "Ainda não registrada"}
-                        </Text>
-                      </View>
-                      <View style={estilos.acoesExercicio}>
-                        <TouchableOpacity
-                          style={estilos.botaoAcao}
-                          onPress={() => iniciarEdicao(exercicio)}
-                        >
-                          <Text style={estilos.textoAcao}>Editar</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={estilos.botaoAcao}
-                          onPress={() => abrirRegistroCarga(exercicio)}
-                        >
-                          <Text style={estilos.textoAcao}>Cargas</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={estilos.botaoExcluir}
-                          onPress={() => excluirExercicio(exercicio)}
-                        >
-                          <Text style={estilos.textoExcluir}>Excluir</Text>
-                        </TouchableOpacity>
-                      </View>
 
-                      {exercicioEditando?.id === exercicio.id && (
-                        <View style={estilos.formularioInterno}>
-                          <Text style={estilos.rotulo}>Editar nome</Text>
-                          <TextInput
-                            style={estilos.input}
-                            value={nomeEdicao}
-                            onChangeText={setNomeEdicao}
-                            placeholder="Nome do exercício"
-                            placeholderTextColor="#828A85"
-                          />
-                          <View style={estilos.linhaCampos}>
-                            <View style={estilos.campoPequeno}>
-                              <Text style={estilos.rotulo}>Séries</Text>
-                              <TextInput
-                                style={estilos.input}
-                                value={seriesEdicao}
-                                onChangeText={setSeriesEdicao}
-                                keyboardType="number-pad"
-                              />
-                            </View>
-                            <View style={estilos.campoGrande}>
-                              <Text style={estilos.rotulo}>Repetições</Text>
-                              <TextInput
-                                style={estilos.input}
-                                value={repeticoesEdicao}
-                                onChangeText={setRepeticoesEdicao}
-                              />
-                            </View>
-                          </View>
-                          <View style={estilos.linhaBotoes}>
-                            <TouchableOpacity
-                              style={estilos.botaoSecundario}
-                              onPress={() => setExercicioEditando(null)}
-                            >
-                              <Text style={estilos.textoBotaoSecundario}>
-                                Cancelar
-                              </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={estilos.botaoAdicionarCompacto}
-                              onPress={salvarEdicao}
-                              disabled={salvando}
-                            >
-                              <Text style={estilos.textoBotaoAdicionar}>
-                                Salvar edição
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      )}
+                <TouchableOpacity
+                  style={[
+                    estilos.botaoAdicionar,
+                    { backgroundColor: corTema },
+                    salvando && estilos.botaoDesabilitado,
+                  ]}
+                  onPress={adicionarExercicio}
+                  disabled={salvando}
+                >
+                  {salvando ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={estilos.textoBotaoAdicionar}>
+                      + Adicionar exercício
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
 
-                      {exercicioParaCarga?.id === exercicio.id && (
-                        <View style={estilos.formularioInterno}>
-                          <Text style={estilos.rotulo}>
-                            Registrar cargas por série (kg)
-                          </Text>
-                          {seriesCarga.map((serie, serieIndice) => (
-                            <View
-                              key={`${exercicio.id}-${serieIndice}`}
-                              style={estilos.linhaCampos}
-                            >
-                              <View style={estilos.campoPequeno}>
-                                <Text style={estilos.rotulo}>
-                                  Série {serieIndice + 1} · reps
-                                </Text>
-                                <TextInput
-                                  style={estilos.input}
-                                  value={serie.repeticoes}
-                                  onChangeText={(valor) =>
-                                    atualizarSerieCarga(
-                                      serieIndice,
-                                      "repeticoes",
-                                      valor,
-                                    )
-                                  }
-                                  keyboardType="number-pad"
-                                  placeholder={exercicio.reps_goal}
-                                  placeholderTextColor="#828A85"
-                                />
-                              </View>
-                              <View style={estilos.campoGrande}>
-                                <Text style={estilos.rotulo}>Carga (kg)</Text>
-                                <TextInput
-                                  style={estilos.input}
-                                  value={serie.carga}
-                                  onChangeText={(valor) =>
-                                    atualizarSerieCarga(
-                                      serieIndice,
-                                      "carga",
-                                      valor,
-                                    )
-                                  }
-                                  keyboardType="decimal-pad"
-                                  placeholder="Ex.: 20"
-                                  placeholderTextColor="#828A85"
-                                />
-                              </View>
-                            </View>
-                          ))}
-                          <View style={estilos.linhaBotoes}>
-                            <TouchableOpacity
-                              style={estilos.botaoSecundario}
-                              onPress={() => setExercicioParaCarga(null)}
-                            >
-                              <Text style={estilos.textoBotaoSecundario}>
-                                Cancelar
-                              </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={estilos.botaoAdicionarCompacto}
-                              onPress={salvarCargas}
-                              disabled={salvando}
-                            >
-                              <Text style={estilos.textoBotaoAdicionar}>
-                                {salvando ? "Salvando..." : "Salvar cargas"}
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      )}
+            <Text style={estilos.tituloSecao}>
+              Exercícios cadastrados ({exercicios.length})
+            </Text>
+
+            {carregandoExercicios ? (
+              <ActivityIndicator
+                size="large"
+                color={corTema}
+                style={estilos.carregandoLista}
+              />
+            ) : exercicios.length === 0 ? (
+              <View style={estilos.vazio}>
+                <Text style={estilos.vazioEmoji}>🏋️</Text>
+                <Text style={estilos.vazioTitulo}>Nenhum exercício ainda</Text>
+                <Text style={estilos.textoSecundario}>
+                  Use o botão “+ Adicionar exercício” neste treino para
+                  cadastrar o primeiro.
+                </Text>
+              </View>
+            ) : (
+              <View style={estilos.listaExercicios}>
+                {exercicios.map((exercicio, indice) => (
+                  <View key={exercicio.id} style={estilos.cartaoExercicio}>
+                    <View
+                      style={[
+                        estilos.numeroExercicio,
+                        { backgroundColor: `${corTema}30` },
+                      ]}
+                    >
+                      <Text style={[estilos.numeroTexto, { color: corTema }]}>
+                        {indice + 1}
+                      </Text>
                     </View>
-                  ))}
-                </View>
-              )}
-            </View>
-          </>
+
+                    <View style={estilos.infoExercicio}>
+                      <Text style={estilos.nomeExercicio}>
+                        {exercicio.name}
+                      </Text>
+
+                      <Text style={estilos.detalheExercicio}>
+                        {exercicio.sets_goal} séries · {exercicio.reps_goal}{" "}
+                        repetições
+                      </Text>
+
+                      <Text
+                        style={[estilos.detalheRecorde, { color: corTema }]}
+                      >
+                        Maior carga:{" "}
+                        {maioresCargas[exercicio.id] !== undefined
+                          ? `${maioresCargas[exercicio.id]} kg`
+                          : "Ainda não registrada"}
+                      </Text>
+                    </View>
+
+                    <View style={estilos.acoesExercicio}>
+                      <TouchableOpacity
+                        style={estilos.botaoAcao}
+                        onPress={() => iniciarEdicao(exercicio)}
+                      >
+                        <Text style={[estilos.textoAcao, { color: corTema }]}>
+                          Editar
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={estilos.botaoAcao}
+                        onPress={() => abrirRegistroCarga(exercicio)}
+                      >
+                        <Text style={[estilos.textoAcao, { color: corTema }]}>
+                          Cargas
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={estilos.botaoExcluir}
+                        onPress={() => excluirExercicio(exercicio)}
+                      >
+                        <Text style={estilos.textoExcluir}>Excluir</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {exercicioEditando?.id === exercicio.id && (
+                      <View style={estilos.formularioInterno}>
+                        <Text style={estilos.rotulo}>Editar nome</Text>
+
+                        <TextInput
+                          style={estilos.input}
+                          value={nomeEdicao}
+                          onChangeText={setNomeEdicao}
+                          placeholder="Nome do exercício"
+                          placeholderTextColor="#828A85"
+                        />
+
+                        <View style={estilos.linhaCampos}>
+                          <View style={estilos.campoPequeno}>
+                            <Text style={estilos.rotulo}>Séries</Text>
+                            <TextInput
+                              style={estilos.input}
+                              value={seriesEdicao}
+                              onChangeText={setSeriesEdicao}
+                              keyboardType="number-pad"
+                            />
+                          </View>
+
+                          <View style={estilos.campoGrande}>
+                            <Text style={estilos.rotulo}>Repetições</Text>
+                            <TextInput
+                              style={estilos.input}
+                              value={repeticoesEdicao}
+                              onChangeText={setRepeticoesEdicao}
+                            />
+                          </View>
+                        </View>
+
+                        <View style={estilos.linhaBotoes}>
+                          <TouchableOpacity
+                            style={estilos.botaoSecundario}
+                            onPress={() => setExercicioEditando(null)}
+                          >
+                            <Text style={estilos.textoBotaoSecundario}>
+                              Cancelar
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[
+                              estilos.botaoAdicionarCompacto,
+                              { backgroundColor: corTema },
+                            ]}
+                            onPress={salvarEdicao}
+                            disabled={salvando}
+                          >
+                            <Text style={estilos.textoBotaoAdicionar}>
+                              Salvar edição
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+
+                    {exercicioParaCarga?.id === exercicio.id && (
+                      <View style={estilos.formularioInterno}>
+                        <Text style={estilos.rotulo}>
+                          Registrar cargas por série (kg)
+                        </Text>
+
+                        {seriesCarga.map((serie, serieIndice) => (
+                          <View
+                            key={`${exercicio.id}-${serieIndice}`}
+                            style={estilos.linhaCampos}
+                          >
+                            <View style={estilos.campoPequeno}>
+                              <Text style={estilos.rotulo}>
+                                Série {serieIndice + 1} · reps
+                              </Text>
+
+                              <TextInput
+                                style={estilos.input}
+                                value={serie.repeticoes}
+                                onChangeText={(valor) =>
+                                  atualizarSerieCarga(
+                                    serieIndice,
+                                    "repeticoes",
+                                    valor,
+                                  )
+                                }
+                                keyboardType="number-pad"
+                                placeholder={exercicio.reps_goal}
+                                placeholderTextColor="#828A85"
+                              />
+                            </View>
+
+                            <View style={estilos.campoGrande}>
+                              <Text style={estilos.rotulo}>Carga (kg)</Text>
+
+                              <TextInput
+                                style={estilos.input}
+                                value={serie.carga}
+                                onChangeText={(valor) =>
+                                  atualizarSerieCarga(
+                                    serieIndice,
+                                    "carga",
+                                    valor,
+                                  )
+                                }
+                                keyboardType="decimal-pad"
+                                placeholder="Ex.: 20"
+                                placeholderTextColor="#828A85"
+                              />
+                            </View>
+                          </View>
+                        ))}
+
+                        <View style={estilos.linhaBotoes}>
+                          <TouchableOpacity
+                            style={estilos.botaoSecundario}
+                            onPress={() => setExercicioParaCarga(null)}
+                          >
+                            <Text style={estilos.textoBotaoSecundario}>
+                              Cancelar
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[
+                              estilos.botaoAdicionarCompacto,
+                              { backgroundColor: corTema },
+                            ]}
+                            onPress={salvarCargas}
+                            disabled={salvando}
+                          >
+                            <Text style={estilos.textoBotaoAdicionar}>
+                              {salvando ? "Salvando..." : "Salvar cargas"}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
         )}
       </ScrollView>
     </View>
@@ -1180,10 +1297,6 @@ const estilos = StyleSheet.create({
     padding: 13,
     gap: 12,
   },
-  cartaoTreinoSelecionado: {
-    borderColor: "#35D07F",
-    backgroundColor: "#1B3024",
-  },
   letraTreino: {
     width: 44,
     height: 44,
@@ -1192,7 +1305,6 @@ const estilos = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  letraTreinoSelecionada: { backgroundColor: "#35D07F" },
   letraTreinoTexto: { color: "#F0F3F1", fontSize: 18, fontWeight: "800" },
   infoTreino: { flex: 1 },
   nomeTreino: { color: "#F0F3F1", fontSize: 15, fontWeight: "700" },
@@ -1286,7 +1398,11 @@ const estilos = StyleSheet.create({
     justifyContent: "center",
   },
   botaoDesabilitado: { opacity: 0.65 },
-  textoBotaoAdicionar: { color: "#101312", fontWeight: "800", fontSize: 14 },
+  textoBotaoAdicionar: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: 14,
+  },
   carregandoLista: { marginVertical: 25 },
   vazio: {
     backgroundColor: "#191E1B",
@@ -1367,5 +1483,9 @@ const estilos = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  textoBotaoSecundario: { color: "#D8E0DA", fontWeight: "700", fontSize: 13 },
+  textoBotaoSecundario: {
+    color: "#D8E0DA",
+    fontWeight: "700",
+    fontSize: 13,
+  },
 });

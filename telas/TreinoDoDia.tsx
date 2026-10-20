@@ -1,7 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -13,6 +12,7 @@ import { supabase } from "../supabase";
 type Props = {
   onAbrirProgramacao: () => void;
   onAbrirTreino: () => void;
+  corTema?: string;
 };
 
 type TreinoHoje = {
@@ -36,6 +36,7 @@ function obterInicioDoProximoDia() {
 export default function TreinoDoDia({
   onAbrirProgramacao,
   onAbrirTreino,
+  corTema = "#35D07F",
 }: Props) {
   const [treino, setTreino] = useState<TreinoHoje | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -63,13 +64,8 @@ export default function TreinoDoDia({
         .lt("started_at", inicioProximoDia)
         .order("started_at", { ascending: false });
 
-      if (erroSessoes) {
+      if (erroSessoes || !sessoes) {
         setTreino(null);
-        return;
-      }
-
-      if (!sessoes || sessoes.length === 0) {
-        setTreino({ nome: "", definido: false });
         return;
       }
 
@@ -103,10 +99,6 @@ export default function TreinoDoDia({
     }
   }, []);
 
-  useEffect(() => {
-    carregarTreinoHoje();
-  }, [carregarTreinoHoje]);
-
   useFocusEffect(
     useCallback(() => {
       carregarTreinoHoje();
@@ -127,7 +119,10 @@ export default function TreinoDoDia({
     <View style={estilos.cartao}>
       <View style={estilos.topo}>
         <View style={estilos.textos}>
-          <Text style={estilos.rotulo}>TREINO DE HOJE</Text>
+          <Text style={[estilos.rotulo, { color: corTema }]}>
+            TREINO DE HOJE
+          </Text>
+
           <Text style={estilos.dia}>{nomesDias[new Date().getDay()]}</Text>
         </View>
 
@@ -135,16 +130,17 @@ export default function TreinoDoDia({
       </View>
 
       {carregando ? (
-        <ActivityIndicator color="#35D07F" style={estilos.carregando} />
+        <ActivityIndicator color={corTema} style={estilos.carregando} />
       ) : treino?.definido ? (
         <>
           <Text style={estilos.titulo}>{treino.nome}</Text>
+
           <Text style={estilos.descricao}>
             Treino registrado para hoje. Continue acompanhando sua evolução!
           </Text>
 
           <TouchableOpacity
-            style={estilos.botaoPrincipal}
+            style={[estilos.botaoPrincipal, { backgroundColor: corTema }]}
             onPress={onAbrirTreino}
             activeOpacity={0.8}
           >
@@ -154,6 +150,7 @@ export default function TreinoDoDia({
       ) : (
         <>
           <Text style={estilos.titulo}>Qual treino você fez hoje?</Text>
+
           <Text style={estilos.descricao}>
             Registre o treino realizado no calendário e acompanhe sua
             frequência. Você escolhe o treino no próprio dia, sem precisar
@@ -167,7 +164,7 @@ export default function TreinoDoDia({
         onPress={onAbrirProgramacao}
         activeOpacity={0.8}
       >
-        <Text style={estilos.textoBotaoSecundario}>
+        <Text style={[estilos.textoBotaoSecundario, { color: corTema }]}>
           {treino?.definido
             ? "Ver calendário ou alterar registro"
             : "Escolher treino de hoje"}
@@ -179,8 +176,8 @@ export default function TreinoDoDia({
 
 const estilos = StyleSheet.create({
   cartao: {
-    backgroundColor: "#1A2B21",
-    borderColor: "#2E6041",
+    backgroundColor: "#1A2027",
+    borderColor: "#303E4D",
     borderWidth: 1,
     borderRadius: 18,
     padding: 18,
@@ -196,13 +193,12 @@ const estilos = StyleSheet.create({
     gap: 4,
   },
   rotulo: {
-    color: "#70D99A",
     fontSize: 10,
     fontWeight: "800",
     letterSpacing: 1.5,
   },
   dia: {
-    color: "#A9BFB0",
+    color: "#A9B5C2",
     fontSize: 13,
     textTransform: "capitalize",
   },
@@ -213,19 +209,18 @@ const estilos = StyleSheet.create({
     marginVertical: 15,
   },
   titulo: {
-    color: "#F4F8F5",
+    color: "#F4F6F8",
     fontSize: 22,
     fontWeight: "800",
     marginBottom: 6,
   },
   descricao: {
-    color: "#B7C8BC",
+    color: "#B8C3CE",
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 15,
   },
   botaoPrincipal: {
-    backgroundColor: "#35D07F",
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 10,
@@ -233,7 +228,7 @@ const estilos = StyleSheet.create({
     marginBottom: 8,
   },
   textoBotaoPrincipal: {
-    color: "#101312",
+    color: "#FFFFFF",
     fontSize: 14,
     fontWeight: "800",
   },
@@ -243,7 +238,6 @@ const estilos = StyleSheet.create({
     paddingHorizontal: 2,
   },
   textoBotaoSecundario: {
-    color: "#7EE3A4",
     fontSize: 13,
     fontWeight: "700",
   },

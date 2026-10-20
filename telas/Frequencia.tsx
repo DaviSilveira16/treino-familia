@@ -24,6 +24,7 @@ type Sessao = {
 
 type Props = {
   onVoltar: () => void;
+  corTema?: string;
 };
 
 const nomesMeses = [
@@ -51,11 +52,10 @@ function dataLocal(data: Date) {
 }
 
 function dataDaSessao(valor: string) {
-  const data = new Date(valor);
-  return dataLocal(data);
+  return dataLocal(new Date(valor));
 }
 
-export default function Frequencia({ onVoltar }: Props) {
+export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const hoje = new Date();
 
   const [usuarioId, setUsuarioId] = useState("");
@@ -134,12 +134,18 @@ export default function Frequencia({ onVoltar }: Props) {
   );
 
   const diasTreinados = new Set(
-    sessoes.map((sessao) => dataDaSessao(sessao.started_at)),
+    sessoes
+      .filter((sessao) => sessao.plan_id !== null)
+      .map((sessao) => dataDaSessao(sessao.started_at)),
   );
 
   const sessoesDoMes = sessoes.filter((sessao) => {
     const data = new Date(sessao.started_at);
-    return data.getFullYear() === ano && data.getMonth() === mes;
+    return (
+      sessao.plan_id !== null &&
+      data.getFullYear() === ano &&
+      data.getMonth() === mes
+    );
   });
 
   const frequenciaMensal = new Set(
@@ -167,19 +173,10 @@ export default function Frequencia({ onVoltar }: Props) {
     setSalvando(true);
 
     try {
-      const dataRegistro = new Date(
-        `${dataSelecionada}T12:00:00`,
-      ).toISOString();
-
-      const sessoesExistentes = sessoes
-        .filter((sessao) => dataDaSessao(sessao.started_at) === dataSelecionada)
-        .sort(
-          (a, b) =>
-            new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
-        );
-
-      const sessaoExistente = sessoesExistentes.find(
-        (sessao) => sessao.plan_id === treinoSelecionado,
+      const sessaoExistente = sessoes.find(
+        (sessao) =>
+          sessao.plan_id === treinoSelecionado &&
+          dataDaSessao(sessao.started_at) === dataSelecionada,
       );
 
       if (sessaoExistente) {
@@ -190,36 +187,25 @@ export default function Frequencia({ onVoltar }: Props) {
         return;
       }
 
-      if (sessoesExistentes.length > 0) {
-        const { error } = await supabase
-          .from("workout_sessions")
-          .update({
-            plan_id: treinoSelecionado,
-            notes: "Treino registrado pelo calendário",
-          })
-          .eq("id", sessoesExistentes[0].id)
-          .eq("user_id", usuarioId);
+      const dataRegistro = new Date(
+        `${dataSelecionada}T12:00:00`,
+      ).toISOString();
 
-        if (error) {
-          Alert.alert("Erro ao registrar", error.message);
-          return;
-        }
-      } else {
-        const { error } = await supabase.from("workout_sessions").insert({
-          user_id: usuarioId,
-          plan_id: treinoSelecionado,
-          started_at: dataRegistro,
-          finished_at: dataRegistro,
-          notes: "Treino registrado pelo calendário",
-        });
+      const { error } = await supabase.from("workout_sessions").insert({
+        user_id: usuarioId,
+        plan_id: treinoSelecionado,
+        started_at: dataRegistro,
+        finished_at: dataRegistro,
+        notes: "Treino registrado pelo calendário",
+      });
 
-        if (error) {
-          Alert.alert("Erro ao registrar", error.message);
-          return;
-        }
+      if (error) {
+        Alert.alert("Erro ao registrar", error.message);
+        return;
       }
 
       await carregarDados();
+      setTreinoSelecionado("");
       Alert.alert("Treino registrado", "O calendário foi atualizado.");
     } catch {
       Alert.alert("Erro", "Não foi possível registrar o treino.");
@@ -231,7 +217,7 @@ export default function Frequencia({ onVoltar }: Props) {
   if (carregando) {
     return (
       <View style={estilos.centralizado}>
-        <ActivityIndicator size="large" color="#35D07F" />
+        <ActivityIndicator size="large" color={corTema} />
         <Text style={estilos.textoSecundario}>Carregando calendário...</Text>
       </View>
     );
@@ -245,18 +231,25 @@ export default function Frequencia({ onVoltar }: Props) {
         showsVerticalScrollIndicator={false}
       >
         <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar}>
-          <Text style={estilos.textoVoltar}>‹ Voltar</Text>
+          <Text style={[estilos.textoVoltar, { color: corTema }]}>
+            ‹ Voltar
+          </Text>
         </TouchableOpacity>
 
-        <Text style={estilos.marca}>TREINO FAMÍLIA</Text>
+        <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
+
         <Text style={estilos.titulo}>Frequência de treino</Text>
+
         <Text style={estilos.subtitulo}>
           Registre os treinos que você realmente realizou. Você escolhe o dia e
           o treino, sem precisar definir uma semana fixa.
         </Text>
 
         <View style={estilos.cartaoResumo}>
-          <Text style={estilos.resumoNumero}>{frequenciaMensal}</Text>
+          <Text style={[estilos.resumoNumero, { color: corTema }]}>
+            {frequenciaMensal}
+          </Text>
+
           <Text style={estilos.resumoTexto}>
             {frequenciaMensal === 1
               ? "dia treinado neste mês"
@@ -270,7 +263,7 @@ export default function Frequencia({ onVoltar }: Props) {
               style={estilos.botaoMes}
               onPress={() => mudarMes(-1)}
             >
-              <Text style={estilos.textoBotaoMes}>‹</Text>
+              <Text style={[estilos.textoBotaoMes, { color: corTema }]}>‹</Text>
             </TouchableOpacity>
 
             <Text style={estilos.tituloMes}>
@@ -285,9 +278,12 @@ export default function Frequencia({ onVoltar }: Props) {
               <Text
                 style={[
                   estilos.textoBotaoMes,
-                  ano === hoje.getFullYear() &&
-                    mes >= hoje.getMonth() &&
-                    estilos.textoDesabilitado,
+                  {
+                    color:
+                      ano === hoje.getFullYear() && mes >= hoje.getMonth()
+                        ? "#536057"
+                        : corTema,
+                  },
                 ]}
               >
                 ›
@@ -318,8 +314,11 @@ export default function Frequencia({ onVoltar }: Props) {
                     style={[
                       estilos.diaCalendario,
                       treinado && estilos.diaTreinado,
-                      selecionado && estilos.diaSelecionado,
-                      eHoje && estilos.diaHoje,
+                      selecionado && {
+                        borderColor: corTema,
+                        borderWidth: 2,
+                      },
+                      eHoje && !selecionado && estilos.diaHoje,
                     ]}
                     onPress={() => {
                       setDataSelecionada(data);
@@ -329,13 +328,21 @@ export default function Frequencia({ onVoltar }: Props) {
                     <Text
                       style={[
                         estilos.numeroDia,
-                        treinado && estilos.numeroTreinado,
+                        treinado && { color: "#FFFFFF" },
                         selecionado && estilos.numeroSelecionado,
                       ]}
                     >
                       {dia}
                     </Text>
-                    {treinado && <View style={estilos.indicadorTreino} />}
+
+                    {treinado ? (
+                      <View
+                        style={[
+                          estilos.indicadorTreino,
+                          { backgroundColor: corTema },
+                        ]}
+                      />
+                    ) : null}
                   </TouchableOpacity>
                 </View>
               );
@@ -343,14 +350,17 @@ export default function Frequencia({ onVoltar }: Props) {
           </View>
 
           <View style={estilos.legenda}>
-            <View style={estilos.indicadorTreino} />
+            <View
+              style={[estilos.indicadorTreino, { backgroundColor: corTema }]}
+            />
             <Text style={estilos.textoLegenda}>Dia com treino registrado</Text>
           </View>
         </View>
 
         <View style={estilos.cartaoRegistro}>
           <Text style={estilos.tituloRegistro}>Registrar treino</Text>
-          <Text style={estilos.dataRegistro}>
+
+          <Text style={[estilos.dataRegistro, { color: corTema }]}>
             {new Date(`${dataSelecionada}T12:00:00`).toLocaleDateString(
               "pt-BR",
               {
@@ -379,7 +389,10 @@ export default function Frequencia({ onVoltar }: Props) {
                     key={treino.id}
                     style={[
                       estilos.opcaoTreino,
-                      selecionado && estilos.opcaoTreinoSelecionada,
+                      selecionado && {
+                        backgroundColor: "#202831",
+                        borderColor: corTema,
+                      },
                     ]}
                     onPress={() => setTreinoSelecionado(treino.id)}
                   >
@@ -399,6 +412,7 @@ export default function Frequencia({ onVoltar }: Props) {
               <TouchableOpacity
                 style={[
                   estilos.botaoSalvar,
+                  { backgroundColor: corTema },
                   (salvando || !treinoSelecionado) && estilos.botaoDesabilitado,
                 ]}
                 onPress={registrarTreino}
@@ -413,22 +427,29 @@ export default function Frequencia({ onVoltar }: Props) {
             </>
           )}
 
-          {sessoesDoDia.length > 0 && (
+          {sessoesDoDia.filter((sessao) => sessao.plan_id !== null).length >
+          0 ? (
             <View style={estilos.treinosDoDia}>
               <Text style={estilos.rotulo}>Treinos registrados neste dia</Text>
-              {sessoesDoDia.map((sessao) => {
-                const treino = treinos.find(
-                  (item) => item.id === sessao.plan_id,
-                );
 
-                return (
-                  <Text key={sessao.id} style={estilos.textoTreinoDoDia}>
-                    ✓ {treino?.name ?? "Treino registrado"}
-                  </Text>
-                );
-              })}
+              {sessoesDoDia
+                .filter((sessao) => sessao.plan_id !== null)
+                .map((sessao) => {
+                  const treino = treinos.find(
+                    (item) => item.id === sessao.plan_id,
+                  );
+
+                  return (
+                    <Text
+                      key={sessao.id}
+                      style={[estilos.textoTreinoDoDia, { color: corTema }]}
+                    >
+                      ✓ {treino?.name ?? "Treino registrado"}
+                    </Text>
+                  );
+                })}
             </View>
-          )}
+          ) : null}
         </View>
       </ScrollView>
     </View>
@@ -453,7 +474,6 @@ const estilos = StyleSheet.create({
     gap: 12,
   },
   marca: {
-    color: "#35D07F",
     fontSize: 12,
     fontWeight: "800",
     letterSpacing: 2,
@@ -478,25 +498,23 @@ const estilos = StyleSheet.create({
     marginBottom: 18,
   },
   textoVoltar: {
-    color: "#35D07F",
     fontSize: 16,
     fontWeight: "600",
   },
   cartaoResumo: {
-    backgroundColor: "#1B3024",
-    borderColor: "#2C593E",
+    backgroundColor: "#1B222A",
+    borderColor: "#303E4D",
     borderWidth: 1,
     borderRadius: 16,
     padding: 20,
     marginBottom: 18,
   },
   resumoNumero: {
-    color: "#35D07F",
     fontSize: 36,
     fontWeight: "800",
   },
   resumoTexto: {
-    color: "#D0D7D2",
+    color: "#D0D7E0",
     fontSize: 14,
     marginTop: 4,
   },
@@ -526,11 +544,7 @@ const estilos = StyleSheet.create({
     justifyContent: "center",
   },
   textoBotaoMes: {
-    color: "#35D07F",
     fontSize: 30,
-  },
-  textoDesabilitado: {
-    color: "#536057",
   },
   gradeCalendario: {
     flexDirection: "row",
@@ -558,11 +572,7 @@ const estilos = StyleSheet.create({
     borderColor: "transparent",
   },
   diaTreinado: {
-    backgroundColor: "#1D4A31",
-  },
-  diaSelecionado: {
-    borderColor: "#35D07F",
-    borderWidth: 2,
+    backgroundColor: "#202831",
   },
   diaHoje: {
     borderColor: "#6D8174",
@@ -572,9 +582,6 @@ const estilos = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
-  numeroTreinado: {
-    color: "#8DE8B0",
-  },
   numeroSelecionado: {
     color: "#FFFFFF",
   },
@@ -582,7 +589,6 @@ const estilos = StyleSheet.create({
     width: 5,
     height: 5,
     borderRadius: 3,
-    backgroundColor: "#35D07F",
   },
   legenda: {
     flexDirection: "row",
@@ -607,7 +613,6 @@ const estilos = StyleSheet.create({
     fontWeight: "800",
   },
   dataRegistro: {
-    color: "#35D07F",
     fontSize: 13,
     marginTop: 6,
     marginBottom: 20,
@@ -626,10 +631,6 @@ const estilos = StyleSheet.create({
     padding: 13,
     marginBottom: 8,
   },
-  opcaoTreinoSelecionada: {
-    backgroundColor: "#1D4A31",
-    borderColor: "#35D07F",
-  },
   textoOpcao: {
     color: "#D0D7D2",
     fontSize: 14,
@@ -639,7 +640,6 @@ const estilos = StyleSheet.create({
     fontWeight: "700",
   },
   botaoSalvar: {
-    backgroundColor: "#35D07F",
     borderRadius: 12,
     padding: 16,
     alignItems: "center",
@@ -663,7 +663,6 @@ const estilos = StyleSheet.create({
     gap: 8,
   },
   textoTreinoDoDia: {
-    color: "#8DE8B0",
     fontSize: 14,
   },
   textoSecundario: {
