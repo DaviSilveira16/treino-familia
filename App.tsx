@@ -35,7 +35,6 @@ import TreinoDoDia from "./telas/TreinoDoDia";
 import MeusTreinos from "./telas/MeusTreinos";
 import EvolucaoFisica from "./telas/EvolucaoFisica";
 import HistoricoTreinos from "./telas/HistoricoTreinos";
-import ProgramacaoSemanal from "./telas/ProgramacaoSemanal";
 
 type ModoAutenticacao = "login" | "cadastro" | "recuperar";
 
@@ -46,7 +45,6 @@ type Rotas = {
   evolucao: undefined;
   historico: undefined;
   frequencia: undefined;
-  programacao: undefined;
 };
 
 const Pilha = createStackNavigator<Rotas>();
@@ -77,12 +75,6 @@ const telas = [
     titulo: "Frequência",
     descricao: "Veja sua frequência de treinamento",
     emoji: "📅",
-  },
-  {
-    id: "programacao",
-    titulo: "Programação semanal",
-    descricao: "Defina seus treinos e dias de descanso",
-    emoji: "🗓️",
   },
 ] as const;
 
@@ -670,7 +662,7 @@ export default function App() {
                 </View>
 
                 <TreinoDoDia
-                  onAbrirProgramacao={() => navigation.navigate("programacao")}
+                  onAbrirProgramacao={() => navigation.navigate("frequencia")}
                   onAbrirTreino={() => navigation.navigate("treinos")}
                 />
 
@@ -741,12 +733,6 @@ export default function App() {
         <Pilha.Screen name="historico">
           {({ navigation }) => (
             <HistoricoTreinos onVoltar={() => navigation.goBack()} />
-          )}
-        </Pilha.Screen>
-
-        <Pilha.Screen name="programacao">
-          {({ navigation }) => (
-            <ProgramacaoSemanal onVoltar={() => navigation.goBack()} />
           )}
         </Pilha.Screen>
 

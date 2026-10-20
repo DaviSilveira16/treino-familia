@@ -39,6 +39,8 @@ type SerieTreino = {
   set_number: number;
   reps: number;
   weight_kg: number;
+  progressoCarga?: number;
+  progressoReps?: number;
 };
 
 type TreinoHistorico = SessaoTreino & {
@@ -65,6 +67,7 @@ function formatarData(valor: string) {
 function formatarHora(valor: string) {
   const data = new Date(valor);
   if (Number.isNaN(data.getTime())) return "";
+
   return data.toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
@@ -75,6 +78,13 @@ function formatarCarga(valor: number) {
   return Number(valor).toLocaleString("pt-BR", {
     maximumFractionDigits: 2,
   });
+}
+
+function chaveExercicio(serie: SerieTreino) {
+  return (
+    serie.exercise_name?.trim().toLocaleLowerCase("pt-BR") ||
+    "exercício sem nome"
+  );
 }
 
 export default function HistoricoTreinos({ onVoltar }: Props) {
@@ -168,17 +178,69 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
         id: string;
         name: string;
       }[];
+
       const nomesPlanos = new Map(
         planos.map((plano) => [plano.id, plano.name]),
       );
 
-      const resultado = listaSessoes.map((sessao) => ({
+      const resultado: TreinoHistorico[] = listaSessoes.map((sessao) => ({
         ...sessao,
         nomeTreino: sessao.plan_id
           ? (nomesPlanos.get(sessao.plan_id) ?? "Treino removido")
           : "Treino removido",
-        series: series.filter((serie) => serie.session_id === sessao.id),
+        series: series
+          .filter((serie) => serie.session_id === sessao.id)
+          .map((serie) => ({ ...serie })),
       }));
+
+      const ordemCronologica = [...resultado].sort(
+        (a, b) =>
+          new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+      );
+
+      const ultimasSeriesPorExercicio = new Map<string, SerieTreino[]>();
+
+      for (const sessao of ordemCronologica) {
+        const gruposExercicios = new Map<string, SerieTreino[]>();
+
+        for (const serie of sessao.series) {
+          const chave = chaveExercicio(serie);
+          const grupo = gruposExercicios.get(chave) ?? [];
+          grupo.push(serie);
+          gruposExercicios.set(chave, grupo);
+        }
+
+        for (const [chave, seriesAtuais] of gruposExercicios) {
+          const seriesAnteriores = ultimasSeriesPorExercicio.get(chave) ?? [];
+
+          for (const serieAtual of seriesAtuais) {
+            const serieAnterior = seriesAnteriores.find(
+              (serie) => serie.set_number === serieAtual.set_number,
+            );
+
+            if (!serieAnterior) continue;
+
+            const diferencaCarga =
+              Number(serieAtual.weight_kg) - Number(serieAnterior.weight_kg);
+
+            const diferencaReps =
+              Number(serieAtual.reps) - Number(serieAnterior.reps);
+
+            if (diferencaCarga > 0) {
+              serieAtual.progressoCarga = diferencaCarga;
+            }
+
+            if (diferencaReps > 0) {
+              serieAtual.progressoReps = diferencaReps;
+            }
+          }
+
+          ultimasSeriesPorExercicio.set(
+            chave,
+            seriesAtuais.map((serie) => ({ ...serie })),
+          );
+        }
+      }
 
       setHistorico(resultado);
     } catch {
@@ -234,7 +296,7 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
         <Text style={estilos.marca}>TREINO FAMÍLIA</Text>
         <Text style={estilos.titulo}>Histórico de treinos</Text>
         <Text style={estilos.subtitulo}>
-          Consulte os registros de cargas e repetições salvos anteriormente.
+          Acompanhe suas cargas, repetições e evoluções em cada exercício.
         </Text>
 
         <View style={estilos.resumo}>
@@ -243,6 +305,17 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
             {historico.length === 1
               ? "registro encontrado"
               : "registros encontrados"}
+          </Text>
+        </View>
+
+        <View style={estilos.legendaProgresso}>
+          <Text style={estilos.legendaTitulo}>COMO LER SUA EVOLUÇÃO</Text>
+          <Text style={estilos.legendaTexto}>
+            <Text style={estilos.textoVerde}>↑ +kg</Text> aumento de carga
+          </Text>
+          <Text style={estilos.legendaTexto}>
+            <Text style={estilos.textoVerde}>↑ +reps</Text> aumento de
+            repetições
           </Text>
         </View>
 
@@ -269,11 +342,18 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                   ),
                 ),
               );
+
               const volumeTotal = sessao.series.reduce(
                 (total, serie) =>
                   total +
                   Number(serie.weight_kg || 0) * Number(serie.reps || 0),
                 0,
+              );
+
+              const seriesComProgresso = sessao.series.filter(
+                (serie) =>
+                  (serie.progressoCarga ?? 0) > 0 ||
+                  (serie.progressoReps ?? 0) > 0,
               );
 
               return (
@@ -309,6 +389,22 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                           ? "série registrada"
                           : "séries registradas"}
                       </Text>
+
+                      {seriesComProgresso.length > 0 && (
+                        <View style={estilos.destaqueEvolucao}>
+                          <Text style={estilos.destaqueEvolucaoTexto}>
+                            ↑ EVOLUÇÃO EM{" "}
+                            {
+                              new Set(seriesComProgresso.map(chaveExercicio))
+                                .size
+                            }{" "}
+                            {new Set(seriesComProgresso.map(chaveExercicio))
+                              .size === 1
+                              ? "EXERCÍCIO"
+                              : "EXERCÍCIOS"}
+                          </Text>
+                        </View>
+                      )}
                     </View>
 
                     <Text style={estilos.seta}>{expandida ? "⌃" : "⌄"}</Text>
@@ -328,6 +424,14 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                                 "Exercício sem nome") === nomeExercicio,
                           );
 
+                          const teveProgressoCarga = seriesExercicio.some(
+                            (serie) => (serie.progressoCarga ?? 0) > 0,
+                          );
+
+                          const teveProgressoReps = seriesExercicio.some(
+                            (serie) => (serie.progressoReps ?? 0) > 0,
+                          );
+
                           return (
                             <View
                               key={`${sessao.id}-${nomeExercicio}`}
@@ -336,6 +440,36 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                               <Text style={estilos.nomeExercicio}>
                                 {nomeExercicio}
                               </Text>
+
+                              {(teveProgressoCarga || teveProgressoReps) && (
+                                <View style={estilos.faixaProgresso}>
+                                  <Text style={estilos.faixaProgressoTitulo}>
+                                    <Text style={estilos.textoVerde}>↑ </Text>
+                                    VOCÊ EVOLUIU NESTE EXERCÍCIO
+                                  </Text>
+                                  <View style={estilos.etiquetasProgresso}>
+                                    {teveProgressoCarga && (
+                                      <View style={estilos.etiquetaProgresso}>
+                                        <Text
+                                          style={estilos.etiquetaProgressoTexto}
+                                        >
+                                          ↑ CARGA
+                                        </Text>
+                                      </View>
+                                    )}
+                                    {teveProgressoReps && (
+                                      <View style={estilos.etiquetaProgresso}>
+                                        <Text
+                                          style={estilos.etiquetaProgressoTexto}
+                                        >
+                                          ↑ REPETIÇÕES
+                                        </Text>
+                                      </View>
+                                    )}
+                                  </View>
+                                </View>
+                              )}
+
                               <View style={estilos.linhaTabela}>
                                 <Text
                                   style={[
@@ -352,10 +486,16 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                                   Carga (kg)
                                 </Text>
                               </View>
+
                               {seriesExercicio.map((serie) => (
                                 <View
                                   key={serie.id}
-                                  style={estilos.linhaTabela}
+                                  style={[
+                                    estilos.linhaTabela,
+                                    ((serie.progressoCarga ?? 0) > 0 ||
+                                      (serie.progressoReps ?? 0) > 0) &&
+                                      estilos.linhaComProgresso,
+                                  ]}
                                 >
                                   <Text
                                     style={[
@@ -365,12 +505,42 @@ export default function HistoricoTreinos({ onVoltar }: Props) {
                                   >
                                     {serie.set_number}
                                   </Text>
-                                  <Text style={estilos.celula}>
-                                    {serie.reps}
-                                  </Text>
-                                  <Text style={estilos.celula}>
-                                    {formatarCarga(Number(serie.weight_kg))}
-                                  </Text>
+
+                                  <View style={estilos.celulaComProgresso}>
+                                    <Text
+                                      style={[
+                                        estilos.celula,
+                                        (serie.progressoReps ?? 0) > 0 &&
+                                          estilos.valorComProgresso,
+                                      ]}
+                                    >
+                                      {serie.reps}
+                                    </Text>
+                                    {(serie.progressoReps ?? 0) > 0 && (
+                                      <Text style={estilos.indicadorProgresso}>
+                                        ↑ +{formatarCarga(serie.progressoReps!)}
+                                      </Text>
+                                    )}
+                                  </View>
+
+                                  <View style={estilos.celulaComProgresso}>
+                                    <Text
+                                      style={[
+                                        estilos.celula,
+                                        (serie.progressoCarga ?? 0) > 0 &&
+                                          estilos.valorComProgresso,
+                                      ]}
+                                    >
+                                      {formatarCarga(Number(serie.weight_kg))}
+                                    </Text>
+                                    {(serie.progressoCarga ?? 0) > 0 && (
+                                      <Text style={estilos.indicadorProgresso}>
+                                        ↑ +
+                                        {formatarCarga(serie.progressoCarga!)}{" "}
+                                        kg
+                                      </Text>
+                                    )}
+                                  </View>
                                 </View>
                               ))}
                             </View>
@@ -457,7 +627,7 @@ const estilos = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 16,
     padding: 18,
-    marginBottom: 18,
+    marginBottom: 14,
   },
   resumoNumero: {
     color: "#35D07F",
@@ -468,6 +638,30 @@ const estilos = StyleSheet.create({
     color: "#B4C5B9",
     fontSize: 13,
     marginTop: 3,
+  },
+  legendaProgresso: {
+    backgroundColor: "#17241C",
+    borderWidth: 1,
+    borderColor: "#28573A",
+    borderRadius: 12,
+    padding: 13,
+    marginBottom: 18,
+    gap: 6,
+  },
+  legendaTitulo: {
+    color: "#C6D9CC",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  legendaTexto: {
+    color: "#D6DED8",
+    fontSize: 12,
+  },
+  textoVerde: {
+    color: "#35D07F",
+    fontWeight: "900",
   },
   lista: {
     gap: 12,
@@ -521,6 +715,22 @@ const estilos = StyleSheet.create({
     marginTop: 7,
     fontWeight: "600",
   },
+  destaqueEvolucao: {
+    alignSelf: "flex-start",
+    backgroundColor: "#173C28",
+    borderColor: "#2D8A50",
+    borderWidth: 1,
+    borderRadius: 7,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    marginTop: 9,
+  },
+  destaqueEvolucaoTexto: {
+    color: "#55E693",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.4,
+  },
   seta: {
     color: "#35D07F",
     fontSize: 23,
@@ -540,12 +750,46 @@ const estilos = StyleSheet.create({
     fontWeight: "800",
     marginBottom: 10,
   },
+  faixaProgresso: {
+    backgroundColor: "#153321",
+    borderColor: "#286B40",
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  faixaProgressoTitulo: {
+    color: "#C5F5D5",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.4,
+  },
+  etiquetasProgresso: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7,
+    marginTop: 8,
+  },
+  etiquetaProgresso: {
+    backgroundColor: "#235C37",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  etiquetaProgressoTexto: {
+    color: "#75F0A4",
+    fontSize: 10,
+    fontWeight: "900",
+  },
   linhaTabela: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 9,
     borderBottomWidth: 1,
     borderBottomColor: "#2B332E",
+  },
+  linhaComProgresso: {
+    backgroundColor: "#14251A",
   },
   celulaCabecalho: {
     color: "#A4ADA7",
@@ -562,6 +806,22 @@ const estilos = StyleSheet.create({
   },
   celulaSerie: {
     flex: 0.6,
+  },
+  celulaComProgresso: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  valorComProgresso: {
+    color: "#55E693",
+    fontWeight: "900",
+  },
+  indicadorProgresso: {
+    color: "#55E693",
+    fontSize: 10,
+    fontWeight: "900",
+    textAlign: "center",
+    marginTop: 3,
   },
   semSeries: {
     color: "#A4ADA7",

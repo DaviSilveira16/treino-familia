@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabase";
 
 type Props = {
@@ -15,19 +17,21 @@ type Props = {
 
 type TreinoHoje = {
   nome: string;
-  descanso: boolean;
   definido: boolean;
 };
 
-const nomesDias = [
-  "domingo",
-  "segunda-feira",
-  "terça-feira",
-  "quarta-feira",
-  "quinta-feira",
-  "sexta-feira",
-  "sábado",
-];
+function obterInicioDoDia() {
+  const data = new Date();
+  data.setHours(0, 0, 0, 0);
+  return data.toISOString();
+}
+
+function obterInicioDoProximoDia() {
+  const data = new Date();
+  data.setHours(0, 0, 0, 0);
+  data.setDate(data.getDate() + 1);
+  return data.toISOString();
+}
 
 export default function TreinoDoDia({
   onAbrirProgramacao,
@@ -38,50 +42,62 @@ export default function TreinoDoDia({
 
   const carregarTreinoHoje = useCallback(async () => {
     setCarregando(true);
+
     try {
-      const { data: usuarioData } = await supabase.auth.getUser();
-      if (!usuarioData.user) {
+      const { data: usuarioData, error: erroUsuario } =
+        await supabase.auth.getUser();
+
+      if (erroUsuario || !usuarioData.user) {
         setTreino(null);
         return;
       }
 
-      const diaHoje = new Date().getDay();
-      const { data, error } = await supabase
-        .from("weekly_workout_schedule")
-        .select("plan_id, is_rest_day")
+      const inicioDia = obterInicioDoDia();
+      const inicioProximoDia = obterInicioDoProximoDia();
+
+      const { data: sessoes, error: erroSessoes } = await supabase
+        .from("workout_sessions")
+        .select("id, plan_id, started_at")
         .eq("user_id", usuarioData.user.id)
-        .eq("day_of_week", diaHoje)
-        .maybeSingle();
+        .gte("started_at", inicioDia)
+        .lt("started_at", inicioProximoDia)
+        .order("started_at", { ascending: false });
 
-      if (error || !data) {
-        setTreino({ nome: "", descanso: false, definido: false });
+      if (erroSessoes) {
+        setTreino(null);
         return;
       }
 
-      if (data.is_rest_day) {
-        setTreino({ nome: "", descanso: true, definido: true });
+      if (!sessoes || sessoes.length === 0) {
+        setTreino({ nome: "", definido: false });
         return;
       }
 
-      if (!data.plan_id) {
-        setTreino({ nome: "", descanso: false, definido: false });
+      const sessaoComPlano = sessoes.find((sessao) => Boolean(sessao.plan_id));
+
+      if (!sessaoComPlano?.plan_id) {
+        setTreino({ nome: "", definido: false });
         return;
       }
 
-      const { data: plano } = await supabase
+      const { data: plano, error: erroPlano } = await supabase
         .from("workout_plans")
         .select("name")
-        .eq("id", data.plan_id)
+        .eq("id", sessaoComPlano.plan_id)
         .eq("user_id", usuarioData.user.id)
         .maybeSingle();
 
+      if (erroPlano || !plano?.name) {
+        setTreino({ nome: "", definido: false });
+        return;
+      }
+
       setTreino({
-        nome: plano?.name ?? "Treino não encontrado",
-        descanso: false,
-        definido: Boolean(plano?.name),
+        nome: plano.name,
+        definido: true,
       });
     } catch {
-      setTreino({ nome: "", descanso: false, definido: false });
+      setTreino(null);
     } finally {
       setCarregando(false);
     }
@@ -91,6 +107,22 @@ export default function TreinoDoDia({
     carregarTreinoHoje();
   }, [carregarTreinoHoje]);
 
+  useFocusEffect(
+    useCallback(() => {
+      carregarTreinoHoje();
+    }, [carregarTreinoHoje]),
+  );
+
+  const nomesDias = [
+    "domingo",
+    "segunda-feira",
+    "terça-feira",
+    "quarta-feira",
+    "quinta-feira",
+    "sexta-feira",
+    "sábado",
+  ];
+
   return (
     <View style={estilos.cartao}>
       <View style={estilos.topo}>
@@ -98,37 +130,34 @@ export default function TreinoDoDia({
           <Text style={estilos.rotulo}>TREINO DE HOJE</Text>
           <Text style={estilos.dia}>{nomesDias[new Date().getDay()]}</Text>
         </View>
-        <Text style={estilos.emoji}>{treino?.descanso ? "🌿" : "🏋️"}</Text>
+
+        <Text style={estilos.emoji}>{treino?.definido ? "💪" : "🏋️"}</Text>
       </View>
 
       {carregando ? (
         <ActivityIndicator color="#35D07F" style={estilos.carregando} />
-      ) : treino?.descanso ? (
-        <>
-          <Text style={estilos.titulo}>Dia de descanso</Text>
-          <Text style={estilos.descricao}>
-            Sua programação indica recuperação hoje. Volte amanhã para o próximo
-            treino.
-          </Text>
-        </>
       ) : treino?.definido ? (
         <>
           <Text style={estilos.titulo}>{treino.nome}</Text>
           <Text style={estilos.descricao}>
-            Este é o treino que você programou para hoje.
+            Treino registrado para hoje. Continue acompanhando sua evolução!
           </Text>
+
           <TouchableOpacity
             style={estilos.botaoPrincipal}
             onPress={onAbrirTreino}
+            activeOpacity={0.8}
           >
             <Text style={estilos.textoBotaoPrincipal}>Abrir meus treinos</Text>
           </TouchableOpacity>
         </>
       ) : (
         <>
-          <Text style={estilos.titulo}>Nenhum treino programado</Text>
+          <Text style={estilos.titulo}>Qual treino você fez hoje?</Text>
           <Text style={estilos.descricao}>
-            Escolha qual treino fazer hoje e organize os dias de descanso.
+            Registre o treino realizado no calendário e acompanhe sua
+            frequência. Você escolhe o treino no próprio dia, sem precisar
+            programar a semana.
           </Text>
         </>
       )}
@@ -136,8 +165,13 @@ export default function TreinoDoDia({
       <TouchableOpacity
         style={estilos.botaoSecundario}
         onPress={onAbrirProgramacao}
+        activeOpacity={0.8}
       >
-        <Text style={estilos.textoBotaoSecundario}>Configurar semana</Text>
+        <Text style={estilos.textoBotaoSecundario}>
+          {treino?.definido
+            ? "Ver calendário ou alterar registro"
+            : "Escolher treino de hoje"}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -158,16 +192,26 @@ const estilos = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 12,
   },
-  textos: { gap: 4 },
+  textos: {
+    gap: 4,
+  },
   rotulo: {
     color: "#70D99A",
     fontSize: 10,
     fontWeight: "800",
     letterSpacing: 1.5,
   },
-  dia: { color: "#A9BFB0", fontSize: 13, textTransform: "capitalize" },
-  emoji: { fontSize: 27 },
-  carregando: { marginVertical: 15 },
+  dia: {
+    color: "#A9BFB0",
+    fontSize: 13,
+    textTransform: "capitalize",
+  },
+  emoji: {
+    fontSize: 27,
+  },
+  carregando: {
+    marginVertical: 15,
+  },
   titulo: {
     color: "#F4F8F5",
     fontSize: 22,
@@ -188,11 +232,19 @@ const estilos = StyleSheet.create({
     alignItems: "center",
     marginBottom: 8,
   },
-  textoBotaoPrincipal: { color: "#101312", fontSize: 14, fontWeight: "800" },
+  textoBotaoPrincipal: {
+    color: "#101312",
+    fontSize: 14,
+    fontWeight: "800",
+  },
   botaoSecundario: {
     alignSelf: "flex-start",
     paddingVertical: 8,
     paddingHorizontal: 2,
   },
-  textoBotaoSecundario: { color: "#7EE3A4", fontSize: 13, fontWeight: "700" },
+  textoBotaoSecundario: {
+    color: "#7EE3A4",
+    fontSize: 13,
+    fontWeight: "700",
+  },
 });
