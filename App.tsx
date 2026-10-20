@@ -5,6 +5,7 @@ import {
   AppState,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StatusBar,
@@ -62,6 +63,8 @@ const CORES_TEMA = [
   "#22D3EE",
   "#FACC15",
 ];
+
+const URL_APLICATIVO = "https://treino-familia-zeta.vercel.app/";
 
 function obterCorTema(valor: unknown): string {
   if (typeof valor === "string" && CORES_TEMA.includes(valor)) {
@@ -317,6 +320,33 @@ export default function App() {
     }
   }
 
+  async function entrarComGoogle() {
+    setEnviando(true);
+
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: URL_APLICATIVO,
+          skipBrowserRedirect: Platform.OS !== "web",
+        },
+      });
+
+      if (error) {
+        Alert.alert("Não foi possível entrar com Google", error.message);
+        return;
+      }
+
+      if (Platform.OS !== "web" && data.url) {
+        await Linking.openURL(data.url);
+      }
+    } catch {
+      Alert.alert("Erro", "Não foi possível iniciar o login com Google.");
+    } finally {
+      setEnviando(false);
+    }
+  }
+
   async function cadastrar() {
     if (!nome.trim()) {
       Alert.alert("Atenção", "Digite seu nome.");
@@ -340,7 +370,7 @@ export default function App() {
         email: email.trim(),
         password: senha,
         options: {
-          emailRedirectTo: "https://treino-familia-zeta.vercel.app/",
+          emailRedirectTo: URL_APLICATIVO,
           data: {
             nome: nome.trim(),
             tema_cor: COR_PADRAO,
@@ -380,7 +410,12 @@ export default function App() {
     setEnviando(true);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        {
+          redirectTo: URL_APLICATIVO,
+        },
+      );
 
       if (error) {
         Alert.alert("Não foi possível enviar", error.message);
@@ -541,15 +576,32 @@ export default function App() {
             </TouchableOpacity>
 
             {modo === "login" && (
-              <TouchableOpacity
-                style={estilos.linkContainer}
-                onPress={() => setModo("recuperar")}
-                disabled={enviando}
-              >
-                <Text style={[estilos.link, { color: corTema }]}>
-                  Esqueci minha senha
-                </Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  style={[
+                    estilos.botaoGoogle,
+                    enviando && estilos.botaoDesabilitado,
+                  ]}
+                  onPress={entrarComGoogle}
+                  disabled={enviando}
+                  activeOpacity={0.8}
+                >
+                  <Text style={estilos.googleLetra}>G</Text>
+                  <Text style={estilos.textoBotaoGoogle}>
+                    Continuar com Google
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={estilos.linkContainer}
+                  onPress={() => setModo("recuperar")}
+                  disabled={enviando}
+                >
+                  <Text style={[estilos.link, { color: corTema }]}>
+                    Esqueci minha senha
+                  </Text>
+                </TouchableOpacity>
+              </>
             )}
 
             <View style={estilos.divisor} />
@@ -597,6 +649,7 @@ export default function App() {
 
   const nomeCompleto =
     sessao.user.user_metadata?.nome ||
+    sessao.user.user_metadata?.full_name ||
     sessao.user.email?.split("@")[0] ||
     "Atleta";
 
@@ -605,7 +658,9 @@ export default function App() {
   const fotoUrl =
     typeof sessao.user.user_metadata?.foto_url === "string"
       ? sessao.user.user_metadata.foto_url
-      : null;
+      : typeof sessao.user.user_metadata?.avatar_url === "string"
+        ? sessao.user.user_metadata.avatar_url
+        : null;
 
   return (
     <NavigationContainer ref={referenciaNavegacao}>
@@ -913,6 +968,27 @@ const estilos = StyleSheet.create({
     color: "#101312",
     fontWeight: "800",
     fontSize: 16,
+  },
+  botaoGoogle: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    marginTop: 14,
+    gap: 10,
+  },
+  googleLetra: {
+    color: "#4285F4",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  textoBotaoGoogle: {
+    color: "#202124",
+    fontSize: 15,
+    fontWeight: "700",
   },
   linkContainer: {
     alignItems: "center",
