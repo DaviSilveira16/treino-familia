@@ -30,11 +30,11 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import Perfil from "./telas/Perfil";
+import Frequencia from "./telas/Frequencia";
 import TreinoDoDia from "./telas/TreinoDoDia";
 import MeusTreinos from "./telas/MeusTreinos";
 import EvolucaoFisica from "./telas/EvolucaoFisica";
 import HistoricoTreinos from "./telas/HistoricoTreinos";
-// import GestoVoltarWeb from "./componentes/GestoVoltarWeb";
 import ProgramacaoSemanal from "./telas/ProgramacaoSemanal";
 
 type ModoAutenticacao = "login" | "cadastro" | "recuperar";
@@ -751,34 +751,9 @@ export default function App() {
         </Pilha.Screen>
 
         <Pilha.Screen name="frequencia">
-          {({ navigation }) => {
-            const tela = telas.find((item) => item.id === "frequencia");
-
-            return (
-              <View style={estilos.container}>
-                <View style={estilos.topoInterno}>
-                  <TouchableOpacity
-                    style={estilos.botaoVoltar}
-                    onPress={() => navigation.goBack()}
-                  >
-                    <Text style={estilos.textoVoltar}>‹ Voltar</Text>
-                  </TouchableOpacity>
-
-                  <Text style={estilos.tituloInterno}>{tela?.titulo}</Text>
-                </View>
-
-                <View style={estilos.conteudoPlaceholder}>
-                  <Text style={estilos.emojiPlaceholder}>{tela?.emoji}</Text>
-
-                  <Text style={estilos.tituloPlaceholder}>{tela?.titulo}</Text>
-
-                  <Text style={estilos.descricaoPlaceholder}>
-                    Esta área será desenvolvida na próxima etapa.
-                  </Text>
-                </View>
-              </View>
-            );
-          }}
+          {({ navigation }) => (
+            <Frequencia onVoltar={() => navigation.goBack()} />
+          )}
         </Pilha.Screen>
       </Pilha.Navigator>
     </NavigationContainer>
