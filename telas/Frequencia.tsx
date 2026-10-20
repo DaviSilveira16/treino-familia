@@ -390,7 +390,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                     style={[
                       estilos.opcaoTreino,
                       selecionado && {
-                        backgroundColor: "#202831",
+                        backgroundColor: `${corTema}20`,
                         borderColor: corTema,
                       },
                     ]}
@@ -502,8 +502,8 @@ const estilos = StyleSheet.create({
     fontWeight: "600",
   },
   cartaoResumo: {
-    backgroundColor: "#1B222A",
-    borderColor: "#303E4D",
+    backgroundColor: "#19251F",
+    borderColor: "#2B4637",
     borderWidth: 1,
     borderRadius: 16,
     padding: 20,
@@ -572,7 +572,7 @@ const estilos = StyleSheet.create({
     borderColor: "transparent",
   },
   diaTreinado: {
-    backgroundColor: "#202831",
+    backgroundColor: "#1D3026",
   },
   diaHoje: {
     borderColor: "#6D8174",

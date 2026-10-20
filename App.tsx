@@ -773,7 +773,6 @@ export default function App() {
               usuario={sessao.user}
               onVoltar={() => navigation.goBack()}
               onTemaAlterado={setCorTema}
-              corTema={corTema}
             />
           )}
         </Pilha.Screen>

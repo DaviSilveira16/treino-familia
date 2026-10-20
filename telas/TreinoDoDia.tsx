@@ -20,6 +20,14 @@ type TreinoHoje = {
   definido: boolean;
 };
 
+function obterCorTransparente(cor: string, transparencia: string) {
+  if (/^#[0-9A-Fa-f]{6}$/.test(cor)) {
+    return `${cor}${transparencia}`;
+  }
+
+  return cor;
+}
+
 function obterInicioDoDia() {
   const data = new Date();
   data.setHours(0, 0, 0, 0);
@@ -116,7 +124,15 @@ export default function TreinoDoDia({
   ];
 
   return (
-    <View style={estilos.cartao}>
+    <View
+      style={[
+        estilos.cartao,
+        {
+          backgroundColor: obterCorTransparente(corTema, "12"),
+          borderColor: obterCorTransparente(corTema, "65"),
+        },
+      ]}
+    >
       <View style={estilos.topo}>
         <View style={estilos.textos}>
           <Text style={[estilos.rotulo, { color: corTema }]}>
@@ -176,8 +192,8 @@ export default function TreinoDoDia({
 
 const estilos = StyleSheet.create({
   cartao: {
-    backgroundColor: "#1A2027",
-    borderColor: "#303E4D",
+    backgroundColor: "#19251F",
+    borderColor: "#2B4637",
     borderWidth: 1,
     borderRadius: 18,
     padding: 18,
@@ -198,7 +214,7 @@ const estilos = StyleSheet.create({
     letterSpacing: 1.5,
   },
   dia: {
-    color: "#A9B5C2",
+    color: "#A9B2AC",
     fontSize: 13,
     textTransform: "capitalize",
   },
@@ -209,13 +225,13 @@ const estilos = StyleSheet.create({
     marginVertical: 15,
   },
   titulo: {
-    color: "#F4F6F8",
+    color: "#F4F6F4",
     fontSize: 22,
     fontWeight: "800",
     marginBottom: 6,
   },
   descricao: {
-    color: "#B8C3CE",
+    color: "#B4C1B8",
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 15,
