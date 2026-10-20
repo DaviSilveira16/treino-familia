@@ -5,7 +5,7 @@ import NetInfo from "@react-native-community/netinfo";
 export const VERSAO_INSTALADA = "1.0.0";
 
 export const URL_VERSOES =
-  "https://SEU-DOMINIO.com/treino-familia/versoes.json";
+  "https://treino-familia.vercel.app/versoes.json";
 
 type VersaoPublicada = {
   versao: string;

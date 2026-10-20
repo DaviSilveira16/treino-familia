@@ -7,3 +7,4 @@ npx expo export --platform web//exportar para vercell
 npm.cmd install //npm
 npx.cmd expo install --fix //expo
 npx.cmd tsc --noEmit //expo 
+npx expo start --clear // iniciar expo

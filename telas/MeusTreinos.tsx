@@ -512,12 +512,92 @@ export default function MeusTreinos({ onVoltar }: Props) {
   async function abrirRegistroCarga(exercicio: Exercicio) {
     setExercicioEditando(null);
     setExercicioParaCarga(exercicio);
-    setSeriesCarga(
-      Array.from({ length: exercicio.sets_goal }, () => ({
-        repeticoes: "",
-        carga: "",
-      })),
-    );
+
+    try {
+      const { data: registros, error: erroRegistros } = await supabase
+        .from("workout_sets")
+        .select("session_id, set_number, reps, weight_kg")
+        .eq("user_id", usuarioId)
+        .eq("exercise_id", exercicio.id);
+
+      if (erroRegistros) {
+        Alert.alert("Erro", "Não foi possível carregar as séries anteriores.");
+
+        setSeriesCarga(
+          Array.from({ length: exercicio.sets_goal }, () => ({
+            repeticoes: "",
+            carga: "",
+          })),
+        );
+
+        return;
+      }
+
+      const idsSessoes = [
+        ...new Set((registros ?? []).map((registro) => registro.session_id)),
+      ].filter(Boolean);
+
+      if (idsSessoes.length === 0) {
+        setSeriesCarga(
+          Array.from({ length: exercicio.sets_goal }, () => ({
+            repeticoes: "",
+            carga: "",
+          })),
+        );
+
+        return;
+      }
+
+      const { data: sessoes, error: erroSessoes } = await supabase
+        .from("workout_sessions")
+        .select("id, started_at")
+        .eq("user_id", usuarioId)
+        .in("id", idsSessoes)
+        .order("started_at", { ascending: false });
+
+      if (erroSessoes) {
+        Alert.alert(
+          "Erro",
+          "Não foi possível localizar o último registro do exercício.",
+        );
+
+        return;
+      }
+
+      const sessoesOrdenadas = sessoes ?? [];
+      const ultimaSessao = sessoesOrdenadas.find((sessao) =>
+        (registros ?? []).some((registro) => registro.session_id === sessao.id),
+      );
+
+      const seriesAnteriores = (registros ?? [])
+        .filter((registro) => registro.session_id === ultimaSessao?.id)
+        .sort((a, b) => a.set_number - b.set_number);
+
+      const quantidadeSeries = Math.max(
+        exercicio.sets_goal,
+        seriesAnteriores.length,
+      );
+
+      setSeriesCarga(
+        Array.from({ length: quantidadeSeries }, (_, indice) => {
+          const serie = seriesAnteriores[indice];
+
+          return {
+            repeticoes: serie?.reps != null ? String(serie.reps) : "",
+            carga: serie?.weight_kg != null ? String(serie.weight_kg) : "",
+          };
+        }),
+      );
+    } catch {
+      Alert.alert("Erro", "Não foi possível carregar as séries anteriores.");
+
+      setSeriesCarga(
+        Array.from({ length: exercicio.sets_goal }, () => ({
+          repeticoes: "",
+          carga: "",
+        })),
+      );
+    }
   }
 
   function atualizarSerieCarga(
@@ -533,7 +613,23 @@ export default function MeusTreinos({ onVoltar }: Props) {
   }
 
   async function salvarCargas() {
-    if (!exercicioParaCarga || !treinoSelecionado || !usuarioId) return;
+    if (!exercicioParaCarga) {
+      mostrarMensagem("Erro", "Nenhum exercício foi selecionado.");
+      return;
+    }
+
+    if (!treinoSelecionado) {
+      mostrarMensagem("Erro", "Nenhum treino foi selecionado.");
+      return;
+    }
+
+    if (!usuarioId) {
+      mostrarMensagem(
+        "Sessão inválida",
+        "Não foi possível identificar sua conta. Saia e entre novamente.",
+      );
+      return;
+    }
     if (
       seriesCarga.length === 0 ||
       seriesCarga.some(
