@@ -4,3 +4,6 @@ git commit -m "Atualiza aplicativo" // 2. Salve as alterações no commit
 //Atenção: confira antes se o .env não será incluído.
 git push// envia pro git hub
 npx expo export --platform web//exportar para vercell
+npm.cmd install //npm
+npx.cmd expo install --fix //expo
+npx.cmd tsc --noEmit //expo 
