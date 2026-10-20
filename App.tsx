@@ -340,6 +340,7 @@ export default function App() {
         email: email.trim(),
         password: senha,
         options: {
+          emailRedirectTo: "https://treino-familia-zeta.vercel.app/",
           data: {
             nome: nome.trim(),
             tema_cor: COR_PADRAO,
