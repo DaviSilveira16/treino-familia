@@ -24,6 +24,25 @@ type Sessao = {
   notes: string | null;
 };
 
+type CardioModelo = {
+  id: string;
+  nome: string;
+  tipo: string;
+  duracao_min: number | null;
+  distancia_km: number | null;
+  calorias: number | null;
+  observacoes: string | null;
+};
+type SessaoCardio = {
+  id: string;
+  activity_name: string;
+  activity_type: string;
+  started_at: string;
+  duration_minutes: number | null;
+  distance_km: number | null;
+  calories: number | null;
+  notes: string | null;
+};
 type Props = {
   onVoltar: () => void;
   corTema?: string;
@@ -65,7 +84,10 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const [dataSelecionada, setDataSelecionada] = useState(dataLocal(hoje));
   const [treinos, setTreinos] = useState<Treino[]>([]);
   const [sessoes, setSessoes] = useState<Sessao[]>([]);
+  const [modelosCardio, setModelosCardio] = useState<CardioModelo[]>([]);
+  const [sessoesCardio, setSessoesCardio] = useState<SessaoCardio[]>([]);
   const [treinoSelecionado, setTreinoSelecionado] = useState("");
+  const [cardioSelecionado, setCardioSelecionado] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
@@ -80,7 +102,12 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         return;
       }
       setUsuarioId(usuario.user.id);
-      const [resultadoTreinos, resultadoSessoes] = await Promise.all([
+      const [
+        resultadoTreinos,
+        resultadoSessoes,
+        resultadoModelosCardio,
+        resultadoSessoesCardio,
+      ] = await Promise.all([
         supabase
           .from("workout_plans")
           .select("id, name")
@@ -89,6 +116,20 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         supabase
           .from("workout_sessions")
           .select("id, plan_id, started_at, notes")
+          .eq("user_id", usuario.user.id)
+          .order("started_at", { ascending: false }),
+        supabase
+          .from("cardio_activities")
+          .select(
+            "id, nome, tipo, duracao_min, distancia_km, calorias, observacoes",
+          )
+          .eq("user_id", usuario.user.id)
+          .order("created_at", { ascending: true }),
+        supabase
+          .from("cardio_sessions")
+          .select(
+            "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, notes",
+          )
           .eq("user_id", usuario.user.id)
           .order("started_at", { ascending: false }),
       ]);
@@ -100,8 +141,24 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         Alert.alert("Erro", resultadoSessoes.error.message);
         return;
       }
+      if (resultadoModelosCardio.error) {
+        Alert.alert(
+          "Erro",
+          `Não foi possível carregar os cardios. Execute o SQL de integração: ${resultadoModelosCardio.error.message}`,
+        );
+        return;
+      }
+      if (resultadoSessoesCardio.error) {
+        Alert.alert(
+          "Erro",
+          `Não foi possível carregar o histórico de cardio: ${resultadoSessoesCardio.error.message}`,
+        );
+        return;
+      }
       setTreinos((resultadoTreinos.data ?? []) as Treino[]);
       setSessoes((resultadoSessoes.data ?? []) as Sessao[]);
+      setModelosCardio((resultadoModelosCardio.data ?? []) as CardioModelo[]);
+      setSessoesCardio((resultadoSessoesCardio.data ?? []) as SessaoCardio[]);
     } catch {
       Alert.alert("Erro", "Não foi possível carregar o calendário.");
     } finally {
@@ -122,22 +179,34 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const sessoesDoDia = sessoes.filter(
     (sessao) => dataDaSessao(sessao.started_at) === dataSelecionada,
   );
-  const diasTreinados = new Set(
-    sessoes
+  const cardiosDoDia = sessoesCardio.filter(
+    (sessao) => dataDaSessao(sessao.started_at) === dataSelecionada,
+  );
+  const diasTreinados = new Set([
+    ...sessoes
       .filter((sessao) => sessao.plan_id !== null)
       .map((sessao) => dataDaSessao(sessao.started_at)),
-  );
-  const sessoesDoMes = sessoes.filter((sessao) => {
-    const data = new Date(sessao.started_at);
-    return (
-      sessao.plan_id !== null &&
-      data.getFullYear() === ano &&
-      data.getMonth() === mes
-    );
-  });
-  const frequenciaMensal = new Set(
-    sessoesDoMes.map((sessao) => dataDaSessao(sessao.started_at)),
-  ).size;
+    ...sessoesCardio.map((sessao) => dataDaSessao(sessao.started_at)),
+  ]);
+  const datasDoMes = [
+    ...sessoes
+      .filter((sessao) => {
+        const data = new Date(sessao.started_at);
+        return (
+          sessao.plan_id !== null &&
+          data.getFullYear() === ano &&
+          data.getMonth() === mes
+        );
+      })
+      .map((sessao) => dataDaSessao(sessao.started_at)),
+    ...sessoesCardio
+      .filter((sessao) => {
+        const data = new Date(sessao.started_at);
+        return data.getFullYear() === ano && data.getMonth() === mes;
+      })
+      .map((sessao) => dataDaSessao(sessao.started_at)),
+  ];
+  const frequenciaMensal = new Set(datasDoMes).size;
   function mudarMes(direcao: number) {
     setMesAtual(new Date(ano, mes + direcao, 1));
   }
@@ -332,6 +401,67 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setSalvando(false);
     }
   }
+  async function registrarCardio() {
+    if (!usuarioId || !cardioSelecionado || !dataSelecionada) {
+      Alert.alert("Atenção", "Selecione um cardio para registrar.");
+      return;
+    }
+    if (dataSelecionada > dataLocal(new Date())) {
+      Alert.alert(
+        "Data inválida",
+        "Você não pode registrar cardio em uma data futura.",
+      );
+      return;
+    }
+    const modelo = modelosCardio.find((item) => item.id === cardioSelecionado);
+    if (!modelo) {
+      Alert.alert("Erro", "O cardio selecionado não foi encontrado.");
+      return;
+    }
+    setSalvando(true);
+    try {
+      const [anoSelecionado, mesSelecionado, diaSelecionado] = dataSelecionada
+        .split("-")
+        .map(Number);
+      const dataRegistro = new Date(
+        anoSelecionado,
+        mesSelecionado - 1,
+        diaSelecionado,
+        12,
+        0,
+        0,
+        0,
+      ).toISOString();
+      const { error } = await supabase.from("cardio_sessions").insert({
+        user_id: usuarioId,
+        activity_id: modelo.id,
+        activity_name: modelo.nome,
+        activity_type: modelo.tipo,
+        started_at: dataRegistro,
+        duration_minutes: modelo.duracao_min,
+        distance_km: modelo.distancia_km,
+        calories: modelo.calorias,
+        notes: modelo.observacoes,
+      });
+      if (error) throw error;
+      setCardioSelecionado("");
+      await carregarDados();
+      Alert.alert(
+        "Cardio registrado",
+        "A sessão foi salva no histórico com uma cópia dos valores atuais.",
+      );
+    } catch (erro) {
+      Alert.alert(
+        "Erro ao registrar cardio",
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível salvar o cardio.",
+      );
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   async function excluirRegistroDoDia() {
     if (!usuarioId || sessoesDoDia.length === 0) {
       setMensagemStatus("Não há registro para excluir nesta data.");
@@ -373,12 +503,26 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
 
       if (error) {
         setMensagemStatus(
-          `Não foi possível excluir o registro. Pode haver cargas vinculadas. Detalhes: ${error.message}`,
+          `Não foi possível excluir o treino. Detalhes: ${error.message}`,
         );
+        return;
+      }
+      const { error: erroCardios } = await supabase
+        .from("cardio_sessions")
+        .delete()
+        .eq("user_id", usuarioId)
+        .gte("started_at", inicioDia)
+        .lt("started_at", fimDia);
+      if (erroCardios) {
+        setMensagemStatus(
+          `O treino foi excluído, mas não foi possível excluir os cardios: ${erroCardios.message}`,
+        );
+        await carregarDados();
         return;
       }
 
       setTreinoSelecionado("");
+      setCardioSelecionado("");
       setConfirmandoExclusao(false);
       await carregarDados();
       setMensagemStatus(
@@ -412,10 +556,10 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           </Text>
         </TouchableOpacity>
         <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
-        <Text style={estilos.titulo}>Frequência de treino</Text>
+        <Text style={estilos.titulo}>Frequência</Text>
         <Text style={estilos.subtitulo}>
-          Registre os treinos que você realmente realizou. Você escolhe o dia e
-          o treino, sem precisar definir uma semana fixa.
+          Registre a musculação e o cardio que realmente realizou em cada data.
+          Você pode registrar os dois no mesmo dia.
         </Text>
         <View style={estilos.cartaoResumo}>
           <Text style={[estilos.resumoNumero, { color: corTema }]}>
@@ -606,6 +750,102 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                     </Text>
                   );
                 })}
+            </View>
+          ) : null}
+          {cardiosDoDia.length > 0 ? (
+            <View style={estilos.treinosDoDia}>
+              <Text style={estilos.rotulo}>Cardios registrados neste dia</Text>
+              {cardiosDoDia.map((cardio) => (
+                <Text
+                  key={cardio.id}
+                  style={[estilos.textoTreinoDoDia, { color: corTema }]}
+                >
+                  ✓ {cardio.activity_name}
+                  {cardio.duration_minutes != null
+                    ? ` · ${cardio.duration_minutes} min`
+                    : ""}
+                  {cardio.distance_km != null
+                    ? ` · ${cardio.distance_km} km`
+                    : ""}
+                  {cardio.calories != null ? ` · ${cardio.calories} kcal` : ""}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+          <View style={[estilos.cartaoRegistro, { marginTop: 16 }]}>
+            <Text style={estilos.tituloRegistro}>Registrar cardio</Text>
+            <Text style={[estilos.dataRegistro, { color: corTema }]}>
+              {new Date(`${dataSelecionada}T12:00:00`).toLocaleDateString(
+                "pt-BR",
+                {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                },
+              )}
+            </Text>
+            {modelosCardio.length === 0 ? (
+              <Text style={estilos.textoSecundario}>
+                Você ainda não cadastrou cardios. Acesse Meus Cardios para criar
+                um modelo.
+              </Text>
+            ) : (
+              <>
+                <Text style={estilos.rotulo}>Qual cardio você realizou?</Text>
+                {modelosCardio.map((cardio) => {
+                  const selecionado = cardioSelecionado === cardio.id;
+                  return (
+                    <TouchableOpacity
+                      key={cardio.id}
+                      style={[
+                        estilos.opcaoTreino,
+                        selecionado && {
+                          backgroundColor: `${corTema}20`,
+                          borderColor: corTema,
+                        },
+                      ]}
+                      onPress={() => setCardioSelecionado(cardio.id)}
+                    >
+                      <Text
+                        style={[
+                          estilos.textoOpcao,
+                          selecionado && estilos.textoOpcaoSelecionada,
+                        ]}
+                      >
+                        {selecionado ? "✓  " : ""}
+                        {cardio.nome} · {cardio.tipo}
+                        {cardio.duracao_min != null
+                          ? ` · ${cardio.duracao_min} min`
+                          : ""}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                <TouchableOpacity
+                  style={[
+                    estilos.botaoSalvar,
+                    { backgroundColor: corTema },
+                    (salvando || !cardioSelecionado) &&
+                      estilos.botaoDesabilitado,
+                  ]}
+                  onPress={registrarCardio}
+                  disabled={salvando || !cardioSelecionado}
+                >
+                  {salvando ? (
+                    <ActivityIndicator color="#101312" />
+                  ) : (
+                    <Text style={estilos.textoBotaoSalvar}>
+                      Confirmar cardio
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+          {sessoesDoDia.some((sessao) => sessao.plan_id !== null) ||
+          cardiosDoDia.length > 0 ? (
+            <View style={estilos.treinosDoDia}>
               <TouchableOpacity
                 style={[
                   estilos.botaoExcluirRegistro,
@@ -624,8 +864,8 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
               {confirmandoExclusao ? (
                 <View style={estilos.confirmacaoExclusao}>
                   <Text style={estilos.textoSecundario}>
-                    Tem certeza que deseja excluir os registros deste dia? Essa
-                    ação também os remove do histórico.
+                    Tem certeza que deseja excluir os registros de musculação e
+                    cardio desta data? Eles também serão removidos do histórico.
                   </Text>
                   <View style={estilos.acoesConfirmacao}>
                     <TouchableOpacity

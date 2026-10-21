@@ -47,6 +47,16 @@ type TreinoHistorico = SessaoTreino & {
   nomeTreino: string;
   series: SerieTreino[];
 };
+type SessaoCardioHistorico = {
+  id: string;
+  activity_name: string;
+  activity_type: string;
+  started_at: string;
+  duration_minutes: number | null;
+  distance_km: number | null;
+  calories: number | null;
+  notes: string | null;
+};
 type Props = {
   onVoltar: () => void;
   corTema?: string;
@@ -92,6 +102,9 @@ export default function HistoricoTreinos({
   corTema = "#35D07F",
 }: Props) {
   const [historico, setHistorico] = useState<TreinoHistorico[]>([]);
+  const [historicoCardio, setHistoricoCardio] = useState<
+    SessaoCardioHistorico[]
+  >([]);
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
   const [sessaoExpandida, setSessaoExpandida] = useState<string | null>(null);
@@ -107,6 +120,21 @@ export default function HistoricoTreinos({
         return;
       }
       const usuarioId = usuarioData.user.id;
+      const { data: cardios, error: erroCardios } = await supabase
+        .from("cardio_sessions")
+        .select(
+          "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, notes",
+        )
+        .eq("user_id", usuarioId)
+        .order("started_at", { ascending: false });
+      if (erroCardios) {
+        Alert.alert(
+          "Erro",
+          `Não foi possível carregar o histórico de cardio: ${erroCardios.message}`,
+        );
+        return;
+      }
+      setHistoricoCardio((cardios ?? []) as SessaoCardioHistorico[]);
       const { data: sessoes, error: erroSessoes } = await supabase
         .from("workout_sessions")
         .select("id, plan_id, started_at, finished_at, notes")
@@ -687,6 +715,80 @@ export default function HistoricoTreinos({
             })}
           </View>
         )}
+        <View style={{ marginTop: 28 }}>
+          <Text style={[estilos.titulo, { fontSize: 22, marginBottom: 8 }]}>
+            Histórico de cardio
+          </Text>
+          <Text style={estilos.subtitulo}>
+            Cada sessão preserva os valores registrados naquela data.
+          </Text>
+          {historicoCardio.length === 0 ? (
+            <View style={estilos.vazio}>
+              <Text style={estilos.vazioEmoji}>❤️‍🔥</Text>
+              <Text style={estilos.vazioTitulo}>Nenhum cardio registrado</Text>
+              <Text style={estilos.vazioDescricao}>
+                Registre uma sessão na área Frequência para vê-la aqui.
+              </Text>
+            </View>
+          ) : (
+            historicoCardio.map((cardio) => (
+              <View
+                key={cardio.id}
+                style={[estilos.cartao, { padding: 18, marginBottom: 12 }]}
+              >
+                <Text style={estilos.nomeTreino}>{cardio.activity_name}</Text>
+                <Text style={estilos.data}>
+                  {formatarData(cardio.started_at)}
+                </Text>
+                <Text style={estilos.hora}>{cardio.activity_type}</Text>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    marginTop: 12,
+                  }}
+                >
+                  {cardio.duration_minutes != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      {cardio.duration_minutes} min
+                    </Text>
+                  ) : null}
+                  {cardio.distance_km != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      {formatarCarga(Number(cardio.distance_km))} km
+                    </Text>
+                  ) : null}
+                  {cardio.calories != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      {formatarCarga(Number(cardio.calories))} kcal
+                    </Text>
+                  ) : null}
+                </View>
+                {cardio.notes ? (
+                  <Text style={estilos.observacoes}>
+                    Observação: {cardio.notes}
+                  </Text>
+                ) : null}
+              </View>
+            ))
+          )}
+        </View>
       </ScrollView>
     </View>
   );
