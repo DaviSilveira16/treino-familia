@@ -12,7 +12,6 @@ import {
   Platform,
 } from "react-native";
 import { supabase } from "../supabase";
-
 const estiloRolagemWeb =
   Platform.OS === "web"
     ? ({
@@ -22,7 +21,6 @@ const estiloRolagemWeb =
         WebkitOverflowScrolling: "touch",
       } as any)
     : { flex: 1, minHeight: 0 };
-
 type SessaoTreino = {
   id: string;
   plan_id: string | null;
@@ -30,7 +28,6 @@ type SessaoTreino = {
   finished_at: string | null;
   notes: string | null;
 };
-
 type SerieTreino = {
   id: string;
   session_id: string;
@@ -41,22 +38,22 @@ type SerieTreino = {
   weight_kg: number;
   progressoCarga?: number;
   progressoReps?: number;
+  mudou?: boolean;
+  serieNova?: boolean;
+  diferencaCarga?: number;
+  diferencaReps?: number;
 };
-
 type TreinoHistorico = SessaoTreino & {
   nomeTreino: string;
   series: SerieTreino[];
 };
-
 type Props = {
   onVoltar: () => void;
   corTema?: string;
 };
-
 function formatarData(valor: string) {
   const data = new Date(valor);
   if (Number.isNaN(data.getTime())) return "Data não disponível";
-
   return data.toLocaleDateString("pt-BR", {
     weekday: "long",
     day: "2-digit",
@@ -64,38 +61,32 @@ function formatarData(valor: string) {
     year: "numeric",
   });
 }
-
 function formatarHora(valor: string) {
   const data = new Date(valor);
   if (Number.isNaN(data.getTime())) return "";
-
   return data.toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
   });
 }
-
 function formatarCarga(valor: number) {
   return Number(valor).toLocaleString("pt-BR", {
     maximumFractionDigits: 2,
   });
 }
-
 function chaveExercicio(serie: SerieTreino) {
+  if (serie.exercise_id) return `id:${serie.exercise_id}`;
   return (
     serie.exercise_name?.trim().toLocaleLowerCase("pt-BR") ||
     "exercício sem nome"
   );
 }
-
 function corComTransparencia(cor: string, transparencia: string) {
   if (/^#[0-9a-fA-F]{6}$/.test(cor)) {
     return `${cor}${transparencia}`;
   }
-
   return cor;
 }
-
 export default function HistoricoTreinos({
   onVoltar,
   corTema = "#35D07F",
@@ -104,29 +95,23 @@ export default function HistoricoTreinos({
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
   const [sessaoExpandida, setSessaoExpandida] = useState<string | null>(null);
-
   const carregarHistorico = useCallback(async (atualizacao = false) => {
     if (atualizacao) setAtualizando(true);
     else setCarregando(true);
-
     try {
       const { data: usuarioData, error: erroUsuario } =
         await supabase.auth.getUser();
-
       if (erroUsuario || !usuarioData.user) {
         Alert.alert("Sessão inválida", "Entre novamente na sua conta.");
         setHistorico([]);
         return;
       }
-
       const usuarioId = usuarioData.user.id;
-
       const { data: sessoes, error: erroSessoes } = await supabase
         .from("workout_sessions")
         .select("id, plan_id, started_at, finished_at, notes")
         .eq("user_id", usuarioId)
         .order("started_at", { ascending: false });
-
       if (erroSessoes) {
         Alert.alert(
           "Erro",
@@ -134,14 +119,11 @@ export default function HistoricoTreinos({
         );
         return;
       }
-
       const listaSessoes = (sessoes ?? []) as SessaoTreino[];
-
       if (listaSessoes.length === 0) {
         setHistorico([]);
         return;
       }
-
       const idsSessoes = listaSessoes.map((sessao) => sessao.id);
       const idsPlanos = Array.from(
         new Set(
@@ -150,7 +132,6 @@ export default function HistoricoTreinos({
             .filter((id): id is string => Boolean(id)),
         ),
       );
-
       const [resultadoSeries, resultadoPlanos] = await Promise.all([
         supabase
           .from("workout_sets")
@@ -168,7 +149,6 @@ export default function HistoricoTreinos({
               .in("id", idsPlanos)
           : Promise.resolve({ data: [], error: null }),
       ]);
-
       if (resultadoSeries.error) {
         Alert.alert(
           "Erro",
@@ -176,7 +156,6 @@ export default function HistoricoTreinos({
         );
         return;
       }
-
       if (resultadoPlanos.error) {
         Alert.alert(
           "Erro",
@@ -184,17 +163,14 @@ export default function HistoricoTreinos({
         );
         return;
       }
-
       const series = (resultadoSeries.data ?? []) as SerieTreino[];
       const planos = (resultadoPlanos.data ?? []) as {
         id: string;
         name: string;
       }[];
-
       const nomesPlanos = new Map(
         planos.map((plano) => [plano.id, plano.name]),
       );
-
       const resultado: TreinoHistorico[] = listaSessoes.map((sessao) => ({
         ...sessao,
         nomeTreino: sessao.plan_id
@@ -204,56 +180,51 @@ export default function HistoricoTreinos({
           .filter((serie) => serie.session_id === sessao.id)
           .map((serie) => ({ ...serie })),
       }));
-
       const ordemCronologica = [...resultado].sort(
         (a, b) =>
           new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
       );
-
       const ultimasSeriesPorExercicio = new Map<string, SerieTreino[]>();
-
       for (const sessao of ordemCronologica) {
         const gruposExercicios = new Map<string, SerieTreino[]>();
-
         for (const serie of sessao.series) {
-          const chave = chaveExercicio(serie);
+          const chave = `${sessao.plan_id ?? "sem-plano"}::${chaveExercicio(serie)}`;
           const grupo = gruposExercicios.get(chave) ?? [];
           grupo.push(serie);
           gruposExercicios.set(chave, grupo);
         }
-
         for (const [chave, seriesAtuais] of gruposExercicios) {
           const seriesAnteriores = ultimasSeriesPorExercicio.get(chave) ?? [];
-
           for (const serieAtual of seriesAtuais) {
             const serieAnterior = seriesAnteriores.find(
-              (serie) => serie.set_number === serieAtual.set_number,
+              (serie) =>
+                Number(serie.set_number) === Number(serieAtual.set_number),
             );
-
-            if (!serieAnterior) continue;
-
+            if (!serieAnterior) {
+              serieAtual.serieNova = true;
+              serieAtual.mudou = true;
+              continue;
+            }
             const diferencaCarga =
               Number(serieAtual.weight_kg) - Number(serieAnterior.weight_kg);
-
             const diferencaReps =
               Number(serieAtual.reps) - Number(serieAnterior.reps);
-
+            serieAtual.diferencaCarga = diferencaCarga;
+            serieAtual.diferencaReps = diferencaReps;
+            serieAtual.mudou = diferencaCarga !== 0 || diferencaReps !== 0;
             if (diferencaCarga > 0) {
               serieAtual.progressoCarga = diferencaCarga;
             }
-
             if (diferencaReps > 0) {
               serieAtual.progressoReps = diferencaReps;
             }
           }
-
           ultimasSeriesPorExercicio.set(
             chave,
             seriesAtuais.map((serie) => ({ ...serie })),
           );
         }
       }
-
       setHistorico(resultado);
     } catch {
       Alert.alert(
@@ -265,15 +236,12 @@ export default function HistoricoTreinos({
       setAtualizando(false);
     }
   }, []);
-
   useEffect(() => {
     carregarHistorico();
   }, [carregarHistorico]);
-
   function alternarDetalhes(id: string) {
     setSessaoExpandida((atual) => (atual === id ? null : id));
   }
-
   if (carregando) {
     return (
       <View style={estilos.centralizado}>
@@ -283,11 +251,9 @@ export default function HistoricoTreinos({
       </View>
     );
   }
-
   return (
     <View style={estilos.container}>
       <StatusBar barStyle="light-content" backgroundColor="#101312" />
-
       <ScrollView
         style={estiloRolagemWeb}
         contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}
@@ -306,13 +272,12 @@ export default function HistoricoTreinos({
             ‹ Voltar
           </Text>
         </TouchableOpacity>
-
         <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
         <Text style={estilos.titulo}>Histórico de treinos</Text>
         <Text style={estilos.subtitulo}>
-          Acompanhe suas cargas, repetições e evoluções em cada exercício.
+          Veja seus treinos registrados, o volume total e apenas as séries novas
+          ou diferentes da última vez que você fez cada exercício.
         </Text>
-
         <View
           style={[
             estilos.resumo,
@@ -331,7 +296,6 @@ export default function HistoricoTreinos({
               : "registros encontrados"}
           </Text>
         </View>
-
         <View
           style={[
             estilos.legendaProgresso,
@@ -349,8 +313,11 @@ export default function HistoricoTreinos({
             </Text>{" "}
             aumento de repetições
           </Text>
+          <Text style={estilos.legendaTexto}>
+            Séries novas e reduções de carga ou repetições também são
+            destacadas.
+          </Text>
         </View>
-
         {historico.length === 0 ? (
           <View style={estilos.vazio}>
             <Text style={estilos.vazioEmoji}>📋</Text>
@@ -366,7 +333,7 @@ export default function HistoricoTreinos({
           <View style={estilos.lista}>
             {historico.map((sessao) => {
               const expandida = sessaoExpandida === sessao.id;
-              const exercicios = Array.from(
+              const todosExercicios = Array.from(
                 new Set(
                   sessao.series.map(
                     (serie) =>
@@ -374,24 +341,31 @@ export default function HistoricoTreinos({
                   ),
                 ),
               );
-
+              const seriesExibidas = sessao.series.filter(
+                (serie) => serie.mudou,
+              );
+              const exercicios = Array.from(
+                new Set(
+                  seriesExibidas.map(
+                    (serie) =>
+                      serie.exercise_name?.trim() || "Exercício sem nome",
+                  ),
+                ),
+              );
               const volumeTotal = sessao.series.reduce(
                 (total, serie) =>
                   total +
                   Number(serie.weight_kg || 0) * Number(serie.reps || 0),
                 0,
               );
-
               const seriesComProgresso = sessao.series.filter(
                 (serie) =>
                   (serie.progressoCarga ?? 0) > 0 ||
                   (serie.progressoReps ?? 0) > 0,
               );
-
               const quantidadeExerciciosComProgresso = new Set(
                 seriesComProgresso.map(chaveExercicio),
               ).size;
-
               return (
                 <View key={sessao.id} style={estilos.cartao}>
                   <TouchableOpacity
@@ -409,7 +383,6 @@ export default function HistoricoTreinos({
                     >
                       <Text style={estilos.iconeDataTexto}>📅</Text>
                     </View>
-
                     <View style={estilos.informacoesCartao}>
                       <Text style={estilos.nomeTreino}>
                         {sessao.nomeTreino}
@@ -425,14 +398,15 @@ export default function HistoricoTreinos({
                           : ""}
                       </Text>
                       <Text style={[estilos.resumoSessao, { color: corTema }]}>
-                        {exercicios.length}{" "}
-                        {exercicios.length === 1 ? "exercício" : "exercícios"} ·{" "}
-                        {sessao.series.length}{" "}
+                        {todosExercicios.length}{" "}
+                        {todosExercicios.length === 1
+                          ? "exercício"
+                          : "exercícios"}{" "}
+                        · {sessao.series.length}{" "}
                         {sessao.series.length === 1
                           ? "série registrada"
                           : "séries registradas"}
                       </Text>
-
                       {seriesComProgresso.length > 0 && (
                         <View
                           style={[
@@ -460,34 +434,35 @@ export default function HistoricoTreinos({
                         </View>
                       )}
                     </View>
-
                     <Text style={[estilos.seta, { color: corTema }]}>
                       {expandida ? "⌃" : "⌄"}
                     </Text>
                   </TouchableOpacity>
-
                   {expandida && (
                     <View style={estilos.detalhes}>
                       {sessao.series.length === 0 ? (
                         <Text style={estilos.semSeries}>
                           Este registro não possui séries salvas.
                         </Text>
+                      ) : seriesExibidas.length === 0 ? (
+                        <Text style={estilos.semSeries}>
+                          Nenhuma série mudou em relação à última vez que você
+                          fez cada exercício. O volume abaixo considera todas as
+                          séries deste treino.
+                        </Text>
                       ) : (
                         exercicios.map((nomeExercicio) => {
-                          const seriesExercicio = sessao.series.filter(
+                          const seriesExercicio = seriesExibidas.filter(
                             (serie) =>
                               (serie.exercise_name?.trim() ||
                                 "Exercício sem nome") === nomeExercicio,
                           );
-
                           const teveProgressoCarga = seriesExercicio.some(
                             (serie) => (serie.progressoCarga ?? 0) > 0,
                           );
-
                           const teveProgressoReps = seriesExercicio.some(
                             (serie) => (serie.progressoReps ?? 0) > 0,
                           );
-
                           return (
                             <View
                               key={`${sessao.id}-${nomeExercicio}`}
@@ -496,7 +471,6 @@ export default function HistoricoTreinos({
                               <Text style={estilos.nomeExercicio}>
                                 {nomeExercicio}
                               </Text>
-
                               {(teveProgressoCarga || teveProgressoReps) && (
                                 <View
                                   style={[
@@ -571,7 +545,6 @@ export default function HistoricoTreinos({
                                   </View>
                                 </View>
                               )}
-
                               <View style={estilos.linhaTabela}>
                                 <Text
                                   style={[
@@ -588,7 +561,6 @@ export default function HistoricoTreinos({
                                   Carga (kg)
                                 </Text>
                               </View>
-
                               {seriesExercicio.map((serie) => (
                                 <View
                                   key={serie.id}
@@ -611,12 +583,11 @@ export default function HistoricoTreinos({
                                   >
                                     {serie.set_number}
                                   </Text>
-
                                   <View style={estilos.celulaComProgresso}>
                                     <Text
                                       style={[
                                         estilos.celula,
-                                        (serie.progressoReps ?? 0) > 0 && {
+                                        serie.mudou && {
                                           color: corTema,
                                           fontWeight: "900",
                                         },
@@ -624,23 +595,43 @@ export default function HistoricoTreinos({
                                     >
                                       {serie.reps}
                                     </Text>
-                                    {(serie.progressoReps ?? 0) > 0 && (
+                                    {serie.diferencaReps !== undefined &&
+                                      serie.diferencaReps !== 0 && (
+                                        <Text
+                                          style={[
+                                            estilos.indicadorProgresso,
+                                            {
+                                              color:
+                                                serie.diferencaReps > 0
+                                                  ? corTema
+                                                  : "#F29B9B",
+                                            },
+                                          ]}
+                                        >
+                                          {serie.diferencaReps > 0
+                                            ? "↑ +"
+                                            : "↓ "}
+                                          {formatarCarga(
+                                            Math.abs(serie.diferencaReps),
+                                          )}
+                                        </Text>
+                                      )}
+                                    {serie.serieNova && (
                                       <Text
                                         style={[
                                           estilos.indicadorProgresso,
                                           { color: corTema },
                                         ]}
                                       >
-                                        ↑ +{formatarCarga(serie.progressoReps!)}
+                                        NOVA
                                       </Text>
                                     )}
                                   </View>
-
                                   <View style={estilos.celulaComProgresso}>
                                     <Text
                                       style={[
                                         estilos.celula,
-                                        (serie.progressoCarga ?? 0) > 0 && {
+                                        serie.mudou && {
                                           color: corTema,
                                           fontWeight: "900",
                                         },
@@ -648,18 +639,28 @@ export default function HistoricoTreinos({
                                     >
                                       {formatarCarga(Number(serie.weight_kg))}
                                     </Text>
-                                    {(serie.progressoCarga ?? 0) > 0 && (
-                                      <Text
-                                        style={[
-                                          estilos.indicadorProgresso,
-                                          { color: corTema },
-                                        ]}
-                                      >
-                                        ↑ +
-                                        {formatarCarga(serie.progressoCarga!)}{" "}
-                                        kg
-                                      </Text>
-                                    )}
+                                    {serie.diferencaCarga !== undefined &&
+                                      serie.diferencaCarga !== 0 && (
+                                        <Text
+                                          style={[
+                                            estilos.indicadorProgresso,
+                                            {
+                                              color:
+                                                serie.diferencaCarga > 0
+                                                  ? corTema
+                                                  : "#F29B9B",
+                                            },
+                                          ]}
+                                        >
+                                          {serie.diferencaCarga > 0
+                                            ? "↑ +"
+                                            : "↓ "}
+                                          {formatarCarga(
+                                            Math.abs(serie.diferencaCarga),
+                                          )}{" "}
+                                          kg
+                                        </Text>
+                                      )}
                                   </View>
                                 </View>
                               ))}
@@ -667,7 +668,6 @@ export default function HistoricoTreinos({
                           );
                         })
                       )}
-
                       <View
                         style={[
                           estilos.rodapeDetalhes,
@@ -683,7 +683,6 @@ export default function HistoricoTreinos({
                           {formatarCarga(volumeTotal)} kg × repetições
                         </Text>
                       </View>
-
                       {sessao.notes ? (
                         <Text style={estilos.observacoes}>
                           Observação: {sessao.notes}
@@ -700,7 +699,6 @@ export default function HistoricoTreinos({
     </View>
   );
 }
-
 const estilos = StyleSheet.create({
   container: {
     flex: 1,

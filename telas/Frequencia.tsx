@@ -173,22 +173,63 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     setSalvando(true);
 
     try {
-      const sessaoExistente = sessoes.find(
-        (sessao) =>
-          sessao.plan_id === treinoSelecionado &&
-          dataDaSessao(sessao.started_at) === dataSelecionada,
-      );
+      const [anoSelecionado, mesSelecionado, diaSelecionado] = dataSelecionada
+        .split("-")
+        .map(Number);
 
-      if (sessaoExistente) {
+      const inicioDia = new Date(
+        anoSelecionado,
+        mesSelecionado - 1,
+        diaSelecionado,
+        0,
+        0,
+        0,
+        0,
+      ).toISOString();
+
+      const fimDia = new Date(
+        anoSelecionado,
+        mesSelecionado - 1,
+        diaSelecionado + 1,
+        0,
+        0,
+        0,
+        0,
+      ).toISOString();
+
+      const { data: sessoesExistentes, error: erroConsulta } = await supabase
+        .from("workout_sessions")
+        .select("id, plan_id, started_at")
+        .eq("user_id", usuarioId)
+        .eq("plan_id", treinoSelecionado)
+        .gte("started_at", inicioDia)
+        .lt("started_at", fimDia);
+
+      if (erroConsulta) {
+        Alert.alert(
+          "Erro ao verificar treino",
+          "Não foi possível confirmar se esse treino já foi registrado. Tente novamente.",
+        );
+        return;
+      }
+
+      if ((sessoesExistentes ?? []).length > 0) {
+        await carregarDados();
         Alert.alert(
           "Treino já registrado",
-          "Esse treino já aparece no histórico dessa data.",
+          "Esse treino já aparece no histórico dessa data. Nenhum registro foi alterado.",
         );
         return;
       }
 
       const dataRegistro = new Date(
-        `${dataSelecionada}T12:00:00`,
+        anoSelecionado,
+        mesSelecionado - 1,
+        diaSelecionado,
+        12,
+        0,
+        0,
+        0,
       ).toISOString();
 
       const { error } = await supabase.from("workout_sessions").insert({
