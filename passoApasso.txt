@@ -8,3 +8,4 @@ npm.cmd install //npm
 npx.cmd expo install --fix //expo
 npx.cmd tsc --noEmit //expo 
 npx expo start --clear  // iniciar expo
+npx.cmd expo export --platform web//expo
