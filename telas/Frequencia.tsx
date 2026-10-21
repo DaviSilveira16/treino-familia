@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+
 import {
   ActivityIndicator,
   Alert,
@@ -8,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
 import { supabase } from "../supabase";
 
 type Treino = {
@@ -50,14 +52,12 @@ function dataLocal(data: Date) {
   const dia = String(data.getDate()).padStart(2, "0");
   return `${ano}-${mes}-${dia}`;
 }
-
 function dataDaSessao(valor: string) {
   return dataLocal(new Date(valor));
 }
 
 export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const hoje = new Date();
-
   const [usuarioId, setUsuarioId] = useState("");
   const [mesAtual, setMesAtual] = useState(
     new Date(hoje.getFullYear(), hoje.getMonth(), 1),
@@ -68,21 +68,16 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const [treinoSelecionado, setTreinoSelecionado] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
-
   const carregarDados = useCallback(async () => {
     setCarregando(true);
-
     try {
       const { data: usuario, error: erroUsuario } =
         await supabase.auth.getUser();
-
       if (erroUsuario || !usuario.user) {
         Alert.alert("Sessão inválida", "Entre novamente na sua conta.");
         return;
       }
-
       setUsuarioId(usuario.user.id);
-
       const [resultadoTreinos, resultadoSessoes] = await Promise.all([
         supabase
           .from("workout_plans")
@@ -95,17 +90,14 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           .eq("user_id", usuario.user.id)
           .order("started_at", { ascending: false }),
       ]);
-
       if (resultadoTreinos.error) {
         Alert.alert("Erro", resultadoTreinos.error.message);
         return;
       }
-
       if (resultadoSessoes.error) {
         Alert.alert("Erro", resultadoSessoes.error.message);
         return;
       }
-
       setTreinos((resultadoTreinos.data ?? []) as Treino[]);
       setSessoes((resultadoSessoes.data ?? []) as Sessao[]);
     } catch {
@@ -114,31 +106,25 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setCarregando(false);
     }
   }, []);
-
   useEffect(() => {
     carregarDados();
   }, [carregarDados]);
-
   const ano = mesAtual.getFullYear();
   const mes = mesAtual.getMonth();
   const primeiroDia = new Date(ano, mes, 1).getDay();
   const quantidadeDias = new Date(ano, mes + 1, 0).getDate();
-
   const diasDoCalendario = [
     ...Array.from({ length: primeiroDia }, () => null),
     ...Array.from({ length: quantidadeDias }, (_, indice) => indice + 1),
   ];
-
   const sessoesDoDia = sessoes.filter(
     (sessao) => dataDaSessao(sessao.started_at) === dataSelecionada,
   );
-
   const diasTreinados = new Set(
     sessoes
       .filter((sessao) => sessao.plan_id !== null)
       .map((sessao) => dataDaSessao(sessao.started_at)),
   );
-
   const sessoesDoMes = sessoes.filter((sessao) => {
     const data = new Date(sessao.started_at);
     return (
@@ -147,21 +133,17 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       data.getMonth() === mes
     );
   });
-
   const frequenciaMensal = new Set(
     sessoesDoMes.map((sessao) => dataDaSessao(sessao.started_at)),
   ).size;
-
   function mudarMes(direcao: number) {
     setMesAtual(new Date(ano, mes + direcao, 1));
   }
-
   async function registrarTreino() {
     if (!usuarioId || !treinoSelecionado || !dataSelecionada) {
       Alert.alert("Atenção", "Selecione um treino para registrar.");
       return;
     }
-
     if (dataSelecionada > dataLocal(new Date())) {
       Alert.alert(
         "Data inválida",
@@ -169,14 +151,11 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       );
       return;
     }
-
     setSalvando(true);
-
     try {
       const [anoSelecionado, mesSelecionado, diaSelecionado] = dataSelecionada
         .split("-")
         .map(Number);
-
       const inicioDia = new Date(
         anoSelecionado,
         mesSelecionado - 1,
@@ -186,7 +165,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         0,
         0,
       ).toISOString();
-
       const fimDia = new Date(
         anoSelecionado,
         mesSelecionado - 1,
@@ -196,15 +174,12 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         0,
         0,
       ).toISOString();
-
       const { data: sessoesExistentes, error: erroConsulta } = await supabase
         .from("workout_sessions")
         .select("id, plan_id, started_at")
         .eq("user_id", usuarioId)
-        .eq("plan_id", treinoSelecionado)
         .gte("started_at", inicioDia)
         .lt("started_at", fimDia);
-
       if (erroConsulta) {
         Alert.alert(
           "Erro ao verificar treino",
@@ -212,16 +187,14 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         );
         return;
       }
-
       if ((sessoesExistentes ?? []).length > 0) {
         await carregarDados();
         Alert.alert(
           "Treino já registrado",
-          "Esse treino já aparece no histórico dessa data. Nenhum registro foi alterado.",
+          "Já existe um treino registrado nessa data. Exclua o registro atual antes de escolher outro.",
         );
         return;
       }
-
       const dataRegistro = new Date(
         anoSelecionado,
         mesSelecionado - 1,
@@ -231,7 +204,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         0,
         0,
       ).toISOString();
-
       const { error } = await supabase.from("workout_sessions").insert({
         user_id: usuarioId,
         plan_id: treinoSelecionado,
@@ -239,12 +211,10 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         finished_at: dataRegistro,
         notes: "Treino registrado pelo calendário",
       });
-
       if (error) {
         Alert.alert("Erro ao registrar", error.message);
         return;
       }
-
       await carregarDados();
       setTreinoSelecionado("");
       Alert.alert("Treino registrado", "O calendário foi atualizado.");
@@ -254,7 +224,47 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setSalvando(false);
     }
   }
-
+  async function excluirRegistro(sessao: Sessao) {
+    Alert.alert(
+      "Excluir registro do dia?",
+      "O treino será removido da frequência e do histórico. Essa ação não pode ser desfeita.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: async () => {
+            setSalvando(true);
+            try {
+              const { error } = await supabase
+                .from("workout_sessions")
+                .delete()
+                .eq("id", sessao.id)
+                .eq("user_id", usuarioId);
+              if (error) {
+                Alert.alert(
+                  "Não foi possível excluir",
+                  "O registro pode ter cargas vinculadas. Nenhum dado foi alterado. Detalhes: " +
+                    error.message,
+                );
+                return;
+              }
+              setTreinoSelecionado("");
+              await carregarDados();
+              Alert.alert(
+                "Registro excluído",
+                "Agora você pode registrar outro treino para esse dia.",
+              );
+            } catch {
+              Alert.alert("Erro", "Não foi possível excluir o registro.");
+            } finally {
+              setSalvando(false);
+            }
+          },
+        },
+      ],
+    );
+  }
   if (carregando) {
     return (
       <View style={estilos.centralizado}>
@@ -263,7 +273,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       </View>
     );
   }
-
   return (
     <View style={estilos.container}>
       <ScrollView
@@ -276,28 +285,22 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
             ‹ Voltar
           </Text>
         </TouchableOpacity>
-
         <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
-
         <Text style={estilos.titulo}>Frequência de treino</Text>
-
         <Text style={estilos.subtitulo}>
           Registre os treinos que você realmente realizou. Você escolhe o dia e
           o treino, sem precisar definir uma semana fixa.
         </Text>
-
         <View style={estilos.cartaoResumo}>
           <Text style={[estilos.resumoNumero, { color: corTema }]}>
             {frequenciaMensal}
           </Text>
-
           <Text style={estilos.resumoTexto}>
             {frequenciaMensal === 1
               ? "dia treinado neste mês"
               : "dias treinados neste mês"}
           </Text>
         </View>
-
         <View style={estilos.cartaoCalendario}>
           <View style={estilos.navegacaoMes}>
             <TouchableOpacity
@@ -306,11 +309,9 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
             >
               <Text style={[estilos.textoBotaoMes, { color: corTema }]}>‹</Text>
             </TouchableOpacity>
-
             <Text style={estilos.tituloMes}>
               {nomesMeses[mes]} {ano}
             </Text>
-
             <TouchableOpacity
               style={estilos.botaoMes}
               onPress={() => mudarMes(1)}
@@ -331,24 +332,20 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
               </Text>
             </TouchableOpacity>
           </View>
-
           <View style={estilos.gradeCalendario}>
             {diasSemana.map((dia, indice) => (
               <View key={`${dia}-${indice}`} style={estilos.celula}>
                 <Text style={estilos.nomeDiaSemana}>{dia}</Text>
               </View>
             ))}
-
             {diasDoCalendario.map((dia, indice) => {
               if (dia === null) {
                 return <View key={`vazio-${indice}`} style={estilos.celula} />;
               }
-
               const data = dataLocal(new Date(ano, mes, dia));
               const treinado = diasTreinados.has(data);
               const selecionado = data === dataSelecionada;
               const eHoje = data === dataLocal(hoje);
-
               return (
                 <View key={data} style={estilos.celula}>
                   <TouchableOpacity
@@ -375,7 +372,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                     >
                       {dia}
                     </Text>
-
                     {treinado ? (
                       <View
                         style={[
@@ -389,7 +385,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
               );
             })}
           </View>
-
           <View style={estilos.legenda}>
             <View
               style={[estilos.indicadorTreino, { backgroundColor: corTema }]}
@@ -397,10 +392,8 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
             <Text style={estilos.textoLegenda}>Dia com treino registrado</Text>
           </View>
         </View>
-
         <View style={estilos.cartaoRegistro}>
           <Text style={estilos.tituloRegistro}>Registrar treino</Text>
-
           <Text style={[estilos.dataRegistro, { color: corTema }]}>
             {new Date(`${dataSelecionada}T12:00:00`).toLocaleDateString(
               "pt-BR",
@@ -412,8 +405,12 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
               },
             )}
           </Text>
-
-          {treinos.length === 0 ? (
+          {sessoesDoDia.some((sessao) => sessao.plan_id !== null) ? (
+            <Text style={estilos.textoSecundario}>
+              Já existe um treino registrado neste dia. Para escolher outro,
+              exclua primeiro o registro abaixo.
+            </Text>
+          ) : treinos.length === 0 ? (
             <Text style={estilos.textoSecundario}>
               Você ainda não cadastrou treinos. Acesse Meus treinos para criar o
               primeiro.
@@ -421,10 +418,8 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           ) : (
             <>
               <Text style={estilos.rotulo}>Qual treino você realizou?</Text>
-
               {treinos.map((treino) => {
                 const selecionado = treinoSelecionado === treino.id;
-
                 return (
                   <TouchableOpacity
                     key={treino.id}
@@ -449,7 +444,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                   </TouchableOpacity>
                 );
               })}
-
               <TouchableOpacity
                 style={[
                   estilos.botaoSalvar,
@@ -467,26 +461,33 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
               </TouchableOpacity>
             </>
           )}
-
           {sessoesDoDia.filter((sessao) => sessao.plan_id !== null).length >
           0 ? (
             <View style={estilos.treinosDoDia}>
               <Text style={estilos.rotulo}>Treinos registrados neste dia</Text>
-
               {sessoesDoDia
                 .filter((sessao) => sessao.plan_id !== null)
                 .map((sessao) => {
                   const treino = treinos.find(
                     (item) => item.id === sessao.plan_id,
                   );
-
                   return (
-                    <Text
-                      key={sessao.id}
-                      style={[estilos.textoTreinoDoDia, { color: corTema }]}
-                    >
-                      ✓ {treino?.name ?? "Treino registrado"}
-                    </Text>
+                    <View key={sessao.id} style={estilos.itemTreinoDoDia}>
+                      <Text
+                        style={[estilos.textoTreinoDoDia, { color: corTema }]}
+                      >
+                        ✓ {treino?.name ?? "Treino registrado"}
+                      </Text>
+                      <TouchableOpacity
+                        style={estilos.botaoExcluirRegistro}
+                        onPress={() => excluirRegistro(sessao)}
+                        disabled={salvando}
+                      >
+                        <Text style={estilos.textoBotaoExcluir}>
+                          Excluir registro do dia
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                   );
                 })}
             </View>
@@ -702,6 +703,23 @@ const estilos = StyleSheet.create({
     marginTop: 18,
     paddingTop: 16,
     gap: 8,
+  },
+  itemTreinoDoDia: {
+    gap: 8,
+    marginBottom: 14,
+  },
+  botaoExcluirRegistro: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#8F4545",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  textoBotaoExcluir: {
+    color: "#FF7777",
+    fontSize: 14,
+    fontWeight: "700",
   },
   textoTreinoDoDia: {
     fontSize: 14,
