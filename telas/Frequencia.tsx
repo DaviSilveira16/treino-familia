@@ -68,6 +68,8 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const [treinoSelecionado, setTreinoSelecionado] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
+  const [mensagemStatus, setMensagemStatus] = useState("");
   const carregarDados = useCallback(async () => {
     setCarregando(true);
     try {
@@ -187,11 +189,15 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         );
         return;
       }
-      if ((sessoesExistentes ?? []).length > 0) {
+      const existeTreinoNoDia = (sessoesExistentes ?? []).some(
+        (sessao) => sessao.plan_id !== null,
+      );
+
+      if (existeTreinoNoDia) {
         await carregarDados();
         Alert.alert(
           "Treino já registrado",
-          "Já existe um treino registrado nessa data. Exclua o registro atual antes de escolher outro.",
+          "Já existe um treino registrado nessa data. Para escolher outro, use o botão Excluir registro do dia.",
         );
         return;
       }
@@ -224,47 +230,65 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setSalvando(false);
     }
   }
-  async function excluirRegistro(sessao: Sessao) {
-    Alert.alert(
-      "Excluir registro do dia?",
-      "O treino será removido da frequência e do histórico. Essa ação não pode ser desfeita.",
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Excluir",
-          style: "destructive",
-          onPress: async () => {
-            setSalvando(true);
-            try {
-              const { error } = await supabase
-                .from("workout_sessions")
-                .delete()
-                .eq("id", sessao.id)
-                .eq("user_id", usuarioId);
-              if (error) {
-                Alert.alert(
-                  "Não foi possível excluir",
-                  "O registro pode ter cargas vinculadas. Nenhum dado foi alterado. Detalhes: " +
-                    error.message,
-                );
-                return;
-              }
-              setTreinoSelecionado("");
-              await carregarDados();
-              Alert.alert(
-                "Registro excluído",
-                "Agora você pode registrar outro treino para esse dia.",
-              );
-            } catch {
-              Alert.alert("Erro", "Não foi possível excluir o registro.");
-            } finally {
-              setSalvando(false);
-            }
-          },
-        },
-      ],
-    );
+  async function excluirRegistroDoDia() {
+    if (!usuarioId || sessoesDoDia.length === 0) {
+      setMensagemStatus("Não há registro para excluir nesta data.");
+      return;
+    }
+
+    setSalvando(true);
+    setMensagemStatus("");
+
+    try {
+      const [anoSelecionado, mesSelecionado, diaSelecionado] = dataSelecionada
+        .split("-")
+        .map(Number);
+      const inicioDia = new Date(
+        anoSelecionado,
+        mesSelecionado - 1,
+        diaSelecionado,
+        0,
+        0,
+        0,
+        0,
+      ).toISOString();
+      const fimDia = new Date(
+        anoSelecionado,
+        mesSelecionado - 1,
+        diaSelecionado + 1,
+        0,
+        0,
+        0,
+        0,
+      ).toISOString();
+
+      const { error } = await supabase
+        .from("workout_sessions")
+        .delete()
+        .eq("user_id", usuarioId)
+        .gte("started_at", inicioDia)
+        .lt("started_at", fimDia);
+
+      if (error) {
+        setMensagemStatus(
+          `Não foi possível excluir o registro. Pode haver cargas vinculadas. Detalhes: ${error.message}`,
+        );
+        return;
+      }
+
+      setTreinoSelecionado("");
+      setConfirmandoExclusao(false);
+      await carregarDados();
+      setMensagemStatus(
+        "Registro do dia excluído. Agora você pode selecionar outro treino.",
+      );
+    } catch {
+      setMensagemStatus("Ocorreu um erro ao excluir o registro do dia.");
+    } finally {
+      setSalvando(false);
+    }
   }
+
   if (carregando) {
     return (
       <View style={estilos.centralizado}>
@@ -472,25 +496,63 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                     (item) => item.id === sessao.plan_id,
                   );
                   return (
-                    <View key={sessao.id} style={estilos.itemTreinoDoDia}>
-                      <Text
-                        style={[estilos.textoTreinoDoDia, { color: corTema }]}
-                      >
-                        ✓ {treino?.name ?? "Treino registrado"}
-                      </Text>
-                      <TouchableOpacity
-                        style={estilos.botaoExcluirRegistro}
-                        onPress={() => excluirRegistro(sessao)}
-                        disabled={salvando}
-                      >
-                        <Text style={estilos.textoBotaoExcluir}>
-                          Excluir registro do dia
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
+                    <Text
+                      key={sessao.id}
+                      style={[estilos.textoTreinoDoDia, { color: corTema }]}
+                    >
+                      ✓ {treino?.name ?? "Treino registrado"}
+                    </Text>
                   );
                 })}
+              <TouchableOpacity
+                style={[
+                  estilos.botaoExcluirRegistro,
+                  salvando && estilos.botaoDesabilitado,
+                ]}
+                onPress={() => {
+                  setMensagemStatus("");
+                  setConfirmandoExclusao(true);
+                }}
+                disabled={salvando}
+              >
+                <Text style={estilos.textoBotaoExcluir}>
+                  Excluir registro do dia
+                </Text>
+              </TouchableOpacity>
+              {confirmandoExclusao ? (
+                <View style={estilos.confirmacaoExclusao}>
+                  <Text style={estilos.textoSecundario}>
+                    Tem certeza que deseja excluir os registros deste dia? Essa
+                    ação também os remove do histórico.
+                  </Text>
+                  <View style={estilos.acoesConfirmacao}>
+                    <TouchableOpacity
+                      style={estilos.botaoCancelarExclusao}
+                      onPress={() => setConfirmandoExclusao(false)}
+                      disabled={salvando}
+                    >
+                      <Text style={estilos.textoOpcao}>Cancelar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={estilos.botaoConfirmarExclusao}
+                      onPress={excluirRegistroDoDia}
+                      disabled={salvando}
+                    >
+                      {salvando ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <Text style={estilos.textoBotaoExcluir}>
+                          Confirmar exclusão
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
             </View>
+          ) : null}
+          {mensagemStatus ? (
+            <Text style={estilos.mensagemStatus}>{mensagemStatus}</Text>
           ) : null}
         </View>
       </ScrollView>
@@ -720,6 +782,38 @@ const estilos = StyleSheet.create({
     color: "#FF7777",
     fontSize: 14,
     fontWeight: "700",
+  },
+  confirmacaoExclusao: {
+    gap: 12,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "#222825",
+  },
+  acoesConfirmacao: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  botaoCancelarExclusao: {
+    borderWidth: 1,
+    borderColor: "#536057",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  botaoConfirmarExclusao: {
+    borderWidth: 1,
+    borderColor: "#8F4545",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  mensagemStatus: {
+    color: "#D0D7D2",
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 12,
   },
   textoTreinoDoDia: {
     fontSize: 14,
