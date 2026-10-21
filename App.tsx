@@ -34,6 +34,7 @@ import Perfil from "./telas/Perfil";
 import Frequencia from "./telas/Frequencia";
 import TreinoDoDia from "./telas/TreinoDoDia";
 import MeusTreinos from "./telas/MeusTreinos";
+import MeusCardios from "./telas/MeusCardios";
 import EvolucaoFisica from "./telas/EvolucaoFisica";
 import HistoricoTreinos from "./telas/HistoricoTreinos";
 
@@ -43,6 +44,7 @@ type Rotas = {
   Inicio: undefined;
   perfil: undefined;
   treinos: undefined;
+  cardios: undefined;
   evolucao: undefined;
   historico: undefined;
   frequencia: undefined;
@@ -80,6 +82,12 @@ const telas = [
     titulo: "Meus treinos",
     descricao: "Acesse seus treinos e exercícios",
     emoji: "🏋️",
+  },
+  {
+    id: "cardios",
+    titulo: "Meus Cardios",
+    descricao: "Cadastre e acompanhe seus cardios",
+    emoji: "🏃",
   },
   {
     id: "evolucao",
@@ -836,6 +844,15 @@ export default function App() {
         <Pilha.Screen name="treinos">
           {({ navigation }) => (
             <MeusTreinos
+              onVoltar={() => navigation.goBack()}
+              corTema={corTema}
+            />
+          )}
+        </Pilha.Screen>
+
+        <Pilha.Screen name="cardios">
+          {({ navigation }) => (
+            <MeusCardios
               onVoltar={() => navigation.goBack()}
               corTema={corTema}
             />
