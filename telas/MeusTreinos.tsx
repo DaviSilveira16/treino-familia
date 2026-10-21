@@ -31,12 +31,6 @@ type SerieCarga = {
   carga: string;
 };
 
-type SessaoDisponivel = {
-  id: string;
-  started_at: string;
-  plan_id: string | null;
-};
-
 type Props = {
   onVoltar: () => void;
   corTema?: string;
@@ -98,11 +92,6 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
   const [exercicioParaCarga, setExercicioParaCarga] =
     useState<Exercicio | null>(null);
   const [seriesCarga, setSeriesCarga] = useState<SerieCarga[]>([]);
-  const [sessoesDisponiveis, setSessoesDisponiveis] = useState<
-    SessaoDisponivel[]
-  >([]);
-  const [sessaoSelecionada, setSessaoSelecionada] =
-    useState<SessaoDisponivel | null>(null);
   const [maioresCargas, setMaioresCargas] = useState<Record<string, number>>(
     {},
   );
@@ -170,19 +159,30 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
         const lista = (data ?? []) as Exercicio[];
         setExercicios(lista);
         const cargas: Record<string, number> = {};
-        await Promise.all(
-          lista.map(async (exercicio) => {
-            const { data: registros } = await supabase
-              .from("workout_sets")
-              .select("weight_kg")
-              .eq("user_id", usuarioId)
-              .eq("exercise_id", exercicio.id);
-            const valores = (registros ?? [])
-              .map((registro) => Number(registro.weight_kg))
-              .filter((valor) => Number.isFinite(valor));
-            if (valores.length > 0) cargas[exercicio.id] = Math.max(...valores);
-          }),
-        );
+        if (lista.length > 0) {
+          const { data: referencias, error: erroReferencias } = await supabase
+            .from("exercise_load_defaults")
+            .select("exercise_id, set_number, reps, weight_kg")
+            .eq("user_id", usuarioId)
+            .in(
+              "exercise_id",
+              lista.map((exercicio) => exercicio.id),
+            )
+            .order("set_number", { ascending: true });
+          if (erroReferencias) {
+            mostrarMensagem("Erro ao carregar cargas", erroReferencias.message);
+            return;
+          }
+          for (const referencia of referencias ?? []) {
+            const carga = Number(referencia.weight_kg);
+            if (Number.isFinite(carga)) {
+              cargas[referencia.exercise_id] = Math.max(
+                cargas[referencia.exercise_id] ?? 0,
+                carga,
+              );
+            }
+          }
+        }
         setMaioresCargas((atuais) => ({ ...atuais, ...cargas }));
       } catch {
         Alert.alert("Erro", "Não foi possível conectar ao Supabase.");
@@ -520,38 +520,37 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
 
     setExercicioEditando(null);
     setExercicioParaCarga(exercicio);
-    setSessaoSelecionada(null);
-    setSessoesDisponiveis([]);
-    setSeriesCarga(
-      Array.from({ length: exercicio.sets_goal }, () => ({
-        repeticoes: "",
-        carga: "",
-      })),
-    );
     setCarregandoExercicios(true);
 
     try {
-      const { data, error } = await supabase
-        .from("workout_sessions")
-        .select("id, started_at, plan_id")
+      const { data: referencias, error } = await supabase
+        .from("exercise_load_defaults")
+        .select("set_number, reps, weight_kg")
         .eq("user_id", usuarioId)
-        .eq("plan_id", treinoSelecionado.id)
-        .order("started_at", { ascending: false })
-        .limit(30);
+        .eq("exercise_id", exercicio.id)
+        .order("set_number", { ascending: true });
 
       if (error) {
-        mostrarMensagem("Erro ao carregar sessões", error.message);
+        mostrarMensagem("Erro ao carregar cargas", error.message);
         return;
       }
 
-      const sessoes = (data ?? []) as SessaoDisponivel[];
-      setSessoesDisponiveis(sessoes);
-      if (sessoes.length === 1) setSessaoSelecionada(sessoes[0]);
+      const salvas = referencias ?? [];
+      const quantidade = Math.max(exercicio.sets_goal || 1, salvas.length, 1);
+      const repsPadrao =
+        String(exercicio.reps_goal || "8-12").match(/\d+/)?.[0] ?? "8";
+      const series = Array.from({ length: quantidade }, (_, indice) => {
+        const salva = salvas.find(
+          (item) => Number(item.set_number) === indice + 1,
+        );
+        return {
+          repeticoes: salva ? String(salva.reps) : repsPadrao,
+          carga: salva ? String(salva.weight_kg) : "0",
+        };
+      });
+      setSeriesCarga(series);
     } catch {
-      mostrarMensagem(
-        "Erro",
-        "Não foi possível carregar os treinos registrados.",
-      );
+      mostrarMensagem("Erro", "Não foi possível carregar as cargas salvas.");
     } finally {
       setCarregandoExercicios(false);
     }
@@ -572,14 +571,6 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
   async function salvarCargas() {
     if (!exercicioParaCarga || !treinoSelecionado || !usuarioId) return;
 
-    if (!sessaoSelecionada) {
-      mostrarMensagem(
-        "Selecione um treino realizado",
-        "Antes de registrar as cargas, vá em Frequência, escolha a data e o treino que você realmente fez e confirme o registro. Depois volte aqui e selecione essa sessão.",
-      );
-      return;
-    }
-
     if (
       seriesCarga.length === 0 ||
       seriesCarga.some(
@@ -588,7 +579,7 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
     ) {
       mostrarMensagem(
         "Preencha as séries",
-        "Informe as repetições realizadas e a carga em kg de cada série. Use 0 se não utilizou peso adicional.",
+        "Informe as repetições e a carga de cada série.",
       );
       return;
     }
@@ -616,61 +607,103 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
 
     setSalvando(true);
     try {
-      const { data: sessaoAtual, error: erroBuscaSessao } = await supabase
-        .from("workout_sessions")
-        .select("id, plan_id")
-        .eq("id", sessaoSelecionada.id)
-        .eq("user_id", usuarioId)
-        .eq("plan_id", treinoSelecionado.id)
-        .maybeSingle();
-
-      if (erroBuscaSessao || !sessaoAtual) {
-        mostrarMensagem(
-          "Sessão não encontrada",
-          erroBuscaSessao?.message ??
-            "Não foi possível confirmar essa sessão. Atualize a tela e tente novamente.",
-        );
-        return;
-      }
-
-      const { data: seriesExistentes, error: erroBuscaSeries } = await supabase
-        .from("workout_sets")
-        .select("id")
-        .eq("user_id", usuarioId)
-        .eq("session_id", sessaoSelecionada.id)
-        .eq("exercise_id", exercicioParaCarga.id)
-        .limit(1);
-
-      if (erroBuscaSeries) {
-        mostrarMensagem("Erro ao verificar as séries", erroBuscaSeries.message);
-        return;
-      }
-
-      if ((seriesExistentes ?? []).length > 0) {
-        mostrarMensagem(
-          "Cargas já registradas",
-          "Este exercício já tem séries salvas nesta sessão. Para preservar seu histórico, o aplicativo não vai duplicar nem substituir esses registros.",
-        );
-        return;
-      }
-
-      const registros = seriesValidadas.map((serie, indice) => ({
+      const registrosReferencia = seriesValidadas.map((serie, indice) => ({
         user_id: usuarioId,
-        session_id: sessaoSelecionada.id,
         exercise_id: exercicioParaCarga.id,
-        exercise_name: exercicioParaCarga.name,
         set_number: indice + 1,
         reps: serie.reps,
         weight_kg: serie.weight_kg,
+        updated_at: new Date().toISOString(),
       }));
 
-      const { error: erroSeries } = await supabase
-        .from("workout_sets")
-        .insert(registros);
-
-      if (erroSeries) {
-        mostrarMensagem("Erro ao salvar as séries", erroSeries.message);
+      const { error: erroSalvarReferencias } = await supabase
+        .from("exercise_load_defaults")
+        .upsert(registrosReferencia, {
+          onConflict: "user_id,exercise_id,set_number",
+        });
+      if (erroSalvarReferencias) {
+        mostrarMensagem("Erro ao salvar cargas", erroSalvarReferencias.message);
         return;
+      }
+
+      const { error: erroLimparSeriesAntigas } = await supabase
+        .from("exercise_load_defaults")
+        .delete()
+        .eq("user_id", usuarioId)
+        .eq("exercise_id", exercicioParaCarga.id)
+        .gt("set_number", seriesValidadas.length);
+      if (erroLimparSeriesAntigas) {
+        mostrarMensagem(
+          "Cargas salvas parcialmente",
+          `As novas cargas foram salvas, mas não foi possível remover séries antigas: ${erroLimparSeriesAntigas.message}`,
+        );
+        return;
+      }
+
+      const hoje = new Date();
+      const inicioDia = new Date(
+        hoje.getFullYear(),
+        hoje.getMonth(),
+        hoje.getDate(),
+      ).toISOString();
+      const fimDia = new Date(
+        hoje.getFullYear(),
+        hoje.getMonth(),
+        hoje.getDate() + 1,
+      ).toISOString();
+      const { data: sessoesHoje, error: erroSessoes } = await supabase
+        .from("workout_sessions")
+        .select("id")
+        .eq("user_id", usuarioId)
+        .eq("plan_id", treinoSelecionado.id)
+        .gte("started_at", inicioDia)
+        .lt("started_at", fimDia)
+        .order("started_at", { ascending: false })
+        .limit(1);
+
+      if (erroSessoes) {
+        mostrarMensagem(
+          "Cargas de referência salvas",
+          `As cargas foram salvas para as próximas sessões, mas não foi possível atualizar o histórico de hoje: ${erroSessoes.message}`,
+        );
+        return;
+      }
+
+      const sessaoHoje = sessoesHoje?.[0];
+      if (sessaoHoje) {
+        const { error: erroExcluirSeries } = await supabase
+          .from("workout_sets")
+          .delete()
+          .eq("user_id", usuarioId)
+          .eq("session_id", sessaoHoje.id)
+          .eq("exercise_id", exercicioParaCarga.id);
+        if (erroExcluirSeries) {
+          mostrarMensagem(
+            "Cargas de referência salvas",
+            `As próximas sessões usarão as novas cargas, mas o histórico de hoje não foi atualizado: ${erroExcluirSeries.message}`,
+          );
+          return;
+        }
+
+        const registrosSessao = seriesValidadas.map((serie, indice) => ({
+          user_id: usuarioId,
+          session_id: sessaoHoje.id,
+          exercise_id: exercicioParaCarga.id,
+          exercise_name: exercicioParaCarga.name,
+          set_number: indice + 1,
+          reps: serie.reps,
+          weight_kg: serie.weight_kg,
+        }));
+        const { error: erroSalvarSessao } = await supabase
+          .from("workout_sets")
+          .insert(registrosSessao);
+        if (erroSalvarSessao) {
+          mostrarMensagem(
+            "Cargas de referência salvas",
+            `As próximas sessões usarão as novas cargas, mas não foi possível atualizar o histórico de hoje: ${erroSalvarSessao.message}`,
+          );
+          return;
+        }
       }
 
       const maiorCargaNova = Math.max(
@@ -678,19 +711,22 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
       );
       setMaioresCargas((atuais) => ({
         ...atuais,
-        [exercicioParaCarga.id]: Math.max(
-          atuais[exercicioParaCarga.id] ?? 0,
-          maiorCargaNova,
-        ),
+        [exercicioParaCarga.id]: maiorCargaNova,
       }));
       setExercicioParaCarga(null);
-      setSessaoSelecionada(null);
       mostrarMensagem(
         "Cargas salvas",
-        "As séries foram vinculadas à sessão escolhida e adicionadas ao histórico.",
+        sessaoHoje
+          ? "As cargas de referência e o registro de hoje foram atualizados."
+          : "As cargas ficaram salvas em Meus treinos e serão usadas nas próximas sessões.",
       );
-    } catch {
-      mostrarMensagem("Erro", "Não foi possível conectar ao Supabase.");
+    } catch (erro) {
+      mostrarMensagem(
+        "Erro",
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível conectar ao Supabase.",
+      );
     } finally {
       setSalvando(false);
     }
@@ -1021,56 +1057,11 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
 
                       {exercicioParaCarga?.id === exercicio.id && (
                         <View style={estilos.formularioInterno}>
-                          <Text style={estilos.rotulo}>
-                            Sessão do treino realizado
+                          <Text style={estilos.descricaoTreino}>
+                            Cargas salvas como referência. Se não houver
+                            evolução, basta consultar e fechar; altere somente
+                            quando quiser atualizar seus valores.
                           </Text>
-                          <Text style={estilos.textoSecundario}>
-                            Selecione a data registrada em Frequência. Este
-                            formulário não cria sessões novas.
-                          </Text>
-                          {sessoesDisponiveis.length === 0 ? (
-                            <View style={estilos.vazio}>
-                              <Text style={estilos.textoSecundario}>
-                                Nenhuma sessão encontrada para este treino. Vá
-                                em Frequência, registre o treino realizado e
-                                volte para lançar as cargas.
-                              </Text>
-                            </View>
-                          ) : (
-                            <View style={estilos.listaTreinos}>
-                              {sessoesDisponiveis.map((sessao) => {
-                                const dataSessao = new Date(sessao.started_at);
-                                const dataFormatada =
-                                  dataSessao.toLocaleDateString("pt-BR", {
-                                    day: "2-digit",
-                                    month: "2-digit",
-                                    year: "numeric",
-                                  });
-                                const selecionada =
-                                  sessaoSelecionada?.id === sessao.id;
-                                return (
-                                  <TouchableOpacity
-                                    key={sessao.id}
-                                    style={[
-                                      estilos.cartaoSessao,
-                                      selecionada &&
-                                        estilos.cartaoSessaoSelecionado,
-                                    ]}
-                                    onPress={() => setSessaoSelecionada(sessao)}
-                                  >
-                                    <Text style={estilos.nomeTreino}>
-                                      {dataFormatada}
-                                    </Text>
-                                    <Text style={estilos.descricaoTreino}>
-                                      {selecionada
-                                        ? "Sessão selecionada ✓"
-                                        : "Selecionar esta sessão"}
-                                    </Text>
-                                  </TouchableOpacity>
-                                );
-                              })}
-                            </View>
-                          )}
                           <Text style={[estilos.rotulo, { marginTop: 18 }]}>
                             Registrar cargas por série (kg)
                           </Text>

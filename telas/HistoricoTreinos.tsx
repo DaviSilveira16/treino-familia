@@ -242,99 +242,6 @@ export default function HistoricoTreinos({
   function alternarDetalhes(id: string) {
     setSessaoExpandida((atual) => (atual === id ? null : id));
   }
-  async function excluirSessao(sessao: TreinoHistorico) {
-    const confirmar = async () => {
-      try {
-        const { data: usuarioData, error: erroUsuario } =
-          await supabase.auth.getUser();
-        if (erroUsuario || !usuarioData.user) {
-          Alert.alert("Sessão inválida", "Entre novamente na sua conta.");
-          return;
-        }
-        const usuarioId = usuarioData.user.id;
-        const { data: seriesVinculadas, error: erroConsultaSeries } =
-          await supabase
-            .from("workout_sets")
-            .select("id")
-            .eq("user_id", usuarioId)
-            .eq("session_id", sessao.id);
-        if (erroConsultaSeries) {
-          Alert.alert(
-            "Não foi possível remover",
-            `Não conseguimos verificar as séries deste registro: ${erroConsultaSeries.message}`,
-          );
-          return;
-        }
-        const idsSeries = (seriesVinculadas ?? []).map((serie) => serie.id);
-        if (idsSeries.length > 0) {
-          const { error: erroDesvincularSeries } = await supabase
-            .from("workout_sets")
-            .update({ session_id: null })
-            .eq("user_id", usuarioId)
-            .eq("session_id", sessao.id);
-          if (erroDesvincularSeries) {
-            Alert.alert(
-              "Não foi possível remover",
-              "O banco não permitiu desvincular as séries deste registro. Nenhum treino foi removido. Para preservar as séries, a coluna session_id da tabela workout_sets precisa aceitar valores nulos.",
-            );
-            return;
-          }
-        }
-        const { error: erroExcluirSessao } = await supabase
-          .from("workout_sessions")
-          .delete()
-          .eq("id", sessao.id)
-          .eq("user_id", usuarioId);
-        if (erroExcluirSessao) {
-          if (idsSeries.length > 0) {
-            await supabase
-              .from("workout_sets")
-              .update({ session_id: sessao.id })
-              .eq("user_id", usuarioId)
-              .in("id", idsSeries);
-          }
-          Alert.alert(
-            "Não foi possível remover",
-            `O registro não foi excluído: ${erroExcluirSessao.message}`,
-          );
-          return;
-        }
-        setHistorico((atual) => atual.filter((item) => item.id !== sessao.id));
-        setSessaoExpandida((atual) => (atual === sessao.id ? null : atual));
-        const mensagemSucesso =
-          "O treino saiu do histórico. As séries foram preservadas e desvinculadas, e o plano de treino não foi apagado.";
-        if (Platform.OS === "web") {
-          const avisarWeb = (globalThis as any).alert;
-          if (typeof avisarWeb === "function") avisarWeb(mensagemSucesso);
-        } else {
-          Alert.alert("Registro removido", mensagemSucesso);
-        }
-      } catch {
-        Alert.alert(
-          "Erro",
-          "Não foi possível remover este registro. Verifique sua conexão e tente novamente.",
-        );
-      }
-    };
-    const mensagem = `Deseja remover o registro de ${sessao.nomeTreino} de ${formatarData(sessao.started_at)}? O plano de treino será mantido e as séries serão preservadas, mas desvinculadas deste registro.`;
-    if (Platform.OS === "web") {
-      const confirmarWeb = (globalThis as any).confirm;
-      if (typeof confirmarWeb === "function" && confirmarWeb(mensagem)) {
-        await confirmar();
-      }
-      return;
-    }
-    Alert.alert("Remover treino do histórico?", mensagem, [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Remover",
-        style: "destructive",
-        onPress: () => {
-          void confirmar();
-        },
-      },
-    ]);
-  }
   if (carregando) {
     return (
       <View style={estilos.centralizado}>
@@ -434,12 +341,10 @@ export default function HistoricoTreinos({
                   ),
                 ),
               );
-              const seriesExibidas = sessao.series.filter(
-                (serie) => serie.mudou,
-              );
+              const seriesExibidas = sessao.series;
               const exercicios = Array.from(
                 new Set(
-                  seriesExibidas.map(
+                  sessao.series.map(
                     (serie) =>
                       serie.exercise_name?.trim() || "Exercício sem nome",
                   ),
@@ -536,12 +441,6 @@ export default function HistoricoTreinos({
                       {sessao.series.length === 0 ? (
                         <Text style={estilos.semSeries}>
                           Este registro não possui séries salvas.
-                        </Text>
-                      ) : seriesExibidas.length === 0 ? (
-                        <Text style={estilos.semSeries}>
-                          Nenhuma série mudou em relação à última vez que você
-                          fez cada exercício. O volume abaixo considera todas as
-                          séries deste treino.
                         </Text>
                       ) : (
                         exercicios.map((nomeExercicio) => {
@@ -781,15 +680,6 @@ export default function HistoricoTreinos({
                           Observação: {sessao.notes}
                         </Text>
                       ) : null}
-                      <TouchableOpacity
-                        style={estilos.botaoExcluir}
-                        onPress={() => void excluirSessao(sessao)}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={estilos.textoBotaoExcluir}>
-                          Remover registro do histórico
-                        </Text>
-                      </TouchableOpacity>
                     </View>
                   )}
                 </View>
@@ -1071,22 +961,6 @@ const estilos = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginTop: 12,
-  },
-  botaoExcluir: {
-    alignItems: "center",
-    backgroundColor: "#351D20",
-    borderColor: "#7A3038",
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginTop: 16,
-  },
-  textoBotaoExcluir: {
-    color: "#FF9CA5",
-    fontSize: 13,
-    fontWeight: "800",
-    textAlign: "center",
   },
   vazio: {
     alignItems: "center",

@@ -210,20 +210,122 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         0,
         0,
       ).toISOString();
-      const { error } = await supabase.from("workout_sessions").insert({
-        user_id: usuarioId,
-        plan_id: treinoSelecionado,
-        started_at: dataRegistro,
-        finished_at: dataRegistro,
-        notes: "Treino registrado pelo calendário",
-      });
-      if (error) {
-        Alert.alert("Erro ao registrar", error.message);
+      const { data: novaSessao, error } = await supabase
+        .from("workout_sessions")
+        .insert({
+          user_id: usuarioId,
+          plan_id: treinoSelecionado,
+          started_at: dataRegistro,
+          finished_at: dataRegistro,
+          notes: "Treino registrado pelo calendário",
+        })
+        .select("id")
+        .single();
+      if (error || !novaSessao) {
+        Alert.alert(
+          "Erro ao registrar",
+          error?.message ?? "Não foi possível criar a sessão.",
+        );
         return;
       }
+
+      const { data: exercicios, error: erroExercicios } = await supabase
+        .from("exercises")
+        .select("id, name, sets_goal, reps_goal")
+        .eq("user_id", usuarioId)
+        .eq("plan_id", treinoSelecionado)
+        .order("position", { ascending: true });
+      if (erroExercicios) {
+        await supabase
+          .from("workout_sessions")
+          .delete()
+          .eq("id", novaSessao.id)
+          .eq("user_id", usuarioId);
+        Alert.alert(
+          "Erro ao registrar",
+          `Não foi possível carregar os exercícios do treino: ${erroExercicios.message}`,
+        );
+        return;
+      }
+
+      const listaExercicios = exercicios ?? [];
+      const { data: referencias, error: erroReferencias } =
+        listaExercicios.length > 0
+          ? await supabase
+              .from("exercise_load_defaults")
+              .select("exercise_id, set_number, reps, weight_kg")
+              .eq("user_id", usuarioId)
+              .in(
+                "exercise_id",
+                listaExercicios.map((exercicio) => exercicio.id),
+              )
+              .order("set_number", { ascending: true })
+          : { data: [], error: null };
+      if (erroReferencias) {
+        await supabase
+          .from("workout_sessions")
+          .delete()
+          .eq("id", novaSessao.id)
+          .eq("user_id", usuarioId);
+        Alert.alert(
+          "Erro ao registrar",
+          `Não foi possível carregar as cargas salvas: ${erroReferencias.message}`,
+        );
+        return;
+      }
+
+      const seriesDaSessao = listaExercicios.flatMap((exercicio) => {
+        const seriesSalvas = (referencias ?? []).filter(
+          (item) => item.exercise_id === exercicio.id,
+        );
+        const quantidade = Math.max(
+          Number(exercicio.sets_goal) || 1,
+          seriesSalvas.length,
+          1,
+        );
+        const repeticoesPadrao =
+          Number(String(exercicio.reps_goal ?? "8").match(/\d+/)?.[0] ?? 8) ||
+          8;
+        return Array.from({ length: quantidade }, (_, indice) => {
+          const serie = seriesSalvas.find(
+            (item) => Number(item.set_number) === indice + 1,
+          );
+          return {
+            user_id: usuarioId,
+            session_id: novaSessao.id,
+            exercise_id: exercicio.id,
+            exercise_name: exercicio.name,
+            set_number: indice + 1,
+            reps: Number(serie?.reps ?? repeticoesPadrao),
+            weight_kg: Number(serie?.weight_kg ?? 0),
+          };
+        });
+      });
+
+      if (seriesDaSessao.length > 0) {
+        const { error: erroSnapshot } = await supabase
+          .from("workout_sets")
+          .insert(seriesDaSessao);
+        if (erroSnapshot) {
+          await supabase
+            .from("workout_sessions")
+            .delete()
+            .eq("id", novaSessao.id)
+            .eq("user_id", usuarioId);
+          Alert.alert(
+            "Erro ao registrar",
+            `O treino não foi concluído porque não foi possível salvar as cargas no histórico: ${erroSnapshot.message}`,
+          );
+          return;
+        }
+      }
+
       await carregarDados();
       setTreinoSelecionado("");
-      Alert.alert("Treino registrado", "O calendário foi atualizado.");
+      Alert.alert(
+        "Treino registrado",
+        "O treino e uma cópia das cargas e exercícios foram salvos no histórico.",
+      );
     } catch {
       Alert.alert("Erro", "Não foi possível registrar o treino.");
     } finally {
