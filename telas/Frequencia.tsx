@@ -134,7 +134,11 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const [cadenciaBicicleta, setCadenciaBicicleta] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
-  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
+  const [registroParaExcluir, setRegistroParaExcluir] = useState<{
+    tipo: "treino" | "cardio";
+    id: string;
+    nome: string;
+  } | null>(null);
   const [mensagemStatus, setMensagemStatus] = useState("");
   const carregarDados = useCallback(async () => {
     setCarregando(true);
@@ -390,7 +394,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         await carregarDados();
         Alert.alert(
           "Treino já registrado",
-          "Já existe um treino registrado nessa data. Para escolher outro, use o botão Excluir registro do dia.",
+          "Já existe um treino registrado nessa data. Para trocar, exclua somente o treino desejado na lista abaixo.",
         );
         return;
       }
@@ -763,74 +767,43 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     }
   }
 
-  async function excluirRegistroDoDia() {
-    if (!usuarioId || sessoesDoDia.length === 0) {
-      setMensagemStatus("Não há registro para excluir nesta data.");
-      return;
-    }
+  async function excluirRegistroSelecionado() {
+    const registro = registroParaExcluir;
+    if (!usuarioId || !registro) return;
 
     setSalvando(true);
     setMensagemStatus("");
 
     try {
-      const [anoSelecionado, mesSelecionado, diaSelecionado] = dataSelecionada
-        .split("-")
-        .map(Number);
-      const inicioDia = new Date(
-        anoSelecionado,
-        mesSelecionado - 1,
-        diaSelecionado,
-        0,
-        0,
-        0,
-        0,
-      ).toISOString();
-      const fimDia = new Date(
-        anoSelecionado,
-        mesSelecionado - 1,
-        diaSelecionado + 1,
-        0,
-        0,
-        0,
-        0,
-      ).toISOString();
+      const resultado =
+        registro.tipo === "treino"
+          ? await supabase
+              .from("workout_sessions")
+              .delete()
+              .eq("id", registro.id)
+              .eq("user_id", usuarioId)
+          : await supabase
+              .from("cardio_sessions")
+              .delete()
+              .eq("id", registro.id)
+              .eq("user_id", usuarioId);
 
-      const { error } = await supabase
-        .from("workout_sessions")
-        .delete()
-        .eq("user_id", usuarioId)
-        .gte("started_at", inicioDia)
-        .lt("started_at", fimDia);
-
-      if (error) {
+      if (resultado.error) {
         setMensagemStatus(
-          `Não foi possível excluir o treino. Detalhes: ${error.message}`,
+          `Não foi possível excluir este ${registro.tipo === "treino" ? "treino" : "cardio"}: ${resultado.error.message}`,
         );
         return;
       }
-      const { error: erroCardios } = await supabase
-        .from("cardio_sessions")
-        .delete()
-        .eq("user_id", usuarioId)
-        .gte("started_at", inicioDia)
-        .lt("started_at", fimDia);
-      if (erroCardios) {
-        setMensagemStatus(
-          `O treino foi excluído, mas não foi possível excluir os cardios: ${erroCardios.message}`,
-        );
-        await carregarDados();
-        return;
-      }
 
-      setTreinoSelecionado("");
-      setCardioSelecionado("");
-      setConfirmandoExclusao(false);
+      setRegistroParaExcluir(null);
+      if (registro.tipo === "treino") setTreinoSelecionado("");
+      if (registro.tipo === "cardio") setCardioSelecionado("");
       await carregarDados();
       setMensagemStatus(
-        "Registro do dia excluído. Agora você pode selecionar outro treino.",
+        `${registro.tipo === "treino" ? "Treino" : "Cardio"} excluído. Os outros registros desse dia foram mantidos.`,
       );
     } catch {
-      setMensagemStatus("Ocorreu um erro ao excluir o registro do dia.");
+      setMensagemStatus("Ocorreu um erro ao excluir o registro selecionado.");
     } finally {
       setSalvando(false);
     }
@@ -978,8 +951,8 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           </Text>
           {sessoesDoDia.some((sessao) => sessao.plan_id !== null) ? (
             <Text style={estilos.textoSecundario}>
-              Já existe um treino registrado neste dia. Para escolher outro,
-              exclua primeiro o registro abaixo.
+              Já existe um treino registrado neste dia. Para trocar, exclua
+              somente o treino desejado na lista de registros.
             </Text>
           ) : treinos.length === 0 ? (
             <Text style={estilos.textoSecundario}>
@@ -1032,387 +1005,462 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
               </TouchableOpacity>
             </>
           )}
-          {sessoesDoDia.filter((sessao) => sessao.plan_id !== null).length >
-          0 ? (
-            <View style={estilos.treinosDoDia}>
-              <Text style={estilos.rotulo}>Treinos registrados neste dia</Text>
-              {sessoesDoDia
-                .filter((sessao) => sessao.plan_id !== null)
-                .map((sessao) => {
-                  const treino = treinos.find(
-                    (item) => item.id === sessao.plan_id,
-                  );
-                  return (
-                    <Text
-                      key={sessao.id}
-                      style={[estilos.textoTreinoDoDia, { color: corTema }]}
-                    >
-                      ✓ {treino?.name ?? "Treino registrado"}
-                    </Text>
-                  );
-                })}
-            </View>
-          ) : null}
-          {cardiosDoDia.length > 0 ? (
-            <View style={estilos.treinosDoDia}>
-              <Text style={estilos.rotulo}>Cardios registrados neste dia</Text>
-              {cardiosDoDia.map((cardio) => (
-                <Text
-                  key={cardio.id}
-                  style={[estilos.textoTreinoDoDia, { color: corTema }]}
-                >
-                  ✓ {cardio.activity_name}
-                  {cardio.duration_minutes != null
-                    ? ` · ${cardio.duration_minutes} min`
-                    : ""}
-                  {cardio.distance_km != null
-                    ? ` · ${cardio.distance_km} km`
-                    : ""}
-                  {(cardio.active_calories ?? cardio.calories) != null
-                    ? ` · ${cardio.active_calories ?? cardio.calories} ${cardio.active_calories != null ? "kcal ativas estimadas" : "kcal"}`
-                    : ""}
-                  {cardio.floors_up != null
-                    ? ` · ${cardio.floors_up} andares subidos`
-                    : ""}
-                  {cardio.cadence_rpm != null
-                    ? ` · ${cardio.cadence_rpm} RPM`
-                    : ""}
-                  {cardio.speed_kmh != null
-                    ? ` · ${cardio.speed_kmh} km/h`
-                    : ""}
-                  {cardio.intensity ? ` · ${cardio.intensity}` : ""}
-                  {cardio.incline_percent != null
-                    ? ` · ${cardio.incline_percent}% inclinação`
-                    : ""}
-                  {cardio.heart_rate_avg != null
-                    ? ` · FC ${cardio.heart_rate_avg} bpm`
-                    : ""}
-                </Text>
-              ))}
-            </View>
-          ) : null}
-          <View style={[estilos.cartaoRegistro, { marginTop: 16 }]}>
-            <Text style={estilos.tituloRegistro}>Registrar cardio</Text>
-            <Text style={[estilos.dataRegistro, { color: corTema }]}>
-              {new Date(`${dataSelecionada}T12:00:00`).toLocaleDateString(
-                "pt-BR",
-                {
-                  weekday: "long",
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                },
-              )}
+        </View>
+        {sessoesDoDia.filter((sessao) => sessao.plan_id !== null).length > 0 ? (
+          <View style={estilos.cartaoHistorico}>
+            <Text style={estilos.tituloRegistro}>
+              Treinos registrados neste dia
             </Text>
-            {modelosCardio.length === 0 ? (
-              <Text style={estilos.textoSecundario}>
-                Você ainda não cadastrou cardios. Acesse Meus Cardios para criar
-                um modelo.
-              </Text>
-            ) : (
-              <>
-                <Text style={estilos.rotulo}>Qual cardio você realizou?</Text>
-                {modelosCardio.map((cardio) => {
-                  const selecionado = cardioSelecionado === cardio.id;
-                  return (
-                    <TouchableOpacity
-                      key={cardio.id}
-                      style={[
-                        estilos.opcaoTreino,
-                        selecionado && {
-                          backgroundColor: `${corTema}20`,
-                          borderColor: corTema,
-                        },
-                      ]}
-                      onPress={() => selecionarCardio(cardio)}
-                    >
-                      <Text
-                        style={[
-                          estilos.textoOpcao,
-                          selecionado && estilos.textoOpcaoSelecionada,
-                        ]}
-                      >
-                        {selecionado ? "✓  " : ""}
-                        {cardio.nome} · {cardio.tipo}
-                        {cardio.duracao_min != null
-                          ? ` · ${cardio.duracao_min} min`
-                          : ""}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-                {modeloCardioSelecionado ? (
-                  <View style={{ marginTop: 10 }}>
-                    {!perfilCaloriasCompleto ? (
-                      <Text style={estilos.avisoCalorias}>
-                        Para estimar calorias, complete peso, altura, idade e
-                        sexo em Meu Perfil.
-                      </Text>
-                    ) : null}
-                    <Text style={estilos.rotulo}>Duração (minutos) *</Text>
-                    <TextInput
-                      style={estilos.inputCardio}
-                      value={duracaoCardio}
-                      onChangeText={setDuracaoCardio}
-                      placeholder="Ex.: 25"
-                      placeholderTextColor="#828A85"
-                      keyboardType="decimal-pad"
-                    />
-                    <Text style={estilos.rotulo}>Intensidade</Text>
-                    <View style={estilos.opcoesIntensidade}>
-                      {(
-                        [
-                          ["leve", "Leve"],
-                          ["moderada", "Moderada"],
-                          ["intensa", "Intensa"],
-                        ] as const
-                      ).map(([valor, rotulo]) => (
-                        <TouchableOpacity
-                          key={valor}
-                          style={[
-                            estilos.botaoIntensidade,
-                            intensidadeCardio === valor && {
-                              borderColor: corTema,
-                              backgroundColor: `${corTema}22`,
-                            },
-                          ]}
-                          onPress={() => setIntensidadeCardio(valor)}
+            {sessoesDoDia
+              .filter((sessao) => sessao.plan_id !== null)
+              .map((sessao) => {
+                const treino = treinos.find(
+                  (item) => item.id === sessao.plan_id,
+                );
+                const nomeTreino = treino?.name ?? "Treino registrado";
+                return (
+                  <View key={sessao.id} style={estilos.itemHistorico}>
+                    <View style={estilos.linhaRegistroSalvo}>
+                      <View style={estilos.conteudoRegistroSalvo}>
+                        <Text
+                          style={[estilos.textoTreinoDoDia, { color: corTema }]}
                         >
-                          <Text
-                            style={[
-                              estilos.textoIntensidade,
-                              intensidadeCardio === valor && { color: corTema },
-                            ]}
-                          >
-                            {rotulo}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    {categoriaSelecionada === "escadas" ? (
-                      <>
-                        <Text style={estilos.rotulo}>
-                          Andares subidos (opcional)
+                          ✓ {nomeTreino}
                         </Text>
-                        <TextInput
-                          style={estilos.inputCardio}
-                          value={andaresSubidos}
-                          onChangeText={setAndaresSubidos}
-                          placeholder="Ex.: 12"
-                          placeholderTextColor="#828A85"
-                          keyboardType="number-pad"
-                        />
                         <Text style={estilos.textoSecundario}>
-                          Informe os andares completos que você subiu. O app usa
-                          esse número junto com a duração para ajustar a
-                          estimativa.
+                          {new Date(sessao.started_at).toLocaleTimeString(
+                            "pt-BR",
+                            {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )}
                         </Text>
-                      </>
-                    ) : null}
-                    {categoriaSelecionada === "bicicleta" ? (
-                      <>
-                        <Text style={estilos.rotulo}>
-                          Cadência da bicicleta (RPM, opcional)
-                        </Text>
-                        <TextInput
-                          style={estilos.inputCardio}
-                          value={cadenciaBicicleta}
-                          onChangeText={setCadenciaBicicleta}
-                          placeholder="Ex.: 75"
-                          placeholderTextColor="#828A85"
-                          keyboardType="number-pad"
-                        />
-                        <Text style={estilos.textoSecundario}>
-                          RPM registra pedaladas por minuto, mas não é usado
-                          sozinho no cálculo porque não informa a resistência ou
-                          potência.
-                        </Text>
-                      </>
-                    ) : null}
-                    {categoriaSelecionada === "caminhada" ||
-                    categoriaSelecionada === "corrida" ||
-                    categoriaSelecionada === "esteira" ||
-                    categoriaSelecionada === "bicicleta" ? (
-                      <>
-                        <Text style={estilos.rotulo}>
-                          Distância (km)
-                          {categoriaSelecionada === "esteira" &&
-                          Number(inclinacaoCardio.replace(",", ".")) > 0
-                            ? " *"
-                            : " (opcional)"}
-                        </Text>
-                        <TextInput
-                          style={estilos.inputCardio}
-                          value={distanciaCardio}
-                          onChangeText={setDistanciaCardio}
-                          placeholder="Ex.: 3,5"
-                          placeholderTextColor="#828A85"
-                          keyboardType="decimal-pad"
-                        />
-                        <Text style={estilos.textoSecundario}>
-                          {categoriaSelecionada === "esteira"
-                            ? "A distância permite estimar a velocidade média e calcular o efeito da inclinação. Para inclinação acima de 0%, a distância é necessária."
-                            : categoriaSelecionada === "bicicleta"
-                              ? "Opcional: se informar os quilômetros, a velocidade média aproximada ajuda a refinar a estimativa. Em bicicletas ergométricas, a distância depende do aparelho."
-                              : "Opcional: se informar os quilômetros, a velocidade média será calculada com a duração e usada para refinar as calorias."}
-                        </Text>
-                      </>
-                    ) : null}
-                    {categoriaSelecionada === "esteira" ? (
-                      <>
-                        <Text style={estilos.rotulo}>
-                          Inclinação da esteira (0 a 15%)
-                        </Text>
-                        <TextInput
-                          style={estilos.inputCardio}
-                          value={inclinacaoCardio}
-                          onChangeText={setInclinacaoCardio}
-                          placeholder="0 a 15"
-                          placeholderTextColor="#828A85"
-                          keyboardType="decimal-pad"
-                        />
-                      </>
-                    ) : null}
-                    <Text style={estilos.textoSecundario}>
-                      A estimativa usa peso, altura, idade, sexo, duração e
-                      intensidade. Quando disponíveis, quilômetros, andares e
-                      inclinação refinam o cálculo.
-                    </Text>
-                    <View style={estilos.resumoCalorias}>
-                      <Text style={estilos.textoResumoCalorias}>
-                        Calorias ativas estimadas
-                      </Text>
-                      <Text style={[estilos.valorCalorias, { color: corTema }]}>
-                        {estimativaCalorias
-                          ? `${estimativaCalorias.caloriasAtivas} kcal`
-                          : !perfilCaloriasCompleto
-                            ? "Complete seu perfil"
-                            : duracaoNumerica === null ||
-                                !Number.isFinite(duracaoNumerica) ||
-                                duracaoNumerica <= 0
-                              ? "Informe a duração"
-                              : categoriaSelecionada === "esteira" &&
-                                  (inclinacaoNumerica === null ||
-                                    !Number.isFinite(inclinacaoNumerica) ||
-                                    inclinacaoNumerica < 0 ||
-                                    inclinacaoNumerica > 15)
-                                ? "Use inclinação de 0 a 15%"
-                                : categoriaSelecionada === "esteira" &&
-                                    inclinacaoNumerica !== null &&
-                                    inclinacaoNumerica > 0 &&
-                                    (!Number.isFinite(
-                                      Number(distanciaCardio.replace(",", ".")),
-                                    ) ||
-                                      Number(
-                                        distanciaCardio.replace(",", "."),
-                                      ) <= 0)
-                                  ? "Informe a distância para calcular a inclinação"
-                                  : intensidadeCardio === null
-                                    ? "Selecione a intensidade"
-                                    : categoriaSelecionada === "escadas" &&
-                                        andaresSubidos.trim() &&
-                                        (andaresNumericos === null ||
-                                          !Number.isInteger(andaresNumericos) ||
-                                          andaresNumericos < 1 ||
-                                          andaresNumericos > 1000)
-                                      ? "Confira os andares subidos"
-                                      : distanciaCardio.trim() &&
-                                          (distanciaNumerica === null ||
-                                            !Number.isFinite(
-                                              distanciaNumerica,
-                                            ) ||
-                                            distanciaNumerica <= 0 ||
-                                            distanciaNumerica > 1000)
-                                        ? "Confira a distância em km"
-                                        : "Confira os dados do cardio"}
-                      </Text>
-                      {estimativaCalorias ? (
-                        <Text style={estilos.detalheCalorias}>
-                          Estimativa por MET {estimativaCalorias.met}. É uma
-                          aproximação; o gasto real varia conforme o esforço e
-                          as características individuais.
-                        </Text>
-                      ) : null}
-                    </View>
-                  </View>
-                ) : null}
-                <TouchableOpacity
-                  style={[
-                    estilos.botaoSalvar,
-                    { backgroundColor: corTema },
-                    (salvando || !cardioSelecionado) &&
-                      estilos.botaoDesabilitado,
-                  ]}
-                  onPress={registrarCardio}
-                  disabled={salvando || !cardioSelecionado}
-                >
-                  {salvando ? (
-                    <ActivityIndicator color="#101312" />
-                  ) : (
-                    <Text style={estilos.textoBotaoSalvar}>
-                      {estimativaCalorias
-                        ? `Confirmar cardio · ${estimativaCalorias.caloriasAtivas} kcal`
-                        : "Confirmar cardio"}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-          {sessoesDoDia.some((sessao) => sessao.plan_id !== null) ||
-          cardiosDoDia.length > 0 ? (
-            <View style={estilos.treinosDoDia}>
-              <TouchableOpacity
-                style={[
-                  estilos.botaoExcluirRegistro,
-                  salvando && estilos.botaoDesabilitado,
-                ]}
-                onPress={() => {
-                  setMensagemStatus("");
-                  setConfirmandoExclusao(true);
-                }}
-                disabled={salvando}
-              >
-                <Text style={estilos.textoBotaoExcluir}>
-                  Excluir registro do dia
-                </Text>
-              </TouchableOpacity>
-              {confirmandoExclusao ? (
-                <View style={estilos.confirmacaoExclusao}>
-                  <Text style={estilos.textoSecundario}>
-                    Tem certeza que deseja excluir os registros de musculação e
-                    cardio desta data? Eles também serão removidos do histórico.
-                  </Text>
-                  <View style={estilos.acoesConfirmacao}>
-                    <TouchableOpacity
-                      style={estilos.botaoCancelarExclusao}
-                      onPress={() => setConfirmandoExclusao(false)}
-                      disabled={salvando}
-                    >
-                      <Text style={estilos.textoOpcao}>Cancelar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={estilos.botaoConfirmarExclusao}
-                      onPress={excluirRegistroDoDia}
-                      disabled={salvando}
-                    >
-                      {salvando ? (
-                        <ActivityIndicator color="#FFFFFF" />
-                      ) : (
+                      </View>
+                      <TouchableOpacity
+                        style={[
+                          estilos.botaoExcluirIndividual,
+                          salvando && estilos.botaoDesabilitado,
+                        ]}
+                        onPress={() =>
+                          setRegistroParaExcluir({
+                            tipo: "treino",
+                            id: sessao.id,
+                            nome: nomeTreino,
+                          })
+                        }
+                        disabled={salvando}
+                      >
                         <Text style={estilos.textoBotaoExcluir}>
-                          Confirmar exclusão
+                          Excluir treino
                         </Text>
-                      )}
-                    </TouchableOpacity>
+                      </TouchableOpacity>
+                    </View>
+                    {registroParaExcluir?.tipo === "treino" &&
+                    registroParaExcluir.id === sessao.id ? (
+                      <View style={estilos.confirmacaoExclusao}>
+                        <Text style={estilos.textoSecundario}>
+                          Excluir somente “{registroParaExcluir.nome}”? Os
+                          demais treinos e cardios desse dia serão mantidos.
+                        </Text>
+                        <View style={estilos.acoesConfirmacao}>
+                          <TouchableOpacity
+                            style={estilos.botaoCancelarExclusao}
+                            onPress={() => setRegistroParaExcluir(null)}
+                            disabled={salvando}
+                          >
+                            <Text style={estilos.textoOpcao}>Cancelar</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={estilos.botaoConfirmarExclusao}
+                            onPress={excluirRegistroSelecionado}
+                            disabled={salvando}
+                          >
+                            {salvando ? (
+                              <ActivityIndicator color="#FFFFFF" />
+                            ) : (
+                              <Text style={estilos.textoBotaoExcluir}>
+                                Confirmar exclusão
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
+          </View>
+        ) : null}
+        <View style={estilos.cartaoRegistro}>
+          <Text style={estilos.tituloRegistro}>Registrar cardio</Text>
+          <Text style={[estilos.dataRegistro, { color: corTema }]}>
+            {new Date(`${dataSelecionada}T12:00:00`).toLocaleDateString(
+              "pt-BR",
+              {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              },
+            )}
+          </Text>
+          {modelosCardio.length === 0 ? (
+            <Text style={estilos.textoSecundario}>
+              Você ainda não cadastrou cardios. Acesse Meus Cardios para criar
+              um modelo.
+            </Text>
+          ) : (
+            <>
+              <Text style={estilos.rotulo}>Qual cardio você realizou?</Text>
+              {modelosCardio.map((cardio) => {
+                const selecionado = cardioSelecionado === cardio.id;
+                return (
+                  <TouchableOpacity
+                    key={cardio.id}
+                    style={[
+                      estilos.opcaoTreino,
+                      selecionado && {
+                        backgroundColor: `${corTema}20`,
+                        borderColor: corTema,
+                      },
+                    ]}
+                    onPress={() => selecionarCardio(cardio)}
+                  >
+                    <Text
+                      style={[
+                        estilos.textoOpcao,
+                        selecionado && estilos.textoOpcaoSelecionada,
+                      ]}
+                    >
+                      {selecionado ? "✓  " : ""}
+                      {cardio.nome} · {cardio.tipo}
+                      {cardio.duracao_min != null
+                        ? ` · ${cardio.duracao_min} min`
+                        : ""}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {modeloCardioSelecionado ? (
+                <View style={{ marginTop: 10 }}>
+                  {!perfilCaloriasCompleto ? (
+                    <Text style={estilos.avisoCalorias}>
+                      Para estimar calorias, complete peso, altura, idade e sexo
+                      em Meu Perfil.
+                    </Text>
+                  ) : null}
+                  <Text style={estilos.rotulo}>Duração (minutos) *</Text>
+                  <TextInput
+                    style={estilos.inputCardio}
+                    value={duracaoCardio}
+                    onChangeText={setDuracaoCardio}
+                    placeholder="Ex.: 25"
+                    placeholderTextColor="#828A85"
+                    keyboardType="decimal-pad"
+                  />
+                  <Text style={estilos.rotulo}>Intensidade</Text>
+                  <View style={estilos.opcoesIntensidade}>
+                    {(
+                      [
+                        ["leve", "Leve"],
+                        ["moderada", "Moderada"],
+                        ["intensa", "Intensa"],
+                      ] as const
+                    ).map(([valor, rotulo]) => (
+                      <TouchableOpacity
+                        key={valor}
+                        style={[
+                          estilos.botaoIntensidade,
+                          intensidadeCardio === valor && {
+                            borderColor: corTema,
+                            backgroundColor: `${corTema}22`,
+                          },
+                        ]}
+                        onPress={() => setIntensidadeCardio(valor)}
+                      >
+                        <Text
+                          style={[
+                            estilos.textoIntensidade,
+                            intensidadeCardio === valor && { color: corTema },
+                          ]}
+                        >
+                          {rotulo}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {categoriaSelecionada === "escadas" ? (
+                    <>
+                      <Text style={estilos.rotulo}>
+                        Andares subidos (opcional)
+                      </Text>
+                      <TextInput
+                        style={estilos.inputCardio}
+                        value={andaresSubidos}
+                        onChangeText={setAndaresSubidos}
+                        placeholder="Ex.: 12"
+                        placeholderTextColor="#828A85"
+                        keyboardType="number-pad"
+                      />
+                      <Text style={estilos.textoSecundario}>
+                        Informe os andares completos que você subiu. O app usa
+                        esse número junto com a duração para ajustar a
+                        estimativa.
+                      </Text>
+                    </>
+                  ) : null}
+                  {categoriaSelecionada === "bicicleta" ? (
+                    <>
+                      <Text style={estilos.rotulo}>
+                        Cadência da bicicleta (RPM, opcional)
+                      </Text>
+                      <TextInput
+                        style={estilos.inputCardio}
+                        value={cadenciaBicicleta}
+                        onChangeText={setCadenciaBicicleta}
+                        placeholder="Ex.: 75"
+                        placeholderTextColor="#828A85"
+                        keyboardType="number-pad"
+                      />
+                      <Text style={estilos.textoSecundario}>
+                        RPM registra pedaladas por minuto, mas não é usado
+                        sozinho no cálculo porque não informa a resistência ou
+                        potência.
+                      </Text>
+                    </>
+                  ) : null}
+                  {categoriaSelecionada === "caminhada" ||
+                  categoriaSelecionada === "corrida" ||
+                  categoriaSelecionada === "esteira" ||
+                  categoriaSelecionada === "bicicleta" ? (
+                    <>
+                      <Text style={estilos.rotulo}>
+                        Distância (km)
+                        {categoriaSelecionada === "esteira" &&
+                        Number(inclinacaoCardio.replace(",", ".")) > 0
+                          ? " *"
+                          : " (opcional)"}
+                      </Text>
+                      <TextInput
+                        style={estilos.inputCardio}
+                        value={distanciaCardio}
+                        onChangeText={setDistanciaCardio}
+                        placeholder="Ex.: 3,5"
+                        placeholderTextColor="#828A85"
+                        keyboardType="decimal-pad"
+                      />
+                      <Text style={estilos.textoSecundario}>
+                        {categoriaSelecionada === "esteira"
+                          ? "A distância permite estimar a velocidade média e calcular o efeito da inclinação. Para inclinação acima de 0%, a distância é necessária."
+                          : categoriaSelecionada === "bicicleta"
+                            ? "Opcional: se informar os quilômetros, a velocidade média aproximada ajuda a refinar a estimativa. Em bicicletas ergométricas, a distância depende do aparelho."
+                            : "Opcional: se informar os quilômetros, a velocidade média será calculada com a duração e usada para refinar as calorias."}
+                      </Text>
+                    </>
+                  ) : null}
+                  {categoriaSelecionada === "esteira" ? (
+                    <>
+                      <Text style={estilos.rotulo}>
+                        Inclinação da esteira (0 a 15%)
+                      </Text>
+                      <TextInput
+                        style={estilos.inputCardio}
+                        value={inclinacaoCardio}
+                        onChangeText={setInclinacaoCardio}
+                        placeholder="0 a 15"
+                        placeholderTextColor="#828A85"
+                        keyboardType="decimal-pad"
+                      />
+                    </>
+                  ) : null}
+                  <Text style={estilos.textoSecundario}>
+                    A estimativa usa peso, altura, idade, sexo, duração e
+                    intensidade. Quando disponíveis, quilômetros, andares e
+                    inclinação refinam o cálculo.
+                  </Text>
+                  <View style={estilos.resumoCalorias}>
+                    <Text style={estilos.textoResumoCalorias}>
+                      Calorias ativas estimadas
+                    </Text>
+                    <Text style={[estilos.valorCalorias, { color: corTema }]}>
+                      {estimativaCalorias
+                        ? `${estimativaCalorias.caloriasAtivas} kcal`
+                        : !perfilCaloriasCompleto
+                          ? "Complete seu perfil"
+                          : duracaoNumerica === null ||
+                              !Number.isFinite(duracaoNumerica) ||
+                              duracaoNumerica <= 0
+                            ? "Informe a duração"
+                            : categoriaSelecionada === "esteira" &&
+                                (inclinacaoNumerica === null ||
+                                  !Number.isFinite(inclinacaoNumerica) ||
+                                  inclinacaoNumerica < 0 ||
+                                  inclinacaoNumerica > 15)
+                              ? "Use inclinação de 0 a 15%"
+                              : categoriaSelecionada === "esteira" &&
+                                  inclinacaoNumerica !== null &&
+                                  inclinacaoNumerica > 0 &&
+                                  (!Number.isFinite(
+                                    Number(distanciaCardio.replace(",", ".")),
+                                  ) ||
+                                    Number(distanciaCardio.replace(",", ".")) <=
+                                      0)
+                                ? "Informe a distância para calcular a inclinação"
+                                : intensidadeCardio === null
+                                  ? "Selecione a intensidade"
+                                  : categoriaSelecionada === "escadas" &&
+                                      andaresSubidos.trim() &&
+                                      (andaresNumericos === null ||
+                                        !Number.isInteger(andaresNumericos) ||
+                                        andaresNumericos < 1 ||
+                                        andaresNumericos > 1000)
+                                    ? "Confira os andares subidos"
+                                    : distanciaCardio.trim() &&
+                                        (distanciaNumerica === null ||
+                                          !Number.isFinite(distanciaNumerica) ||
+                                          distanciaNumerica <= 0 ||
+                                          distanciaNumerica > 1000)
+                                      ? "Confira a distância em km"
+                                      : "Confira os dados do cardio"}
+                    </Text>
+                    {estimativaCalorias ? (
+                      <Text style={estilos.detalheCalorias}>
+                        Estimativa por MET {estimativaCalorias.met}. É uma
+                        aproximação; o gasto real varia conforme o esforço e as
+                        características individuais.
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
               ) : null}
-            </View>
-          ) : null}
-          {mensagemStatus ? (
-            <Text style={estilos.mensagemStatus}>{mensagemStatus}</Text>
-          ) : null}
+              <TouchableOpacity
+                style={[
+                  estilos.botaoSalvar,
+                  { backgroundColor: corTema },
+                  (salvando || !cardioSelecionado) && estilos.botaoDesabilitado,
+                ]}
+                onPress={registrarCardio}
+                disabled={salvando || !cardioSelecionado}
+              >
+                {salvando ? (
+                  <ActivityIndicator color="#101312" />
+                ) : (
+                  <Text style={estilos.textoBotaoSalvar}>
+                    {estimativaCalorias
+                      ? `Confirmar cardio · ${estimativaCalorias.caloriasAtivas} kcal`
+                      : "Confirmar cardio"}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </>
+          )}
         </View>
+        {cardiosDoDia.length > 0 ? (
+          <View style={estilos.cartaoHistorico}>
+            <Text style={estilos.tituloRegistro}>
+              Cardios registrados neste dia
+            </Text>
+            {cardiosDoDia.map((cardio) => (
+              <View key={cardio.id} style={estilos.itemHistorico}>
+                <View style={estilos.linhaRegistroSalvo}>
+                  <View style={estilos.conteudoRegistroSalvo}>
+                    <Text
+                      style={[estilos.textoTreinoDoDia, { color: corTema }]}
+                    >
+                      ✓ {cardio.activity_name}
+                    </Text>
+                    <Text style={estilos.textoSecundario}>
+                      {cardio.duration_minutes != null
+                        ? `${cardio.duration_minutes} min`
+                        : ""}
+                      {cardio.distance_km != null
+                        ? ` · ${cardio.distance_km} km`
+                        : ""}
+                      {(cardio.active_calories ?? cardio.calories) != null
+                        ? ` · ${cardio.active_calories ?? cardio.calories} ${cardio.active_calories != null ? "kcal ativas estimadas" : "kcal"}`
+                        : ""}
+                      {cardio.floors_up != null
+                        ? ` · ${cardio.floors_up} andares subidos`
+                        : ""}
+                      {cardio.cadence_rpm != null
+                        ? ` · ${cardio.cadence_rpm} RPM`
+                        : ""}
+                      {cardio.speed_kmh != null
+                        ? ` · ${cardio.speed_kmh} km/h`
+                        : ""}
+                      {cardio.intensity ? ` · ${cardio.intensity}` : ""}
+                      {cardio.incline_percent != null
+                        ? ` · ${cardio.incline_percent}% inclinação`
+                        : ""}
+                      {cardio.heart_rate_avg != null
+                        ? ` · FC ${cardio.heart_rate_avg} bpm`
+                        : ""}
+                    </Text>
+                    <Text style={estilos.textoSecundario}>
+                      {new Date(cardio.started_at).toLocaleTimeString("pt-BR", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[
+                      estilos.botaoExcluirIndividual,
+                      salvando && estilos.botaoDesabilitado,
+                    ]}
+                    onPress={() =>
+                      setRegistroParaExcluir({
+                        tipo: "cardio",
+                        id: cardio.id,
+                        nome: cardio.activity_name,
+                      })
+                    }
+                    disabled={salvando}
+                  >
+                    <Text style={estilos.textoBotaoExcluir}>
+                      Excluir cardio
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {registroParaExcluir?.tipo === "cardio" &&
+                registroParaExcluir.id === cardio.id ? (
+                  <View style={estilos.confirmacaoExclusao}>
+                    <Text style={estilos.textoSecundario}>
+                      Excluir somente “{registroParaExcluir.nome}”? O treino e
+                      os outros cardios desse dia serão mantidos.
+                    </Text>
+                    <View style={estilos.acoesConfirmacao}>
+                      <TouchableOpacity
+                        style={estilos.botaoCancelarExclusao}
+                        onPress={() => setRegistroParaExcluir(null)}
+                        disabled={salvando}
+                      >
+                        <Text style={estilos.textoOpcao}>Cancelar</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={estilos.botaoConfirmarExclusao}
+                        onPress={excluirRegistroSelecionado}
+                        disabled={salvando}
+                      >
+                        {salvando ? (
+                          <ActivityIndicator color="#FFFFFF" />
+                        ) : (
+                          <Text style={estilos.textoBotaoExcluir}>
+                            Confirmar exclusão
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
+        {mensagemStatus ? (
+          <Text style={estilos.mensagemStatus}>{mensagemStatus}</Text>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -1568,6 +1616,43 @@ const estilos = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 18,
     padding: 16,
+    marginBottom: 18,
+  },
+  cartaoHistorico: {
+    backgroundColor: "#171C19",
+    borderColor: "#2B332E",
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 18,
+    gap: 10,
+  },
+  itemHistorico: {
+    borderWidth: 1,
+    borderColor: "#303832",
+    borderRadius: 12,
+    padding: 12,
+    gap: 10,
+    marginTop: 2,
+  },
+  linhaRegistroSalvo: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  conteudoRegistroSalvo: {
+    flex: 1,
+    minWidth: 0,
+    gap: 5,
+  },
+  botaoExcluirIndividual: {
+    borderWidth: 1,
+    borderColor: "#8F4545",
+    borderRadius: 9,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    alignSelf: "center",
   },
   tituloRegistro: {
     color: "#F3F5F3",
