@@ -1,10 +1,11 @@
 import React, { ReactNode, useEffect, useRef } from "react";
 import {
+  Animated,
   BackHandler,
+  Dimensions,
   PanResponder,
   Platform,
   StyleSheet,
-  View,
 } from "react-native";
 
 type Props = {
@@ -19,47 +20,87 @@ export default function NavegacaoVoltarGlobal({
   ativo = true,
 }: Props) {
   const voltarRef = useRef(onVoltar);
-  const gestoConcluido = useRef(false);
+  const ativoRef = useRef(ativo);
+  const fechandoRef = useRef(false);
+  const deslocamento = useRef(new Animated.Value(0)).current;
 
   voltarRef.current = onVoltar;
+  ativoRef.current = ativo;
 
-  const gesto = useRef(
+  const animarParaOrigem = () => {
+    fechandoRef.current = false;
+    Animated.spring(deslocamento, {
+      toValue: 0,
+      useNativeDriver: Platform.OS !== "web",
+      tension: 180,
+      friction: 24,
+    }).start();
+  };
+
+  const iniciarVolta = () => {
+    if (fechandoRef.current || !ativoRef.current) {
+      return;
+    }
+
+    fechandoRef.current = true;
+    const largura = Dimensions.get("window").width;
+
+    Animated.timing(deslocamento, {
+      toValue: largura,
+      duration: 160,
+      useNativeDriver: Platform.OS !== "web",
+    }).start(({ finished }) => {
+      if (!finished) {
+        fechandoRef.current = false;
+        return;
+      }
+
+      voltarRef.current();
+    });
+  };
+
+  const gestoDeVoltar = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-
-      onMoveShouldSetPanResponder: (_, movimento) =>
-        ativo &&
-        movimento.x0 <= 36 &&
-        movimento.dx > 8 &&
+      onMoveShouldSetPanResponderCapture: (_, movimento) =>
+        ativoRef.current &&
+        movimento.x0 <= 28 &&
+        movimento.dx > 6 &&
         Math.abs(movimento.dx) > Math.abs(movimento.dy) * 1.2,
-
+      onMoveShouldSetPanResponder: (_, movimento) =>
+        ativoRef.current &&
+        movimento.x0 <= 28 &&
+        movimento.dx > 6 &&
+        Math.abs(movimento.dx) > Math.abs(movimento.dy) * 1.2,
       onPanResponderGrant: () => {
-        gestoConcluido.current = false;
+        fechandoRef.current = false;
+        deslocamento.stopAnimation();
       },
-
-      onPanResponderTerminationRequest: () => false,
-
-      onPanResponderRelease: (_, movimento) => {
-        if (
-          !gestoConcluido.current &&
-          ativo &&
-          movimento.x0 <= 36 &&
-          movimento.dx >= 55 &&
-          Math.abs(movimento.dx) > Math.abs(movimento.dy) * 1.2
-        ) {
-          gestoConcluido.current = true;
-          voltarRef.current();
+      onPanResponderMove: (_, movimento) => {
+        if (movimento.dx > 0 && !fechandoRef.current) {
+          deslocamento.setValue(movimento.dx);
         }
       },
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderRelease: (_, movimento) => {
+        const largura = Dimensions.get("window").width;
+        const concluiu =
+          ativoRef.current &&
+          (movimento.dx >= largura * 0.25 || movimento.vx >= 0.55);
 
-      onPanResponderTerminate: () => {
-        gestoConcluido.current = false;
+        if (concluiu) {
+          iniciarVolta();
+          return;
+        }
+
+        animarParaOrigem();
       },
+      onPanResponderTerminate: animarParaOrigem,
     }),
   ).current;
 
   useEffect(() => {
-    if (!ativo || Platform.OS === "ios") {
+    if (Platform.OS === "ios" || Platform.OS === "web" || !ativo) {
       return;
     }
 
@@ -72,26 +113,28 @@ export default function NavegacaoVoltarGlobal({
   }, [ativo]);
 
   return (
-    <View style={estilos.container}>
+    <Animated.View
+      {...(Platform.OS === "web" ? gestoDeVoltar.panHandlers : {})}
+      style={[
+        estilos.container,
+        {
+          transform: [{ translateX: deslocamento }],
+          shadowOpacity: Platform.OS === "web" ? 0.18 : 0,
+        },
+      ]}
+    >
       {children}
-
-      {ativo && <View style={estilos.areaGesto} {...gesto.panHandlers} />}
-    </View>
+    </Animated.View>
   );
 }
 
 const estilos = StyleSheet.create({
   container: {
     flex: 1,
+    minHeight: 0,
     backgroundColor: "#101312",
-  },
-  areaGesto: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 36,
-    zIndex: 999,
-    backgroundColor: "transparent",
+    shadowColor: "#000000",
+    shadowOffset: { width: -3, height: 0 },
+    shadowRadius: 12,
   },
 });

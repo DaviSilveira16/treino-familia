@@ -38,6 +38,7 @@ import MeusTreinos from "./telas/MeusTreinos";
 import MeusCardios from "./telas/MeusCardios";
 import EvolucaoFisica from "./telas/EvolucaoFisica";
 import HistoricoTreinos from "./telas/HistoricoTreinos";
+import NavegacaoVoltarGlobal from "./telas/NavegacaoVoltarGlobal";
 
 type ModoAutenticacao = "login" | "cadastro" | "recuperar";
 
@@ -699,6 +700,9 @@ export default function App() {
           gestureDirection: "horizontal",
           gestureResponseDistance: 40,
           gestureVelocityImpact: 0.3,
+          cardOverlayEnabled: true,
+          cardShadowEnabled: true,
+          detachPreviousScreen: Platform.OS === "web" ? false : undefined,
           cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
           transitionSpec: {
             open: {
@@ -716,7 +720,7 @@ export default function App() {
           },
           cardStyle: {
             flex: 1,
-            backgroundColor: "#101312",
+            backgroundColor: Platform.OS === "web" ? "transparent" : "#101312",
           },
         }}
       >
@@ -850,56 +854,86 @@ export default function App() {
 
         <Pilha.Screen name="perfil">
           {({ navigation }) => (
-            <Perfil
-              usuario={sessao.user}
+            <NavegacaoVoltarGlobal
               onVoltar={() => navigation.goBack()}
-              onTemaAlterado={setCorTema}
-            />
+              ativo={Platform.OS === "web" && navigation.canGoBack()}
+            >
+              <Perfil
+                usuario={sessao.user}
+                onVoltar={() => navigation.goBack()}
+                onTemaAlterado={setCorTema}
+              />
+            </NavegacaoVoltarGlobal>
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="treinos">
           {({ navigation }) => (
-            <MeusTreinos
+            <NavegacaoVoltarGlobal
               onVoltar={() => navigation.goBack()}
-              corTema={corTema}
-            />
+              ativo={Platform.OS === "web" && navigation.canGoBack()}
+            >
+              <MeusTreinos
+                onVoltar={() => navigation.goBack()}
+                corTema={corTema}
+              />
+            </NavegacaoVoltarGlobal>
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="cardios">
           {({ navigation }) => (
-            <MeusCardios
+            <NavegacaoVoltarGlobal
               onVoltar={() => navigation.goBack()}
-              corTema={corTema}
-            />
+              ativo={Platform.OS === "web" && navigation.canGoBack()}
+            >
+              <MeusCardios
+                onVoltar={() => navigation.goBack()}
+                corTema={corTema}
+              />
+            </NavegacaoVoltarGlobal>
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="evolucao">
           {({ navigation }) => (
-            <EvolucaoFisica
+            <NavegacaoVoltarGlobal
               onVoltar={() => navigation.goBack()}
-              corTema={corTema}
-            />
+              ativo={Platform.OS === "web" && navigation.canGoBack()}
+            >
+              <EvolucaoFisica
+                onVoltar={() => navigation.goBack()}
+                corTema={corTema}
+              />
+            </NavegacaoVoltarGlobal>
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="historico">
           {({ navigation }) => (
-            <HistoricoTreinos
+            <NavegacaoVoltarGlobal
               onVoltar={() => navigation.goBack()}
-              corTema={corTema}
-            />
+              ativo={Platform.OS === "web" && navigation.canGoBack()}
+            >
+              <HistoricoTreinos
+                onVoltar={() => navigation.goBack()}
+                corTema={corTema}
+              />
+            </NavegacaoVoltarGlobal>
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="frequencia">
           {({ navigation }) => (
-            <Frequencia
+            <NavegacaoVoltarGlobal
               onVoltar={() => navigation.goBack()}
-              corTema={corTema}
-            />
+              ativo={Platform.OS === "web" && navigation.canGoBack()}
+            >
+              <Frequencia
+                onVoltar={() => navigation.goBack()}
+                corTema={corTema}
+              />
+            </NavegacaoVoltarGlobal>
           )}
         </Pilha.Screen>
       </Pilha.Navigator>
