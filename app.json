@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "treino-familia",
+    "name": "Treino Família",
     "slug": "treino-familia",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -19,6 +19,10 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
+      "name": "Treino Família",
+      "shortName": "Treino Fam",
+      "themeColor": "#111312",
+      "backgroundColor": "#111312",
       "favicon": "./assets/favicon.png"
     }
   }

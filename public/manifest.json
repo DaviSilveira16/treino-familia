@@ -1,0 +1,32 @@
+{
+  "id": "/",
+  "name": "Treino Família",
+  "short_name": "Treino Fam",
+  "description": "Acompanhe seus treinos, cardios e evolução física em família.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#111312",
+  "background_color": "#111312",
+  "icons": [
+    {
+      "src": "/treino-familia-icon-192-v2.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/treino-familia-icon-512-v2.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/treino-familia-icon-maskable-512-v2.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
