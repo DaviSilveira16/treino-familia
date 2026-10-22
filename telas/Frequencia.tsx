@@ -513,18 +513,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     }
 
     const duracao = lerNumero(duracaoCardio);
-    const distancia = lerNumero(distanciaCardio);
-    const inclinacao = lerNumero(inclinacaoCardio);
-    const frequencia = lerNumero(frequenciaCardiaca);
-    const velocidade = lerNumero(velocidadeCardio);
-    const cadencia = lerNumero(cadenciaBicicleta);
-    const nomeTipo = textoTipo(modelo.tipo);
-    const eBicicleta = nomeTipo.includes("bicicleta");
-    const eEsteira = nomeTipo.includes("esteira");
-    const aceitaVelocidade =
-      eEsteira ||
-      nomeTipo.includes("caminhada") ||
-      nomeTipo.includes("corrida");
 
     if (duracao === null || !Number.isFinite(duracao) || duracao <= 0) {
       Alert.alert(
@@ -540,38 +528,11 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       );
       return;
     }
-    const camposNumericos = [
-      ["distância", distancia, 0, 1000],
-      ["inclinação", inclinacao, 0, 25],
-      ["frequência cardíaca", frequencia, 30, 240],
-      ["velocidade", velocidade, 0.1, 18],
-      ["cadência", cadencia, 0.1, 250],
-    ] as const;
-    for (const [nomeCampo, valor, minimo, maximo] of camposNumericos) {
-      if (
-        valor !== null &&
-        (!Number.isFinite(valor) || valor < minimo || valor > maximo)
-      ) {
-        Alert.alert(
-          "Valor inválido",
-          `Confira o campo ${nomeCampo}. Informe um valor entre ${minimo} e ${maximo}.`,
-        );
-        return;
-      }
-    }
-    if (eEsteira && inclinacao !== null && inclinacao > 25) {
-      Alert.alert("Inclinação inválida", "Use uma inclinação entre 0% e 25%.");
-      return;
-    }
-
     const estimativa = estimarCaloriasAtivas({
       tipo: modelo.tipo,
       intensidade: intensidadeCardio,
       pesoKg: pesoUsuario,
       duracaoMinutos: duracao,
-      velocidadeKmh:
-        aceitaVelocidade && velocidade !== null ? velocidade : null,
-      inclinacaoPercentual: eEsteira && inclinacao !== null ? inclinacao : null,
     });
     if (!estimativa) {
       Alert.alert(
@@ -602,14 +563,14 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         activity_type: modelo.tipo,
         started_at: dataRegistro,
         duration_minutes: duracao,
-        distance_km: distancia,
+        distance_km: null,
         calories: estimativa.caloriasAtivas,
         active_calories: estimativa.caloriasAtivas,
         intensity: intensidadeCardio,
-        incline_percent: eEsteira ? inclinacao : null,
-        heart_rate_avg: frequencia,
-        speed_kmh: aceitaVelocidade ? velocidade : null,
-        cadence_rpm: eBicicleta ? cadencia : null,
+        incline_percent: null,
+        heart_rate_avg: null,
+        speed_kmh: null,
+        cadence_rpm: null,
         weight_kg_snapshot: pesoUsuario,
         met_value: estimativa.met,
         notes: modelo.observacoes,
@@ -1062,89 +1023,10 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                         </TouchableOpacity>
                       ))}
                     </View>
-                    <Text style={estilos.rotulo}>Distância (km, opcional)</Text>
-                    <TextInput
-                      style={estilos.inputCardio}
-                      value={distanciaCardio}
-                      onChangeText={setDistanciaCardio}
-                      placeholder="Ex.: 3,5"
-                      placeholderTextColor="#828A85"
-                      keyboardType="decimal-pad"
-                    />
-                    {textoTipo(modeloCardioSelecionado.tipo).includes(
-                      "esteira",
-                    ) ? (
-                      <>
-                        <Text style={estilos.rotulo}>
-                          Velocidade (km/h, opcional)
-                        </Text>
-                        <TextInput
-                          style={estilos.inputCardio}
-                          value={velocidadeCardio}
-                          onChangeText={setVelocidadeCardio}
-                          placeholder="Ex.: 6,0"
-                          placeholderTextColor="#828A85"
-                          keyboardType="decimal-pad"
-                        />
-                        <Text style={estilos.rotulo}>
-                          Inclinação da esteira (%, opcional)
-                        </Text>
-                        <TextInput
-                          style={estilos.inputCardio}
-                          value={inclinacaoCardio}
-                          onChangeText={setInclinacaoCardio}
-                          placeholder="Ex.: 5"
-                          placeholderTextColor="#828A85"
-                          keyboardType="decimal-pad"
-                        />
-                      </>
-                    ) : null}
-                    {textoTipo(modeloCardioSelecionado.tipo).includes(
-                      "bicicleta",
-                    ) ? (
-                      <>
-                        <Text style={estilos.rotulo}>
-                          Velocidade de pedalada da bicicleta (cadência em RPM,
-                          opcional)
-                        </Text>
-                        <TextInput
-                          style={estilos.inputCardio}
-                          value={cadenciaBicicleta}
-                          onChangeText={setCadenciaBicicleta}
-                          placeholder="Pedaladas por minuto; ex.: 80"
-                          placeholderTextColor="#828A85"
-                          keyboardType="decimal-pad"
-                        />
-                      </>
-                    ) : null}
-                    {["caminhada", "corrida"].some((tipo) =>
-                      textoTipo(modeloCardioSelecionado.tipo).includes(tipo),
-                    ) ? (
-                      <>
-                        <Text style={estilos.rotulo}>
-                          Velocidade (km/h, opcional)
-                        </Text>
-                        <TextInput
-                          style={estilos.inputCardio}
-                          value={velocidadeCardio}
-                          onChangeText={setVelocidadeCardio}
-                          placeholder="Ex.: 8,0"
-                          placeholderTextColor="#828A85"
-                          keyboardType="decimal-pad"
-                        />
-                      </>
-                    ) : null}
-                    <Text style={estilos.rotulo}>
-                      Frequência cardíaca média (bpm, opcional)
+                    <Text style={estilos.textoSecundario}>
+                      A estimativa usa seu peso, a duração, o tipo de cardio e a
+                      intensidade.
                     </Text>
-                    <TextInput
-                      style={estilos.inputCardio}
-                      value={frequenciaCardiaca}
-                      onChangeText={setFrequenciaCardiaca}
-                      placeholder="Ex.: 145"
-                      placeholderTextColor="#828A85"
-                      keyboardType="number-pad"
-                    />
                     <View style={estilos.resumoCalorias}>
                       <Text style={estilos.textoResumoCalorias}>
                         Calorias ativas estimadas
