@@ -14,8 +14,10 @@ import {
 
 import { supabase } from "../supabase";
 import {
+  categoriaDoCardio,
   estimarCaloriasAtivas,
   type IntensidadeCardio,
+  type SexoCardio,
 } from "../servicos/caloriasCardio";
 
 type Treino = {
@@ -54,6 +56,10 @@ type SessaoCardio = {
   speed_kmh?: number | null;
   cadence_rpm?: number | null;
   weight_kg_snapshot?: number | null;
+  height_cm_snapshot?: number | null;
+  age_snapshot?: number | null;
+  sex_snapshot?: string | null;
+  floors_up?: number | null;
   met_value?: number | null;
   notes: string | null;
 };
@@ -116,13 +122,15 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const [treinoSelecionado, setTreinoSelecionado] = useState("");
   const [cardioSelecionado, setCardioSelecionado] = useState("");
   const [pesoUsuario, setPesoUsuario] = useState<number | null>(null);
+  const [alturaUsuario, setAlturaUsuario] = useState<number | null>(null);
+  const [idadeUsuario, setIdadeUsuario] = useState<number | null>(null);
+  const [sexoUsuario, setSexoUsuario] = useState<SexoCardio | null>(null);
   const [duracaoCardio, setDuracaoCardio] = useState("");
   const [distanciaCardio, setDistanciaCardio] = useState("");
   const [intensidadeCardio, setIntensidadeCardio] =
     useState<IntensidadeCardio | null>(null);
-  const [inclinacaoCardio, setInclinacaoCardio] = useState("");
-  const [frequenciaCardiaca, setFrequenciaCardiaca] = useState("");
-  const [velocidadeCardio, setVelocidadeCardio] = useState("");
+  const [inclinacaoCardio, setInclinacaoCardio] = useState("0");
+  const [andaresSubidos, setAndaresSubidos] = useState("");
   const [cadenciaBicicleta, setCadenciaBicicleta] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -138,10 +146,31 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         return;
       }
       setUsuarioId(usuario.user.id);
-      const pesoPerfil = Number(usuario.user.user_metadata?.peso_kg);
+      const metadados = usuario.user.user_metadata ?? {};
+      const pesoPerfil = Number(metadados.peso_kg);
+      const alturaPerfil = Number(metadados.altura_cm);
+      const idadePerfil = Number(metadados.idade);
+      const sexoPerfil = metadados.sexo;
       setPesoUsuario(
         Number.isFinite(pesoPerfil) && pesoPerfil >= 20 && pesoPerfil <= 400
           ? pesoPerfil
+          : null,
+      );
+      setAlturaUsuario(
+        Number.isFinite(alturaPerfil) &&
+          alturaPerfil >= 100 &&
+          alturaPerfil <= 250
+          ? alturaPerfil
+          : null,
+      );
+      setIdadeUsuario(
+        Number.isInteger(idadePerfil) && idadePerfil >= 18 && idadePerfil <= 110
+          ? idadePerfil
+          : null,
+      );
+      setSexoUsuario(
+        sexoPerfil === "masculino" || sexoPerfil === "feminino"
+          ? sexoPerfil
           : null,
       );
       const [
@@ -170,7 +199,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         supabase
           .from("cardio_sessions")
           .select(
-            "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, cadence_rpm, weight_kg_snapshot, met_value, notes",
+            "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, cadence_rpm, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
           )
           .eq("user_id", usuario.user.id)
           .order("started_at", { ascending: false }),
@@ -229,27 +258,51 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const modeloCardioSelecionado = modelosCardio.find(
     (item) => item.id === cardioSelecionado,
   );
+  const categoriaSelecionada = modeloCardioSelecionado
+    ? categoriaDoCardio(modeloCardioSelecionado.tipo)
+    : null;
   const duracaoNumerica = lerNumero(duracaoCardio);
   const distanciaNumerica = lerNumero(distanciaCardio);
   const inclinacaoNumerica = lerNumero(inclinacaoCardio);
-  const velocidadeNumerica = lerNumero(velocidadeCardio);
+  const andaresNumericos = lerNumero(andaresSubidos);
+  const perfilCaloriasCompleto =
+    pesoUsuario !== null &&
+    alturaUsuario !== null &&
+    idadeUsuario !== null &&
+    sexoUsuario !== null;
   const estimativaCalorias =
     modeloCardioSelecionado &&
-    pesoUsuario !== null &&
+    perfilCaloriasCompleto &&
     duracaoNumerica !== null &&
+    Number.isFinite(duracaoNumerica) &&
+    duracaoNumerica > 0 &&
     intensidadeCardio !== null
       ? estimarCaloriasAtivas({
           tipo: modeloCardioSelecionado.tipo,
           intensidade: intensidadeCardio,
-          pesoKg: pesoUsuario,
+          pesoKg: pesoUsuario!,
+          alturaCm: alturaUsuario!,
+          idade: idadeUsuario!,
+          sexo: sexoUsuario!,
           duracaoMinutos: duracaoNumerica,
-          velocidadeKmh:
-            velocidadeNumerica !== null && Number.isFinite(velocidadeNumerica)
-              ? velocidadeNumerica
+          distanciaKm:
+            distanciaNumerica !== null &&
+            Number.isFinite(distanciaNumerica) &&
+            distanciaNumerica > 0
+              ? distanciaNumerica
               : null,
           inclinacaoPercentual:
-            inclinacaoNumerica !== null && Number.isFinite(inclinacaoNumerica)
-              ? inclinacaoNumerica
+            categoriaSelecionada === "esteira"
+              ? inclinacaoNumerica !== null &&
+                Number.isFinite(inclinacaoNumerica)
+                ? inclinacaoNumerica
+                : 0
+              : null,
+          andaresSubidos:
+            andaresNumericos !== null &&
+            Number.isInteger(andaresNumericos) &&
+            andaresNumericos > 0
+              ? andaresNumericos
               : null,
         })
       : null;
@@ -473,17 +526,20 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     }
   }
   function selecionarCardio(modelo: CardioModelo) {
+    const categoria = categoriaDoCardio(modelo.tipo);
     setCardioSelecionado(modelo.id);
     setDuracaoCardio(
       modelo.duracao_min == null ? "" : String(modelo.duracao_min),
     );
     setDistanciaCardio(
-      modelo.distancia_km == null ? "" : String(modelo.distancia_km),
+      ["esteira", "caminhada", "corrida", "bicicleta"].includes(categoria) &&
+        modelo.distancia_km != null
+        ? String(modelo.distancia_km)
+        : "",
     );
     setIntensidadeCardio(null);
-    setInclinacaoCardio("");
-    setFrequenciaCardiaca("");
-    setVelocidadeCardio("");
+    setInclinacaoCardio(categoria === "esteira" ? "0" : "");
+    setAndaresSubidos("");
     setCadenciaBicicleta("");
   }
 
@@ -499,10 +555,10 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       );
       return;
     }
-    if (pesoUsuario === null) {
+    if (!perfilCaloriasCompleto) {
       Alert.alert(
         "Complete seu perfil",
-        "Informe seu peso atual em Meu Perfil para calcular as calorias estimadas antes de registrar o cardio.",
+        "Informe peso, altura, idade e sexo em Meu Perfil para estimar as calorias do cardio.",
       );
       return;
     }
@@ -512,12 +568,31 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       return;
     }
 
+    const categoria = categoriaDoCardio(modelo.tipo);
     const duracao = lerNumero(duracaoCardio);
+    const distancia = distanciaCardio.trim()
+      ? lerNumero(distanciaCardio)
+      : null;
+    const inclinacao =
+      categoria === "esteira"
+        ? inclinacaoCardio.trim()
+          ? lerNumero(inclinacaoCardio)
+          : 0
+        : null;
+    const andares = andaresSubidos.trim() ? lerNumero(andaresSubidos) : null;
+    const cadencia = cadenciaBicicleta.trim()
+      ? lerNumero(cadenciaBicicleta)
+      : null;
 
-    if (duracao === null || !Number.isFinite(duracao) || duracao <= 0) {
+    if (
+      duracao === null ||
+      !Number.isFinite(duracao) ||
+      duracao <= 0 ||
+      duracao > 1440
+    ) {
       Alert.alert(
         "Duração necessária",
-        "Informe a duração do cardio em minutos.",
+        "Informe a duração em minutos, maior que zero e até 1440 minutos.",
       );
       return;
     }
@@ -528,16 +603,90 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       );
       return;
     }
+    if (
+      distanciaCardio.trim() &&
+      (distancia === null ||
+        !Number.isFinite(distancia) ||
+        distancia <= 0 ||
+        distancia > 1000)
+    ) {
+      Alert.alert(
+        "Distância inválida",
+        "Informe a distância em quilômetros, maior que zero e até 1000 km.",
+      );
+      return;
+    }
+    if (
+      categoria === "esteira" &&
+      (inclinacao === null ||
+        !Number.isFinite(inclinacao) ||
+        inclinacao < 0 ||
+        inclinacao > 15)
+    ) {
+      Alert.alert(
+        "Inclinação inválida",
+        "A inclinação da esteira deve estar entre 0 e 15%.",
+      );
+      return;
+    }
+    if (
+      categoria === "esteira" &&
+      inclinacao !== null &&
+      inclinacao > 0 &&
+      (distancia === null || !Number.isFinite(distancia) || distancia <= 0)
+    ) {
+      Alert.alert(
+        "Distância necessária",
+        "Para calcular o efeito da inclinação da esteira, informe também a distância percorrida em quilômetros.",
+      );
+      return;
+    }
+    if (
+      categoria === "escadas" &&
+      andaresSubidos.trim() &&
+      (andares === null ||
+        !Number.isInteger(andares) ||
+        andares < 1 ||
+        andares > 1000)
+    ) {
+      Alert.alert(
+        "Andares inválidos",
+        "Informe um número inteiro de andares subidos entre 1 e 1000.",
+      );
+      return;
+    }
+    if (
+      categoria === "bicicleta" &&
+      cadenciaBicicleta.trim() &&
+      (cadencia === null ||
+        !Number.isFinite(cadencia) ||
+        cadencia < 1 ||
+        cadencia > 250)
+    ) {
+      Alert.alert(
+        "Cadência inválida",
+        "Informe a cadência em RPM entre 1 e 250, ou deixe o campo vazio.",
+      );
+      return;
+    }
     const estimativa = estimarCaloriasAtivas({
       tipo: modelo.tipo,
       intensidade: intensidadeCardio,
-      pesoKg: pesoUsuario,
+      pesoKg: pesoUsuario!,
+      alturaCm: alturaUsuario!,
+      idade: idadeUsuario!,
+      sexo: sexoUsuario!,
       duracaoMinutos: duracao,
+      distanciaKm:
+        distancia !== null && Number.isFinite(distancia) ? distancia : null,
+      inclinacaoPercentual: categoria === "esteira" ? (inclinacao ?? 0) : null,
+      andaresSubidos:
+        andares !== null && Number.isFinite(andares) ? andares : null,
     });
     if (!estimativa) {
       Alert.alert(
         "Não foi possível calcular",
-        "Confira o peso no perfil e a duração do cardio.",
+        "Confira os dados do perfil e as informações da atividade. Na esteira inclinada, informe a distância e use inclinação de 0 a 15%.",
       );
       return;
     }
@@ -563,15 +712,30 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         activity_type: modelo.tipo,
         started_at: dataRegistro,
         duration_minutes: duracao,
-        distance_km: null,
+        distance_km:
+          distancia !== null && Number.isFinite(distancia) ? distancia : null,
         calories: estimativa.caloriasAtivas,
         active_calories: estimativa.caloriasAtivas,
         intensity: intensidadeCardio,
-        incline_percent: null,
+        incline_percent: categoria === "esteira" ? (inclinacao ?? 0) : null,
+        floors_up:
+          categoria === "escadas" &&
+          andares !== null &&
+          Number.isFinite(andares)
+            ? andares
+            : null,
         heart_rate_avg: null,
-        speed_kmh: null,
-        cadence_rpm: null,
+        speed_kmh: estimativa.velocidadeKmh,
+        cadence_rpm:
+          categoria === "bicicleta" &&
+          cadencia !== null &&
+          Number.isFinite(cadencia)
+            ? cadencia
+            : null,
         weight_kg_snapshot: pesoUsuario,
+        height_cm_snapshot: alturaUsuario,
+        age_snapshot: idadeUsuario,
+        sex_snapshot: sexoUsuario,
         met_value: estimativa.met,
         notes: modelo.observacoes,
       });
@@ -579,9 +743,8 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setCardioSelecionado("");
       setDuracaoCardio("");
       setDistanciaCardio("");
-      setInclinacaoCardio("");
-      setFrequenciaCardiaca("");
-      setVelocidadeCardio("");
+      setInclinacaoCardio("0");
+      setAndaresSubidos("");
       setCadenciaBicicleta("");
       await carregarDados();
       Alert.alert(
@@ -908,6 +1071,9 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                   {(cardio.active_calories ?? cardio.calories) != null
                     ? ` · ${cardio.active_calories ?? cardio.calories} ${cardio.active_calories != null ? "kcal ativas estimadas" : "kcal"}`
                     : ""}
+                  {cardio.floors_up != null
+                    ? ` · ${cardio.floors_up} andares subidos`
+                    : ""}
                   {cardio.cadence_rpm != null
                     ? ` · ${cardio.cadence_rpm} RPM`
                     : ""}
@@ -977,10 +1143,10 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                 })}
                 {modeloCardioSelecionado ? (
                   <View style={{ marginTop: 10 }}>
-                    {pesoUsuario === null ? (
+                    {!perfilCaloriasCompleto ? (
                       <Text style={estilos.avisoCalorias}>
-                        Para estimar calorias, primeiro informe seu peso em Meu
-                        Perfil.
+                        Para estimar calorias, complete peso, altura, idade e
+                        sexo em Meu Perfil.
                       </Text>
                     ) : null}
                     <Text style={estilos.rotulo}>Duração (minutos) *</Text>
@@ -1023,9 +1189,94 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                         </TouchableOpacity>
                       ))}
                     </View>
+                    {categoriaSelecionada === "escadas" ? (
+                      <>
+                        <Text style={estilos.rotulo}>
+                          Andares subidos (opcional)
+                        </Text>
+                        <TextInput
+                          style={estilos.inputCardio}
+                          value={andaresSubidos}
+                          onChangeText={setAndaresSubidos}
+                          placeholder="Ex.: 12"
+                          placeholderTextColor="#828A85"
+                          keyboardType="number-pad"
+                        />
+                        <Text style={estilos.textoSecundario}>
+                          Informe os andares completos que você subiu. O app usa
+                          esse número junto com a duração para ajustar a
+                          estimativa.
+                        </Text>
+                      </>
+                    ) : null}
+                    {categoriaSelecionada === "bicicleta" ? (
+                      <>
+                        <Text style={estilos.rotulo}>
+                          Cadência da bicicleta (RPM, opcional)
+                        </Text>
+                        <TextInput
+                          style={estilos.inputCardio}
+                          value={cadenciaBicicleta}
+                          onChangeText={setCadenciaBicicleta}
+                          placeholder="Ex.: 75"
+                          placeholderTextColor="#828A85"
+                          keyboardType="number-pad"
+                        />
+                        <Text style={estilos.textoSecundario}>
+                          RPM registra pedaladas por minuto, mas não é usado
+                          sozinho no cálculo porque não informa a resistência ou
+                          potência.
+                        </Text>
+                      </>
+                    ) : null}
+                    {categoriaSelecionada === "caminhada" ||
+                    categoriaSelecionada === "corrida" ||
+                    categoriaSelecionada === "esteira" ||
+                    categoriaSelecionada === "bicicleta" ? (
+                      <>
+                        <Text style={estilos.rotulo}>
+                          Distância (km)
+                          {categoriaSelecionada === "esteira" &&
+                          Number(inclinacaoCardio.replace(",", ".")) > 0
+                            ? " *"
+                            : " (opcional)"}
+                        </Text>
+                        <TextInput
+                          style={estilos.inputCardio}
+                          value={distanciaCardio}
+                          onChangeText={setDistanciaCardio}
+                          placeholder="Ex.: 3,5"
+                          placeholderTextColor="#828A85"
+                          keyboardType="decimal-pad"
+                        />
+                        <Text style={estilos.textoSecundario}>
+                          {categoriaSelecionada === "esteira"
+                            ? "A distância permite estimar a velocidade média e calcular o efeito da inclinação. Para inclinação acima de 0%, a distância é necessária."
+                            : categoriaSelecionada === "bicicleta"
+                              ? "Opcional: se informar os quilômetros, a velocidade média aproximada ajuda a refinar a estimativa. Em bicicletas ergométricas, a distância depende do aparelho."
+                              : "Opcional: se informar os quilômetros, a velocidade média será calculada com a duração e usada para refinar as calorias."}
+                        </Text>
+                      </>
+                    ) : null}
+                    {categoriaSelecionada === "esteira" ? (
+                      <>
+                        <Text style={estilos.rotulo}>
+                          Inclinação da esteira (0 a 15%)
+                        </Text>
+                        <TextInput
+                          style={estilos.inputCardio}
+                          value={inclinacaoCardio}
+                          onChangeText={setInclinacaoCardio}
+                          placeholder="0 a 15"
+                          placeholderTextColor="#828A85"
+                          keyboardType="decimal-pad"
+                        />
+                      </>
+                    ) : null}
                     <Text style={estilos.textoSecundario}>
-                      A estimativa usa seu peso, a duração, o tipo de cardio e a
-                      intensidade.
+                      A estimativa usa peso, altura, idade, sexo, duração e
+                      intensidade. Quando disponíveis, quilômetros, andares e
+                      inclinação refinam o cálculo.
                     </Text>
                     <View style={estilos.resumoCalorias}>
                       <Text style={estilos.textoResumoCalorias}>
@@ -1034,19 +1285,52 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                       <Text style={[estilos.valorCalorias, { color: corTema }]}>
                         {estimativaCalorias
                           ? `${estimativaCalorias.caloriasAtivas} kcal`
-                          : pesoUsuario === null
-                            ? "Informe seu peso no perfil"
+                          : !perfilCaloriasCompleto
+                            ? "Complete seu perfil"
                             : duracaoNumerica === null ||
                                 !Number.isFinite(duracaoNumerica) ||
                                 duracaoNumerica <= 0
                               ? "Informe a duração"
-                              : "Selecione a intensidade"}
+                              : categoriaSelecionada === "esteira" &&
+                                  (inclinacaoNumerica === null ||
+                                    !Number.isFinite(inclinacaoNumerica) ||
+                                    inclinacaoNumerica < 0 ||
+                                    inclinacaoNumerica > 15)
+                                ? "Use inclinação de 0 a 15%"
+                                : categoriaSelecionada === "esteira" &&
+                                    inclinacaoNumerica !== null &&
+                                    inclinacaoNumerica > 0 &&
+                                    (!Number.isFinite(
+                                      Number(distanciaCardio.replace(",", ".")),
+                                    ) ||
+                                      Number(
+                                        distanciaCardio.replace(",", "."),
+                                      ) <= 0)
+                                  ? "Informe a distância para calcular a inclinação"
+                                  : intensidadeCardio === null
+                                    ? "Selecione a intensidade"
+                                    : categoriaSelecionada === "escadas" &&
+                                        andaresSubidos.trim() &&
+                                        (andaresNumericos === null ||
+                                          !Number.isInteger(andaresNumericos) ||
+                                          andaresNumericos < 1 ||
+                                          andaresNumericos > 1000)
+                                      ? "Confira os andares subidos"
+                                      : distanciaCardio.trim() &&
+                                          (distanciaNumerica === null ||
+                                            !Number.isFinite(
+                                              distanciaNumerica,
+                                            ) ||
+                                            distanciaNumerica <= 0 ||
+                                            distanciaNumerica > 1000)
+                                        ? "Confira a distância em km"
+                                        : "Confira os dados do cardio"}
                       </Text>
                       {estimativaCalorias ? (
                         <Text style={estilos.detalheCalorias}>
-                          Estimativa por MET {estimativaCalorias.met}. RPM e
-                          frequência cardíaca são registrados, mas não
-                          determinam sozinhos o gasto energético.
+                          Estimativa por MET {estimativaCalorias.met}. É uma
+                          aproximação; o gasto real varia conforme o esforço e
+                          as características individuais.
                         </Text>
                       ) : null}
                     </View>

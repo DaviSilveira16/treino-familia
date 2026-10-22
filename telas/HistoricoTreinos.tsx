@@ -62,6 +62,10 @@ type SessaoCardioHistorico = {
   speed_kmh?: number | null;
   cadence_rpm?: number | null;
   weight_kg_snapshot?: number | null;
+  height_cm_snapshot?: number | null;
+  age_snapshot?: number | null;
+  sex_snapshot?: string | null;
+  floors_up?: number | null;
   met_value?: number | null;
   notes: string | null;
 };
@@ -131,7 +135,7 @@ export default function HistoricoTreinos({
       const { data: cardios, error: erroCardios } = await supabase
         .from("cardio_sessions")
         .select(
-          "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, cadence_rpm, weight_kg_snapshot, met_value, notes",
+          "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, cadence_rpm, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
         )
         .eq("user_id", usuarioId)
         .order("started_at", { ascending: false });
@@ -833,6 +837,16 @@ export default function HistoricoTreinos({
                       {formatarCarga(Number(cardio.incline_percent))}%
                     </Text>
                   ) : null}
+                  {cardio.floors_up != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      Andares subidos: {cardio.floors_up}
+                    </Text>
+                  ) : null}
                   {cardio.heart_rate_avg != null ? (
                     <Text
                       style={[
@@ -852,6 +866,40 @@ export default function HistoricoTreinos({
                     >
                       Peso no registro:{" "}
                       {formatarCarga(Number(cardio.weight_kg_snapshot))} kg
+                    </Text>
+                  ) : null}
+                  {cardio.height_cm_snapshot != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      Altura no registro:{" "}
+                      {formatarCarga(Number(cardio.height_cm_snapshot))} cm
+                    </Text>
+                  ) : null}
+                  {cardio.age_snapshot != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      Idade no registro: {cardio.age_snapshot} anos
+                    </Text>
+                  ) : null}
+                  {cardio.sex_snapshot != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      Sexo da equação:{" "}
+                      {cardio.sex_snapshot === "masculino"
+                        ? "Masculino"
+                        : "Feminino"}
                     </Text>
                   ) : null}
                   {cardio.met_value != null ? (

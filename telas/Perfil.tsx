@@ -74,12 +74,34 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
       ? ""
       : String(usuario.user_metadata.peso_kg),
   );
-  const [salvandoPeso, setSalvandoPeso] = useState(false);
+  const [alturaCm, setAlturaCm] = useState(
+    usuario.user_metadata?.altura_cm == null
+      ? ""
+      : String(usuario.user_metadata.altura_cm),
+  );
+  const [idade, setIdade] = useState(
+    usuario.user_metadata?.idade == null
+      ? ""
+      : String(usuario.user_metadata.idade),
+  );
+  const [sexo, setSexo] = useState<"masculino" | "feminino" | "">(
+    usuario.user_metadata?.sexo === "masculino" ||
+      usuario.user_metadata?.sexo === "feminino"
+      ? usuario.user_metadata.sexo
+      : "",
+  );
+  const [salvandoDadosCalorias, setSalvandoDadosCalorias] = useState(false);
 
   function metadadosComPerfil(adicionais: Record<string, unknown> = {}) {
     const pesoInformado = pesoKg.trim()
       ? Number(pesoKg.replace(",", "."))
       : Number(usuario.user_metadata?.peso_kg);
+    const alturaInformada = alturaCm.trim()
+      ? Number(alturaCm.replace(",", "."))
+      : Number(usuario.user_metadata?.altura_cm);
+    const idadeInformada = idade.trim()
+      ? Number(idade.replace(",", "."))
+      : Number(usuario.user_metadata?.idade);
 
     return {
       ...usuario.user_metadata,
@@ -91,38 +113,90 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
       pesoInformado <= 400
         ? { peso_kg: pesoInformado }
         : {}),
+      ...(Number.isFinite(alturaInformada) &&
+      alturaInformada >= 100 &&
+      alturaInformada <= 250
+        ? { altura_cm: alturaInformada }
+        : {}),
+      ...(Number.isFinite(idadeInformada) &&
+      idadeInformada >= 18 &&
+      idadeInformada <= 110
+        ? { idade: idadeInformada }
+        : {}),
+      ...(sexo === "masculino" || sexo === "feminino" ? { sexo } : {}),
       ...adicionais,
     };
   }
 
-  async function salvarPeso() {
+  async function salvarDadosCalorias() {
     const peso = Number(pesoKg.replace(",", "."));
+    const altura = Number(alturaCm.replace(",", "."));
+    const idadeNumerica = Number(idade.replace(",", "."));
+
     if (!pesoKg.trim() || !Number.isFinite(peso) || peso < 20 || peso > 400) {
       Alert.alert(
         "Peso inválido",
-        "Informe seu peso em kg entre 20 e 400 para calcular as calorias do cardio.",
+        "Informe seu peso atual em kg, entre 20 e 400.",
+      );
+      return;
+    }
+    if (
+      !alturaCm.trim() ||
+      !Number.isFinite(altura) ||
+      altura < 100 ||
+      altura > 250
+    ) {
+      Alert.alert(
+        "Altura inválida",
+        "Informe sua altura em centímetros, entre 100 e 250.",
+      );
+      return;
+    }
+    if (
+      !idade.trim() ||
+      !Number.isInteger(idadeNumerica) ||
+      idadeNumerica < 18 ||
+      idadeNumerica > 110
+    ) {
+      Alert.alert("Idade inválida", "Informe uma idade entre 18 e 110 anos.");
+      return;
+    }
+    if (sexo !== "masculino" && sexo !== "feminino") {
+      Alert.alert(
+        "Sexo necessário",
+        "Selecione uma das opções para calcular a estimativa personalizada.",
       );
       return;
     }
 
-    setSalvandoPeso(true);
+    setSalvandoDadosCalorias(true);
     try {
       const { error } = await supabase.auth.updateUser({
-        data: metadadosComPerfil({ peso_kg: peso }),
+        data: metadadosComPerfil({
+          peso_kg: peso,
+          altura_cm: altura,
+          idade: idadeNumerica,
+          sexo,
+        }),
       });
       if (error) {
         Alert.alert("Erro", error.message);
         return;
       }
       setPesoKg(String(peso));
+      setAlturaCm(String(altura));
+      setIdade(String(idadeNumerica));
       Alert.alert(
-        "Peso salvo",
-        "Seu peso será usado nas estimativas dos próximos cardios. Os registros anteriores não serão alterados.",
+        "Dados salvos",
+        "Esses dados serão usados para estimar as calorias dos próximos cardios. Os registros anteriores continuarão iguais.",
       );
     } catch {
-      Alert.alert("Erro", "Não foi possível salvar seu peso.");
+      Alert.alert(
+        "Erro",
+        "Não foi possível salvar os dados para estimar calorias.",
+      );
     } finally {
-      setSalvandoPeso(false);
+      setSalvandoDadosCalorias(false);
     }
   }
 
@@ -478,11 +552,12 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
         </View>
 
         <View style={estilos.cartao}>
-          <Text style={estilos.tituloSecao}>Peso para estimar calorias</Text>
+          <Text style={estilos.tituloSecao}>Dados para estimar calorias</Text>
           <Text style={estilos.descricaoSecao}>
-            Informe apenas seu peso atual. A estimativa usa peso, modalidade,
-            duração e intensidade; altura, idade e sexo não são necessários para
-            o cálculo MET utilizado no app.
+            Preencha estes dados uma vez e atualize o peso quando necessário. A
+            estimativa usa uma equação de metabolismo de repouso para
+            personalizar as calorias ativas. Alterar o perfil não modifica
+            sessões antigas.
           </Text>
           <Text style={estilos.rotulo}>Peso atual (kg)</Text>
           <TextInput
@@ -492,21 +567,84 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
             placeholder="Ex.: 80,5"
             placeholderTextColor="#828A85"
             keyboardType="decimal-pad"
-            editable={!salvandoPeso}
+            editable={!salvandoDadosCalorias}
           />
+          <Text style={estilos.rotulo}>Altura (cm)</Text>
+          <TextInput
+            style={estilos.input}
+            value={alturaCm}
+            onChangeText={setAlturaCm}
+            placeholder="Ex.: 174"
+            placeholderTextColor="#828A85"
+            keyboardType="number-pad"
+            editable={!salvandoDadosCalorias}
+          />
+          <Text style={estilos.rotulo}>Idade (anos, 18 ou mais)</Text>
+          <TextInput
+            style={estilos.input}
+            value={idade}
+            onChangeText={setIdade}
+            placeholder="Ex.: 30"
+            placeholderTextColor="#828A85"
+            keyboardType="number-pad"
+            editable={!salvandoDadosCalorias}
+          />
+          <Text style={estilos.rotulo}>Sexo usado na equação</Text>
+          <View
+            style={{
+              flexDirection: "row",
+              gap: 10,
+              marginTop: 8,
+              marginBottom: 14,
+            }}
+          >
+            {(
+              [
+                ["masculino", "Masculino"],
+                ["feminino", "Feminino"],
+              ] as const
+            ).map(([valor, rotulo]) => (
+              <TouchableOpacity
+                key={valor}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  paddingHorizontal: 10,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: sexo === valor ? corTema : "#343B37",
+                  backgroundColor: sexo === valor ? `${corTema}22` : "#171B19",
+                  alignItems: "center",
+                }}
+                onPress={() => setSexo(valor)}
+                disabled={salvandoDadosCalorias}
+              >
+                <Text
+                  style={{
+                    color: sexo === valor ? corTema : "#E8ECE9",
+                    fontWeight: "700",
+                  }}
+                >
+                  {rotulo}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <TouchableOpacity
             style={[
               estilos.botaoPrincipal,
               { backgroundColor: corTema },
-              salvandoPeso && estilos.botaoDesabilitado,
+              salvandoDadosCalorias && estilos.botaoDesabilitado,
             ]}
-            onPress={salvarPeso}
-            disabled={salvandoPeso}
+            onPress={salvarDadosCalorias}
+            disabled={salvandoDadosCalorias}
           >
-            {salvandoPeso ? (
+            {salvandoDadosCalorias ? (
               <ActivityIndicator color="#101312" />
             ) : (
-              <Text style={estilos.textoBotaoPrincipal}>Salvar peso</Text>
+              <Text style={estilos.textoBotaoPrincipal}>
+                Salvar dados para calorias
+              </Text>
             )}
           </TouchableOpacity>
         </View>
