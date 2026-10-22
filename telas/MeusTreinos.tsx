@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +11,7 @@ import {
   View,
   Platform,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../supabase";
 
 type Treino = {
@@ -24,6 +26,8 @@ type Exercicio = {
   sets_goal: number;
   reps_goal: string;
   position: number;
+  photo_path?: string | null;
+  photo_url?: string | null;
 };
 
 type SerieCarga = {
@@ -98,6 +102,7 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
   const [carregando, setCarregando] = useState(true);
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [fotoCarregandoId, setFotoCarregandoId] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -146,7 +151,9 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
       try {
         const { data, error } = await supabase
           .from("exercises")
-          .select("id, plan_id, name, sets_goal, reps_goal, position")
+          .select(
+            "id, plan_id, name, sets_goal, reps_goal, position, photo_path",
+          )
           .eq("plan_id", treinoSelecionado.id)
           .eq("user_id", usuarioId)
           .order("position");
@@ -156,7 +163,21 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
           return;
         }
 
-        const lista = (data ?? []) as Exercicio[];
+        const listaBase = (data ?? []) as Exercicio[];
+        const lista = await Promise.all(
+          listaBase.map(async (exercicio) => {
+            if (!exercicio.photo_path) {
+              return { ...exercicio, photo_url: null };
+            }
+            const { data: fotoAssinada } = await supabase.storage
+              .from("exercise-photos")
+              .createSignedUrl(exercicio.photo_path, 604800);
+            return {
+              ...exercicio,
+              photo_url: fotoAssinada?.signedUrl ?? null,
+            };
+          }),
+        );
         setExercicios(lista);
         const cargas: Record<string, number> = {};
         if (lista.length > 0) {
@@ -384,7 +405,7 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
           reps_goal: reps,
           position: exercicios.length,
         })
-        .select("id, plan_id, name, sets_goal, reps_goal, position")
+        .select("id, plan_id, name, sets_goal, reps_goal, position, photo_path")
         .single();
 
       if (error) {
@@ -441,7 +462,7 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
         .eq("id", exercicioEditando.id)
         .eq("plan_id", exercicioEditando.plan_id)
         .eq("user_id", usuarioId)
-        .select("id, plan_id, name, sets_goal, reps_goal, position")
+        .select("id, plan_id, name, sets_goal, reps_goal, position, photo_path")
         .single();
 
       if (error) {
@@ -451,7 +472,9 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
 
       setExercicios((atuais) =>
         atuais.map((item) =>
-          item.id === exercicioEditando.id ? (data as Exercicio) : item,
+          item.id === exercicioEditando.id
+            ? { ...(data as Exercicio), photo_url: item.photo_url }
+            : item,
         ),
       );
       setExercicioEditando(null);
@@ -471,6 +494,20 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
     if (!confirmado) return;
 
     try {
+      const { error: erroPreservarHistorico } = await supabase
+        .from("workout_sets")
+        .update({ exercise_id: null })
+        .eq("user_id", usuarioId)
+        .eq("exercise_id", exercicio.id);
+
+      if (erroPreservarHistorico) {
+        mostrarMensagem(
+          "Histórico preservado",
+          `Não foi possível proteger os registros anteriores. O exercício não foi excluído: ${erroPreservarHistorico.message}`,
+        );
+        return;
+      }
+
       const { error } = await supabase
         .from("exercises")
         .delete()
@@ -509,6 +546,119 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
           ? `Não foi possível excluir o exercício: ${erro.message}`
           : "Não foi possível conectar ao Supabase.",
       );
+    }
+  }
+
+  async function adicionarOuTrocarFoto(exercicio: Exercicio) {
+    if (!usuarioId) {
+      mostrarMensagem("Sessão inválida", "Entre novamente na sua conta.");
+      return;
+    }
+
+    setFotoCarregandoId(exercicio.id);
+    try {
+      const resultado = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.75,
+      });
+
+      if (resultado.canceled || !resultado.assets[0]) return;
+
+      const imagem = resultado.assets[0];
+      const tiposAceitos = [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+      ];
+      const contentType = tiposAceitos.includes(imagem.mimeType ?? "")
+        ? imagem.mimeType!
+        : "image/jpeg";
+      const extensao =
+        contentType === "image/png"
+          ? "png"
+          : contentType === "image/webp"
+            ? "webp"
+            : contentType === "image/heic"
+              ? "heic"
+              : contentType === "image/heif"
+                ? "heif"
+                : "jpg";
+      const respostaImagem = await fetch(imagem.uri);
+      const arquivoImagem = await respostaImagem.arrayBuffer();
+      const novoCaminho = `${usuarioId}/${exercicio.id}/${Date.now()}.${extensao}`;
+      const { error: erroUpload } = await supabase.storage
+        .from("exercise-photos")
+        .upload(novoCaminho, arquivoImagem, {
+          contentType,
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (erroUpload) {
+        mostrarMensagem("Não foi possível enviar a foto", erroUpload.message);
+        return;
+      }
+
+      const { error: erroAtualizarExercicio } = await supabase
+        .from("exercises")
+        .update({ photo_path: novoCaminho })
+        .eq("id", exercicio.id)
+        .eq("plan_id", exercicio.plan_id)
+        .eq("user_id", usuarioId);
+
+      if (erroAtualizarExercicio) {
+        await supabase.storage.from("exercise-photos").remove([novoCaminho]);
+        mostrarMensagem(
+          "Não foi possível salvar a foto",
+          erroAtualizarExercicio.message,
+        );
+        return;
+      }
+
+      const { data: fotoAssinada, error: erroUrl } = await supabase.storage
+        .from("exercise-photos")
+        .createSignedUrl(novoCaminho, 604800);
+
+      setExercicios((atuais) =>
+        atuais.map((item) =>
+          item.id === exercicio.id
+            ? {
+                ...item,
+                photo_path: novoCaminho,
+                photo_url: fotoAssinada?.signedUrl ?? null,
+              }
+            : item,
+        ),
+      );
+
+      if (exercicio.photo_path) {
+        await supabase.storage
+          .from("exercise-photos")
+          .remove([exercicio.photo_path]);
+      }
+
+      if (erroUrl) {
+        mostrarMensagem(
+          "Foto salva",
+          "A foto foi salva. Ela aparecerá após recarregar os exercícios.",
+        );
+        return;
+      }
+
+      mostrarMensagem("Foto salva", "A foto do exercício foi atualizada.");
+    } catch (erro) {
+      mostrarMensagem(
+        "Erro ao adicionar foto",
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível selecionar ou enviar a foto.",
+      );
+    } finally {
+      setFotoCarregandoId(null);
     }
   }
 
@@ -635,75 +785,9 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
       if (erroLimparSeriesAntigas) {
         mostrarMensagem(
           "Cargas salvas parcialmente",
-          `As novas cargas foram salvas, mas não foi possível remover séries antigas: ${erroLimparSeriesAntigas.message}`,
+          `As novas cargas foram salvas, mas não foi possível remover séries de referência que deixaram de ser usadas: ${erroLimparSeriesAntigas.message}`,
         );
         return;
-      }
-
-      const hoje = new Date();
-      const inicioDia = new Date(
-        hoje.getFullYear(),
-        hoje.getMonth(),
-        hoje.getDate(),
-      ).toISOString();
-      const fimDia = new Date(
-        hoje.getFullYear(),
-        hoje.getMonth(),
-        hoje.getDate() + 1,
-      ).toISOString();
-      const { data: sessoesHoje, error: erroSessoes } = await supabase
-        .from("workout_sessions")
-        .select("id")
-        .eq("user_id", usuarioId)
-        .eq("plan_id", treinoSelecionado.id)
-        .gte("started_at", inicioDia)
-        .lt("started_at", fimDia)
-        .order("started_at", { ascending: false })
-        .limit(1);
-
-      if (erroSessoes) {
-        mostrarMensagem(
-          "Cargas de referência salvas",
-          `As cargas foram salvas para as próximas sessões, mas não foi possível atualizar o histórico de hoje: ${erroSessoes.message}`,
-        );
-        return;
-      }
-
-      const sessaoHoje = sessoesHoje?.[0];
-      if (sessaoHoje) {
-        const { error: erroExcluirSeries } = await supabase
-          .from("workout_sets")
-          .delete()
-          .eq("user_id", usuarioId)
-          .eq("session_id", sessaoHoje.id)
-          .eq("exercise_id", exercicioParaCarga.id);
-        if (erroExcluirSeries) {
-          mostrarMensagem(
-            "Cargas de referência salvas",
-            `As próximas sessões usarão as novas cargas, mas o histórico de hoje não foi atualizado: ${erroExcluirSeries.message}`,
-          );
-          return;
-        }
-
-        const registrosSessao = seriesValidadas.map((serie, indice) => ({
-          user_id: usuarioId,
-          session_id: sessaoHoje.id,
-          exercise_id: exercicioParaCarga.id,
-          exercise_name: exercicioParaCarga.name,
-          set_number: indice + 1,
-          reps: serie.reps,
-          weight_kg: serie.weight_kg,
-        }));
-        const { error: erroSalvarSessao } = await supabase
-          .from("workout_sets")
-          .insert(registrosSessao);
-        if (erroSalvarSessao) {
-          mostrarMensagem(
-            "Cargas de referência salvas",
-            `As próximas sessões usarão as novas cargas, mas não foi possível atualizar o histórico de hoje: ${erroSalvarSessao.message}`,
-          );
-          return;
-        }
       }
 
       const maiorCargaNova = Math.max(
@@ -716,9 +800,7 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
       setExercicioParaCarga(null);
       mostrarMensagem(
         "Cargas salvas",
-        sessaoHoje
-          ? "As cargas de referência e o registro de hoje foram atualizados."
-          : "As cargas ficaram salvas em Meus treinos e serão usadas nas próximas sessões.",
+        "As cargas de referência foram atualizadas para os próximos treinos. Os registros já feitos no histórico permanecem exatamente como foram registrados.",
       );
     } catch (erro) {
       mostrarMensagem(
@@ -965,9 +1047,26 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
                 <View style={estilos.listaExercicios}>
                   {exercicios.map((exercicio, indice) => (
                     <View key={exercicio.id} style={estilos.cartaoExercicio}>
-                      <View style={estilos.numeroExercicio}>
-                        <Text style={estilos.numeroTexto}>{indice + 1}</Text>
-                      </View>
+                      <TouchableOpacity
+                        style={estilos.numeroExercicio}
+                        onPress={() => adicionarOuTrocarFoto(exercicio)}
+                        disabled={fotoCarregandoId === exercicio.id}
+                        activeOpacity={0.8}
+                      >
+                        {exercicio.photo_url ? (
+                          <Image
+                            source={{ uri: exercicio.photo_url }}
+                            style={estilos.fotoExercicio}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <Text style={estilos.numeroTexto}>
+                            {fotoCarregandoId === exercicio.id
+                              ? "…"
+                              : indice + 1}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
                       <View style={estilos.infoExercicio}>
                         <Text style={estilos.nomeExercicio}>
                           {exercicio.name}
@@ -995,6 +1094,19 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
                           onPress={() => abrirRegistroCarga(exercicio)}
                         >
                           <Text style={estilos.textoAcao}>Cargas</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={estilos.botaoAcao}
+                          onPress={() => adicionarOuTrocarFoto(exercicio)}
+                          disabled={fotoCarregandoId === exercicio.id}
+                        >
+                          <Text style={estilos.textoAcao}>
+                            {fotoCarregandoId === exercicio.id
+                              ? "Enviando foto…"
+                              : exercicio.photo_path
+                                ? "Trocar foto"
+                                : "Adicionar foto"}
+                          </Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={estilos.botaoExcluir}
@@ -1348,14 +1460,21 @@ const criarEstilos = (corTema: string) =>
       gap: 10,
     },
     numeroExercicio: {
-      width: 36,
-      height: 36,
-      borderRadius: 11,
+      width: 64,
+      height: 64,
+      borderRadius: 13,
       backgroundColor: `${corTema}20`,
       alignItems: "center",
       justifyContent: "center",
+      overflow: "hidden",
+      flexShrink: 0,
     },
-    numeroTexto: { color: corTema, fontWeight: "800", fontSize: 15 },
+    fotoExercicio: {
+      width: "100%",
+      height: "100%",
+      borderRadius: 13,
+    },
+    numeroTexto: { color: corTema, fontWeight: "800", fontSize: 18 },
     infoExercicio: { flex: 1, minWidth: 140 },
     nomeExercicio: { color: "#F0F3F1", fontSize: 14, fontWeight: "700" },
     detalheExercicio: { color: "#A4ADA7", fontSize: 12, marginTop: 5 },

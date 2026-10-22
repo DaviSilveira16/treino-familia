@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   AppState,
   Image,
   KeyboardAvoidingView,
@@ -127,6 +128,22 @@ export default function App() {
     setSessao(novaSessao);
     setCorTema(obterCorTema(novaSessao?.user.user_metadata?.tema_cor));
   }
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || !sessao) {
+      return;
+    }
+
+    const assinatura = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (referenciaNavegacao.isReady() && referenciaNavegacao.canGoBack()) {
+        referenciaNavegacao.goBack();
+        return true;
+      }
+      return false;
+    });
+
+    return () => assinatura.remove();
+  }, [sessao]);
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof document === "undefined") {
