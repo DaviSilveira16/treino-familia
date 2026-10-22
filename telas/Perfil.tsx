@@ -69,6 +69,62 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
   const [enviandoFoto, setEnviandoFoto] = useState(false);
   const [alterandoSenha, setAlterandoSenha] = useState(false);
   const [salvandoTema, setSalvandoTema] = useState(false);
+  const [pesoKg, setPesoKg] = useState(
+    usuario.user_metadata?.peso_kg == null
+      ? ""
+      : String(usuario.user_metadata.peso_kg),
+  );
+  const [salvandoPeso, setSalvandoPeso] = useState(false);
+
+  function metadadosComPerfil(adicionais: Record<string, unknown> = {}) {
+    const pesoInformado = pesoKg.trim()
+      ? Number(pesoKg.replace(",", "."))
+      : Number(usuario.user_metadata?.peso_kg);
+
+    return {
+      ...usuario.user_metadata,
+      nome: nome.trim() || nomeAtual,
+      tema_cor: corTema,
+      ...(fotoUrl ? { foto_url: fotoUrl } : {}),
+      ...(Number.isFinite(pesoInformado) &&
+      pesoInformado >= 20 &&
+      pesoInformado <= 400
+        ? { peso_kg: pesoInformado }
+        : {}),
+      ...adicionais,
+    };
+  }
+
+  async function salvarPeso() {
+    const peso = Number(pesoKg.replace(",", "."));
+    if (!pesoKg.trim() || !Number.isFinite(peso) || peso < 20 || peso > 400) {
+      Alert.alert(
+        "Peso inválido",
+        "Informe seu peso em kg entre 20 e 400 para calcular as calorias do cardio.",
+      );
+      return;
+    }
+
+    setSalvandoPeso(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        data: metadadosComPerfil({ peso_kg: peso }),
+      });
+      if (error) {
+        Alert.alert("Erro", error.message);
+        return;
+      }
+      setPesoKg(String(peso));
+      Alert.alert(
+        "Peso salvo",
+        "Seu peso será usado nas estimativas dos próximos cardios. Os registros anteriores não serão alterados.",
+      );
+    } catch {
+      Alert.alert("Erro", "Não foi possível salvar seu peso.");
+    } finally {
+      setSalvandoPeso(false);
+    }
+  }
 
   async function salvarNome() {
     if (!nome.trim()) {
@@ -80,10 +136,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
 
     try {
       const { error } = await supabase.auth.updateUser({
-        data: {
-          ...usuario.user_metadata,
-          nome: nome.trim(),
-        },
+        data: metadadosComPerfil(),
       });
 
       if (error) {
@@ -104,11 +157,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
 
     try {
       const { error } = await supabase.auth.updateUser({
-        data: {
-          ...usuario.user_metadata,
-          nome: nome.trim() || nomeAtual,
-          tema_cor: corTema,
-        },
+        data: metadadosComPerfil({ tema_cor: corTema }),
       });
 
       if (error) {
@@ -186,11 +235,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
       const urlFoto = `${data.publicUrl}?v=${Date.now()}`;
 
       const { error: erroPerfil } = await supabase.auth.updateUser({
-        data: {
-          ...usuario.user_metadata,
-          nome: nome.trim() || nomeAtual,
-          foto_url: urlFoto,
-        },
+        data: metadadosComPerfil({ foto_url: urlFoto }),
       });
 
       if (erroPerfil) {
@@ -428,6 +473,40 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
               <ActivityIndicator color="#101312" />
             ) : (
               <Text style={estilos.textoBotaoPrincipal}>Salvar nome</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={estilos.cartao}>
+          <Text style={estilos.tituloSecao}>Peso para estimar calorias</Text>
+          <Text style={estilos.descricaoSecao}>
+            Informe apenas seu peso atual. A estimativa usa peso, modalidade,
+            duração e intensidade; altura, idade e sexo não são necessários para
+            o cálculo MET utilizado no app.
+          </Text>
+          <Text style={estilos.rotulo}>Peso atual (kg)</Text>
+          <TextInput
+            style={estilos.input}
+            value={pesoKg}
+            onChangeText={setPesoKg}
+            placeholder="Ex.: 80,5"
+            placeholderTextColor="#828A85"
+            keyboardType="decimal-pad"
+            editable={!salvandoPeso}
+          />
+          <TouchableOpacity
+            style={[
+              estilos.botaoPrincipal,
+              { backgroundColor: corTema },
+              salvandoPeso && estilos.botaoDesabilitado,
+            ]}
+            onPress={salvarPeso}
+            disabled={salvandoPeso}
+          >
+            {salvandoPeso ? (
+              <ActivityIndicator color="#101312" />
+            ) : (
+              <Text style={estilos.textoBotaoPrincipal}>Salvar peso</Text>
             )}
           </TouchableOpacity>
         </View>

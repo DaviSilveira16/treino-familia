@@ -22,20 +22,19 @@ type Cardio = {
 };
 type Props = { onVoltar: () => void; corTema?: string };
 const TIPOS = [
-  "Escada",
+  "Escadas",
   "Esteira",
   "Bicicleta",
   "Caminhada",
   "Corrida",
   "Elíptico",
-  "Outro",
 ];
 
 export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
   const [cardios, setCardios] = useState<Cardio[]>([]);
   const [usuarioId, setUsuarioId] = useState("");
   const [nome, setNome] = useState("");
-  const [tipo, setTipo] = useState("Escada");
+  const [tipo, setTipo] = useState("Escadas");
   const [duracao, setDuracao] = useState("");
   const [distancia, setDistancia] = useState("");
   const [calorias, setCalorias] = useState("");
@@ -79,7 +78,7 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
 
   function limparFormulario() {
     setNome("");
-    setTipo("Escada");
+    setTipo("Escadas");
     setDuracao("");
     setDistancia("");
     setCalorias("");
@@ -220,7 +219,8 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
                 onPress={() => setTipo(item)}
                 style={[
                   estilos.tipo,
-                  tipo === item && {
+                  (tipo === item ||
+                    (tipo === "Escada" && item === "Escadas")) && {
                     borderColor: corTema,
                     backgroundColor: `${corTema}20`,
                   },
@@ -229,7 +229,10 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
                 <Text
                   style={[
                     estilos.tipoTexto,
-                    tipo === item && { color: corTema },
+                    (tipo === item ||
+                      (tipo === "Escada" && item === "Escadas")) && {
+                      color: corTema,
+                    },
                   ]}
                 >
                   {item}
@@ -255,15 +258,19 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
             placeholder="Ex.: 3,5"
             placeholderTextColor="#7D8881"
           />
-          <Text style={estilos.rotulo}>Calorias (opcional)</Text>
+          <Text style={estilos.rotulo}>Calorias de referência (opcional)</Text>
           <TextInput
             style={estilos.input}
             value={calorias}
             onChangeText={setCalorias}
             keyboardType="decimal-pad"
-            placeholder="Ex.: 180"
+            placeholder="Não serão usadas no cálculo da sessão"
             placeholderTextColor="#7D8881"
           />
+          <Text style={estilos.descricaoCalorias}>
+            As calorias de cada sessão serão estimadas ao registrar o cardio na
+            Frequência, usando o peso do perfil e os dados da atividade.
+          </Text>
           <Text style={estilos.rotulo}>Observações (opcional)</Text>
           <TextInput
             style={[estilos.input, estilos.multilinha]}
@@ -390,6 +397,13 @@ const estilos = StyleSheet.create({
     paddingVertical: 12,
     color: "#F3F5F3",
     fontSize: 14,
+  },
+  descricaoCalorias: {
+    color: "#A4ADA7",
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: -5,
+    marginBottom: 10,
   },
   multilinha: { minHeight: 78, textAlignVertical: "top" },
   tipos: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

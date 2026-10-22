@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 
 import {
   ActivityIndicator,
@@ -6,11 +7,16 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 
 import { supabase } from "../supabase";
+import {
+  estimarCaloriasAtivas,
+  type IntensidadeCardio,
+} from "../servicos/caloriasCardio";
 
 type Treino = {
   id: string;
@@ -41,6 +47,14 @@ type SessaoCardio = {
   duration_minutes: number | null;
   distance_km: number | null;
   calories: number | null;
+  active_calories?: number | null;
+  intensity?: string | null;
+  incline_percent?: number | null;
+  heart_rate_avg?: number | null;
+  speed_kmh?: number | null;
+  cadence_rpm?: number | null;
+  weight_kg_snapshot?: number | null;
+  met_value?: number | null;
   notes: string | null;
 };
 type Props = {
@@ -75,6 +89,19 @@ function dataDaSessao(valor: string) {
   return dataLocal(new Date(valor));
 }
 
+function lerNumero(valor: string): number | null {
+  if (!valor.trim()) return null;
+  const numero = Number(valor.replace(",", "."));
+  return Number.isFinite(numero) ? numero : Number.NaN;
+}
+
+function textoTipo(tipo: string) {
+  return tipo
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
 export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const hoje = new Date();
   const [usuarioId, setUsuarioId] = useState("");
@@ -88,6 +115,15 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const [sessoesCardio, setSessoesCardio] = useState<SessaoCardio[]>([]);
   const [treinoSelecionado, setTreinoSelecionado] = useState("");
   const [cardioSelecionado, setCardioSelecionado] = useState("");
+  const [pesoUsuario, setPesoUsuario] = useState<number | null>(null);
+  const [duracaoCardio, setDuracaoCardio] = useState("");
+  const [distanciaCardio, setDistanciaCardio] = useState("");
+  const [intensidadeCardio, setIntensidadeCardio] =
+    useState<IntensidadeCardio | null>(null);
+  const [inclinacaoCardio, setInclinacaoCardio] = useState("");
+  const [frequenciaCardiaca, setFrequenciaCardiaca] = useState("");
+  const [velocidadeCardio, setVelocidadeCardio] = useState("");
+  const [cadenciaBicicleta, setCadenciaBicicleta] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
@@ -102,6 +138,12 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         return;
       }
       setUsuarioId(usuario.user.id);
+      const pesoPerfil = Number(usuario.user.user_metadata?.peso_kg);
+      setPesoUsuario(
+        Number.isFinite(pesoPerfil) && pesoPerfil >= 20 && pesoPerfil <= 400
+          ? pesoPerfil
+          : null,
+      );
       const [
         resultadoTreinos,
         resultadoSessoes,
@@ -128,7 +170,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         supabase
           .from("cardio_sessions")
           .select(
-            "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, notes",
+            "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, cadence_rpm, weight_kg_snapshot, met_value, notes",
           )
           .eq("user_id", usuario.user.id)
           .order("started_at", { ascending: false }),
@@ -165,9 +207,11 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setCarregando(false);
     }
   }, []);
-  useEffect(() => {
-    carregarDados();
-  }, [carregarDados]);
+  useFocusEffect(
+    useCallback(() => {
+      carregarDados();
+    }, [carregarDados]),
+  );
   const ano = mesAtual.getFullYear();
   const mes = mesAtual.getMonth();
   const primeiroDia = new Date(ano, mes, 1).getDay();
@@ -182,6 +226,33 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const cardiosDoDia = sessoesCardio.filter(
     (sessao) => dataDaSessao(sessao.started_at) === dataSelecionada,
   );
+  const modeloCardioSelecionado = modelosCardio.find(
+    (item) => item.id === cardioSelecionado,
+  );
+  const duracaoNumerica = lerNumero(duracaoCardio);
+  const distanciaNumerica = lerNumero(distanciaCardio);
+  const inclinacaoNumerica = lerNumero(inclinacaoCardio);
+  const velocidadeNumerica = lerNumero(velocidadeCardio);
+  const estimativaCalorias =
+    modeloCardioSelecionado &&
+    pesoUsuario !== null &&
+    duracaoNumerica !== null &&
+    intensidadeCardio !== null
+      ? estimarCaloriasAtivas({
+          tipo: modeloCardioSelecionado.tipo,
+          intensidade: intensidadeCardio,
+          pesoKg: pesoUsuario,
+          duracaoMinutos: duracaoNumerica,
+          velocidadeKmh:
+            velocidadeNumerica !== null && Number.isFinite(velocidadeNumerica)
+              ? velocidadeNumerica
+              : null,
+          inclinacaoPercentual:
+            inclinacaoNumerica !== null && Number.isFinite(inclinacaoNumerica)
+              ? inclinacaoNumerica
+              : null,
+        })
+      : null;
   const diasTreinados = new Set([
     ...sessoes
       .filter((sessao) => sessao.plan_id !== null)
@@ -401,6 +472,21 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setSalvando(false);
     }
   }
+  function selecionarCardio(modelo: CardioModelo) {
+    setCardioSelecionado(modelo.id);
+    setDuracaoCardio(
+      modelo.duracao_min == null ? "" : String(modelo.duracao_min),
+    );
+    setDistanciaCardio(
+      modelo.distancia_km == null ? "" : String(modelo.distancia_km),
+    );
+    setIntensidadeCardio(null);
+    setInclinacaoCardio("");
+    setFrequenciaCardiaca("");
+    setVelocidadeCardio("");
+    setCadenciaBicicleta("");
+  }
+
   async function registrarCardio() {
     if (!usuarioId || !cardioSelecionado || !dataSelecionada) {
       Alert.alert("Atenção", "Selecione um cardio para registrar.");
@@ -413,11 +499,88 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       );
       return;
     }
+    if (pesoUsuario === null) {
+      Alert.alert(
+        "Complete seu perfil",
+        "Informe seu peso atual em Meu Perfil para calcular as calorias estimadas antes de registrar o cardio.",
+      );
+      return;
+    }
     const modelo = modelosCardio.find((item) => item.id === cardioSelecionado);
     if (!modelo) {
       Alert.alert("Erro", "O cardio selecionado não foi encontrado.");
       return;
     }
+
+    const duracao = lerNumero(duracaoCardio);
+    const distancia = lerNumero(distanciaCardio);
+    const inclinacao = lerNumero(inclinacaoCardio);
+    const frequencia = lerNumero(frequenciaCardiaca);
+    const velocidade = lerNumero(velocidadeCardio);
+    const cadencia = lerNumero(cadenciaBicicleta);
+    const nomeTipo = textoTipo(modelo.tipo);
+    const eBicicleta = nomeTipo.includes("bicicleta");
+    const eEsteira = nomeTipo.includes("esteira");
+    const aceitaVelocidade =
+      eEsteira ||
+      nomeTipo.includes("caminhada") ||
+      nomeTipo.includes("corrida");
+
+    if (duracao === null || !Number.isFinite(duracao) || duracao <= 0) {
+      Alert.alert(
+        "Duração necessária",
+        "Informe a duração do cardio em minutos.",
+      );
+      return;
+    }
+    if (intensidadeCardio === null) {
+      Alert.alert(
+        "Intensidade necessária",
+        "Selecione a intensidade do cardio.",
+      );
+      return;
+    }
+    const camposNumericos = [
+      ["distância", distancia, 0, 1000],
+      ["inclinação", inclinacao, 0, 25],
+      ["frequência cardíaca", frequencia, 30, 240],
+      ["velocidade", velocidade, 0.1, 18],
+      ["cadência", cadencia, 0.1, 250],
+    ] as const;
+    for (const [nomeCampo, valor, minimo, maximo] of camposNumericos) {
+      if (
+        valor !== null &&
+        (!Number.isFinite(valor) || valor < minimo || valor > maximo)
+      ) {
+        Alert.alert(
+          "Valor inválido",
+          `Confira o campo ${nomeCampo}. Informe um valor entre ${minimo} e ${maximo}.`,
+        );
+        return;
+      }
+    }
+    if (eEsteira && inclinacao !== null && inclinacao > 25) {
+      Alert.alert("Inclinação inválida", "Use uma inclinação entre 0% e 25%.");
+      return;
+    }
+
+    const estimativa = estimarCaloriasAtivas({
+      tipo: modelo.tipo,
+      intensidade: intensidadeCardio,
+      pesoKg: pesoUsuario,
+      duracaoMinutos: duracao,
+      velocidadeKmh:
+        aceitaVelocidade && velocidade !== null ? velocidade : null,
+      inclinacaoPercentual: eEsteira && inclinacao !== null ? inclinacao : null,
+    });
+    if (!estimativa) {
+      Alert.alert(
+        "Não foi possível calcular",
+        "Confira o peso no perfil e a duração do cardio.",
+      );
+      return;
+    }
+
     setSalvando(true);
     try {
       const [anoSelecionado, mesSelecionado, diaSelecionado] = dataSelecionada
@@ -438,17 +601,31 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         activity_name: modelo.nome,
         activity_type: modelo.tipo,
         started_at: dataRegistro,
-        duration_minutes: modelo.duracao_min,
-        distance_km: modelo.distancia_km,
-        calories: modelo.calorias,
+        duration_minutes: duracao,
+        distance_km: distancia,
+        calories: estimativa.caloriasAtivas,
+        active_calories: estimativa.caloriasAtivas,
+        intensity: intensidadeCardio,
+        incline_percent: eEsteira ? inclinacao : null,
+        heart_rate_avg: frequencia,
+        speed_kmh: aceitaVelocidade ? velocidade : null,
+        cadence_rpm: eBicicleta ? cadencia : null,
+        weight_kg_snapshot: pesoUsuario,
+        met_value: estimativa.met,
         notes: modelo.observacoes,
       });
       if (error) throw error;
       setCardioSelecionado("");
+      setDuracaoCardio("");
+      setDistanciaCardio("");
+      setInclinacaoCardio("");
+      setFrequenciaCardiaca("");
+      setVelocidadeCardio("");
+      setCadenciaBicicleta("");
       await carregarDados();
       Alert.alert(
         "Cardio registrado",
-        "A sessão foi salva no histórico com uma cópia dos valores atuais.",
+        `Sessão salva com aproximadamente ${estimativa.caloriasAtivas} kcal ativas estimadas. O peso e o MET usados ficaram guardados neste registro; atualizar seu perfil não mudará esta estimativa.`,
       );
     } catch (erro) {
       Alert.alert(
@@ -767,7 +944,22 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                   {cardio.distance_km != null
                     ? ` · ${cardio.distance_km} km`
                     : ""}
-                  {cardio.calories != null ? ` · ${cardio.calories} kcal` : ""}
+                  {(cardio.active_calories ?? cardio.calories) != null
+                    ? ` · ${cardio.active_calories ?? cardio.calories} ${cardio.active_calories != null ? "kcal ativas estimadas" : "kcal"}`
+                    : ""}
+                  {cardio.cadence_rpm != null
+                    ? ` · ${cardio.cadence_rpm} RPM`
+                    : ""}
+                  {cardio.speed_kmh != null
+                    ? ` · ${cardio.speed_kmh} km/h`
+                    : ""}
+                  {cardio.intensity ? ` · ${cardio.intensity}` : ""}
+                  {cardio.incline_percent != null
+                    ? ` · ${cardio.incline_percent}% inclinação`
+                    : ""}
+                  {cardio.heart_rate_avg != null
+                    ? ` · FC ${cardio.heart_rate_avg} bpm`
+                    : ""}
                 </Text>
               ))}
             </View>
@@ -805,7 +997,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                           borderColor: corTema,
                         },
                       ]}
-                      onPress={() => setCardioSelecionado(cardio.id)}
+                      onPress={() => selecionarCardio(cardio)}
                     >
                       <Text
                         style={[
@@ -822,6 +1014,162 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                     </TouchableOpacity>
                   );
                 })}
+                {modeloCardioSelecionado ? (
+                  <View style={{ marginTop: 10 }}>
+                    {pesoUsuario === null ? (
+                      <Text style={estilos.avisoCalorias}>
+                        Para estimar calorias, primeiro informe seu peso em Meu
+                        Perfil.
+                      </Text>
+                    ) : null}
+                    <Text style={estilos.rotulo}>Duração (minutos) *</Text>
+                    <TextInput
+                      style={estilos.inputCardio}
+                      value={duracaoCardio}
+                      onChangeText={setDuracaoCardio}
+                      placeholder="Ex.: 25"
+                      placeholderTextColor="#828A85"
+                      keyboardType="decimal-pad"
+                    />
+                    <Text style={estilos.rotulo}>Intensidade</Text>
+                    <View style={estilos.opcoesIntensidade}>
+                      {(
+                        [
+                          ["leve", "Leve"],
+                          ["moderada", "Moderada"],
+                          ["intensa", "Intensa"],
+                        ] as const
+                      ).map(([valor, rotulo]) => (
+                        <TouchableOpacity
+                          key={valor}
+                          style={[
+                            estilos.botaoIntensidade,
+                            intensidadeCardio === valor && {
+                              borderColor: corTema,
+                              backgroundColor: `${corTema}22`,
+                            },
+                          ]}
+                          onPress={() => setIntensidadeCardio(valor)}
+                        >
+                          <Text
+                            style={[
+                              estilos.textoIntensidade,
+                              intensidadeCardio === valor && { color: corTema },
+                            ]}
+                          >
+                            {rotulo}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <Text style={estilos.rotulo}>Distância (km, opcional)</Text>
+                    <TextInput
+                      style={estilos.inputCardio}
+                      value={distanciaCardio}
+                      onChangeText={setDistanciaCardio}
+                      placeholder="Ex.: 3,5"
+                      placeholderTextColor="#828A85"
+                      keyboardType="decimal-pad"
+                    />
+                    {textoTipo(modeloCardioSelecionado.tipo).includes(
+                      "esteira",
+                    ) ? (
+                      <>
+                        <Text style={estilos.rotulo}>
+                          Velocidade (km/h, opcional)
+                        </Text>
+                        <TextInput
+                          style={estilos.inputCardio}
+                          value={velocidadeCardio}
+                          onChangeText={setVelocidadeCardio}
+                          placeholder="Ex.: 6,0"
+                          placeholderTextColor="#828A85"
+                          keyboardType="decimal-pad"
+                        />
+                        <Text style={estilos.rotulo}>
+                          Inclinação da esteira (%, opcional)
+                        </Text>
+                        <TextInput
+                          style={estilos.inputCardio}
+                          value={inclinacaoCardio}
+                          onChangeText={setInclinacaoCardio}
+                          placeholder="Ex.: 5"
+                          placeholderTextColor="#828A85"
+                          keyboardType="decimal-pad"
+                        />
+                      </>
+                    ) : null}
+                    {textoTipo(modeloCardioSelecionado.tipo).includes(
+                      "bicicleta",
+                    ) ? (
+                      <>
+                        <Text style={estilos.rotulo}>
+                          Velocidade de pedalada da bicicleta (cadência em RPM,
+                          opcional)
+                        </Text>
+                        <TextInput
+                          style={estilos.inputCardio}
+                          value={cadenciaBicicleta}
+                          onChangeText={setCadenciaBicicleta}
+                          placeholder="Pedaladas por minuto; ex.: 80"
+                          placeholderTextColor="#828A85"
+                          keyboardType="decimal-pad"
+                        />
+                      </>
+                    ) : null}
+                    {["caminhada", "corrida"].some((tipo) =>
+                      textoTipo(modeloCardioSelecionado.tipo).includes(tipo),
+                    ) ? (
+                      <>
+                        <Text style={estilos.rotulo}>
+                          Velocidade (km/h, opcional)
+                        </Text>
+                        <TextInput
+                          style={estilos.inputCardio}
+                          value={velocidadeCardio}
+                          onChangeText={setVelocidadeCardio}
+                          placeholder="Ex.: 8,0"
+                          placeholderTextColor="#828A85"
+                          keyboardType="decimal-pad"
+                        />
+                      </>
+                    ) : null}
+                    <Text style={estilos.rotulo}>
+                      Frequência cardíaca média (bpm, opcional)
+                    </Text>
+                    <TextInput
+                      style={estilos.inputCardio}
+                      value={frequenciaCardiaca}
+                      onChangeText={setFrequenciaCardiaca}
+                      placeholder="Ex.: 145"
+                      placeholderTextColor="#828A85"
+                      keyboardType="number-pad"
+                    />
+                    <View style={estilos.resumoCalorias}>
+                      <Text style={estilos.textoResumoCalorias}>
+                        Calorias ativas estimadas
+                      </Text>
+                      <Text style={[estilos.valorCalorias, { color: corTema }]}>
+                        {estimativaCalorias
+                          ? `${estimativaCalorias.caloriasAtivas} kcal`
+                          : pesoUsuario === null
+                            ? "Informe seu peso no perfil"
+                            : duracaoNumerica === null ||
+                                !Number.isFinite(duracaoNumerica) ||
+                                duracaoNumerica <= 0
+                              ? "Informe a duração"
+                              : "Selecione a intensidade"}
+                      </Text>
+                      {estimativaCalorias ? (
+                        <Text style={estilos.detalheCalorias}>
+                          Estimativa por MET {estimativaCalorias.met}. RPM e
+                          frequência cardíaca são registrados, mas não
+                          determinam sozinhos o gasto energético.
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
+                ) : null}
                 <TouchableOpacity
                   style={[
                     estilos.botaoSalvar,
@@ -836,7 +1184,9 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                     <ActivityIndicator color="#101312" />
                   ) : (
                     <Text style={estilos.textoBotaoSalvar}>
-                      Confirmar cardio
+                      {estimativaCalorias
+                        ? `Confirmar cardio · ${estimativaCalorias.caloriasAtivas} kcal`
+                        : "Confirmar cardio"}
                     </Text>
                   )}
                 </TouchableOpacity>
@@ -1084,6 +1434,67 @@ const estilos = StyleSheet.create({
   textoOpcaoSelecionada: {
     color: "#FFFFFF",
     fontWeight: "700",
+  },
+  inputCardio: {
+    backgroundColor: "#101512",
+    borderWidth: 1,
+    borderColor: "#354039",
+    borderRadius: 11,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: "#F0F3F1",
+    marginBottom: 12,
+  },
+  opcoesIntensidade: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 8,
+  },
+  botaoIntensidade: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#343D37",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+  textoIntensidade: {
+    color: "#D0D7D2",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  resumoCalorias: {
+    backgroundColor: "#101512",
+    borderWidth: 1,
+    borderColor: "#354039",
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  textoResumoCalorias: {
+    color: "#A9B2AC",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  valorCalorias: {
+    fontSize: 26,
+    fontWeight: "900",
+    marginTop: 4,
+  },
+  detalheCalorias: {
+    color: "#A9B2AC",
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 5,
+  },
+  avisoCalorias: {
+    color: "#FACC15",
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 10,
   },
   botaoSalvar: {
     borderRadius: 12,

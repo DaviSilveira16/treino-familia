@@ -55,6 +55,14 @@ type SessaoCardioHistorico = {
   duration_minutes: number | null;
   distance_km: number | null;
   calories: number | null;
+  active_calories?: number | null;
+  intensity?: string | null;
+  incline_percent?: number | null;
+  heart_rate_avg?: number | null;
+  speed_kmh?: number | null;
+  cadence_rpm?: number | null;
+  weight_kg_snapshot?: number | null;
+  met_value?: number | null;
   notes: string | null;
 };
 type Props = {
@@ -123,7 +131,7 @@ export default function HistoricoTreinos({
       const { data: cardios, error: erroCardios } = await supabase
         .from("cardio_sessions")
         .select(
-          "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, notes",
+          "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, cadence_rpm, weight_kg_snapshot, met_value, notes",
         )
         .eq("user_id", usuarioId)
         .order("started_at", { ascending: false });
@@ -769,14 +777,91 @@ export default function HistoricoTreinos({
                       {formatarCarga(Number(cardio.distance_km))} km
                     </Text>
                   ) : null}
-                  {cardio.calories != null ? (
+                  {(cardio.active_calories ?? cardio.calories) != null ? (
                     <Text
                       style={[
                         estilos.etiquetaProgressoTexto,
                         { color: corTema },
                       ]}
                     >
-                      {formatarCarga(Number(cardio.calories))} kcal
+                      {formatarCarga(
+                        Number(cardio.active_calories ?? cardio.calories),
+                      )}{" "}
+                      {cardio.active_calories != null
+                        ? "kcal ativas estimadas"
+                        : "kcal"}
+                    </Text>
+                  ) : null}
+                  {cardio.intensity ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      Intensidade: {cardio.intensity}
+                    </Text>
+                  ) : null}
+                  {cardio.cadence_rpm != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      Cadência: {formatarCarga(Number(cardio.cadence_rpm))} RPM
+                    </Text>
+                  ) : null}
+                  {cardio.speed_kmh != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      Velocidade: {formatarCarga(Number(cardio.speed_kmh))} km/h
+                    </Text>
+                  ) : null}
+                  {cardio.incline_percent != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      Inclinação:{" "}
+                      {formatarCarga(Number(cardio.incline_percent))}%
+                    </Text>
+                  ) : null}
+                  {cardio.heart_rate_avg != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      FC média: {cardio.heart_rate_avg} bpm
+                    </Text>
+                  ) : null}
+                  {cardio.weight_kg_snapshot != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      Peso no registro:{" "}
+                      {formatarCarga(Number(cardio.weight_kg_snapshot))} kg
+                    </Text>
+                  ) : null}
+                  {cardio.met_value != null ? (
+                    <Text
+                      style={[
+                        estilos.etiquetaProgressoTexto,
+                        { color: corTema },
+                      ]}
+                    >
+                      MET: {formatarCarga(Number(cardio.met_value))}
                     </Text>
                   ) : null}
                 </View>
