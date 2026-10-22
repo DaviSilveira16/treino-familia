@@ -27,6 +27,18 @@ type SessaoTreino = {
   started_at: string;
   finished_at: string | null;
   notes: string | null;
+  duration_minutes?: number | null;
+  intensity?: string | null;
+  active_calories?: number | null;
+  weight_kg_snapshot?: number | null;
+  height_cm_snapshot?: number | null;
+  age_snapshot?: number | null;
+  sex_snapshot?: string | null;
+  met_value?: number | null;
+  exercise_count?: number | null;
+  sets_count?: number | null;
+  total_reps?: number | null;
+  total_volume_kg?: number | null;
 };
 type SerieTreino = {
   id: string;
@@ -149,7 +161,9 @@ export default function HistoricoTreinos({
       setHistoricoCardio((cardios ?? []) as SessaoCardioHistorico[]);
       const { data: sessoes, error: erroSessoes } = await supabase
         .from("workout_sessions")
-        .select("id, plan_id, started_at, finished_at, notes")
+        .select(
+          "id, plan_id, started_at, finished_at, notes, duration_minutes, intensity, active_calories, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, met_value, exercise_count, sets_count, total_reps, total_volume_kg",
+        )
         .eq("user_id", usuarioId)
         .order("started_at", { ascending: false });
       if (erroSessoes) {
@@ -445,6 +459,15 @@ export default function HistoricoTreinos({
                           ? "série registrada"
                           : "séries registradas"}
                       </Text>
+                      {sessao.active_calories != null ? (
+                        <Text
+                          style={[estilos.resumoSessao, { color: corTema }]}
+                        >
+                          {sessao.active_calories} kcal ativas estimadas ·{" "}
+                          {sessao.duration_minutes ?? "—"} min ·{" "}
+                          {sessao.intensity ?? "intensidade não informada"}
+                        </Text>
+                      ) : null}
                       {seriesComProgresso.length > 0 && (
                         <View
                           style={[
@@ -700,6 +723,56 @@ export default function HistoricoTreinos({
                           );
                         })
                       )}
+                      {sessao.active_calories != null ? (
+                        <View style={estilos.detalheEstimativaCalorias}>
+                          <Text
+                            style={[estilos.volumeLabel, { color: corTema }]}
+                          >
+                            GASTO ENERGÉTICO ESTIMADO
+                          </Text>
+                          <Text
+                            style={[estilos.volumeValor, { color: corTema }]}
+                          >
+                            {sessao.active_calories} kcal ativas
+                          </Text>
+                          <Text style={estilos.legendaTexto}>
+                            {sessao.duration_minutes ?? "—"} minutos ·
+                            intensidade {sessao.intensity ?? "não informada"} ·
+                            MET {sessao.met_value ?? "—"}
+                          </Text>
+                          <Text style={estilos.legendaTexto}>
+                            Perfil usado: {sessao.weight_kg_snapshot ?? "—"} kg
+                            {sessao.height_cm_snapshot != null
+                              ? ` · ${sessao.height_cm_snapshot} cm`
+                              : ""}
+                            {sessao.age_snapshot != null
+                              ? ` · ${sessao.age_snapshot} anos`
+                              : ""}
+                            {sessao.sex_snapshot
+                              ? ` · ${sessao.sex_snapshot}`
+                              : ""}
+                          </Text>
+                          <Text style={estilos.legendaTexto}>
+                            {sessao.total_reps ??
+                              sessao.series.reduce(
+                                (total, serie) =>
+                                  total + Number(serie.reps || 0),
+                                0,
+                              )}{" "}
+                            repetições · volume de carga{" "}
+                            {formatarCarga(
+                              sessao.total_volume_kg ?? volumeTotal,
+                            )}{" "}
+                            kg × repetições
+                          </Text>
+                          <Text style={estilos.legendaTexto}>
+                            Estimativa aproximada baseada em MET, duração,
+                            intensidade e peso. Cargas e repetições documentam o
+                            volume da sessão; não são convertidas diretamente em
+                            calorias.
+                          </Text>
+                        </View>
+                      ) : null}
                       <View
                         style={[
                           estilos.rodapeDetalhes,
@@ -1180,6 +1253,16 @@ const estilos = StyleSheet.create({
     borderColor: "#28573A",
     padding: 12,
     marginTop: 2,
+  },
+  detalheEstimativaCalorias: {
+    backgroundColor: "#17241C",
+    borderWidth: 1,
+    borderColor: "#28573A",
+    borderRadius: 12,
+    padding: 13,
+    marginTop: 16,
+    marginBottom: 14,
+    gap: 6,
   },
   volumeLabel: {
     color: "#A4ADA7",
