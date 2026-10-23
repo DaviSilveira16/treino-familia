@@ -19,11 +19,13 @@ export default function NavegacaoInferior({
   const corIconeComunidade = comunidadeAtiva ? corTema : "#9AA69D";
 
   return (
-    <View style={estilos.barra}>
+    <View nativeID="navegacao-inferior" style={estilos.barra}>
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
-        onPress={() => onNavegar("comunidade")}
+        onPress={() => {
+          if (!comunidadeAtiva) onNavegar("comunidade");
+        }}
         style={estilos.item}
         activeOpacity={0.8}
       >
@@ -117,33 +119,38 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    height: 50,
-    minHeight: 50,
-    maxHeight: 50,
-    paddingTop: 2,
-    paddingBottom: 2,
-    paddingHorizontal: 16,
+    height: 48,
+    minHeight: 48,
+    maxHeight: 48,
+    padding: 0,
+    paddingHorizontal: 6,
+    margin: 0,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 22,
+    justifyContent: "space-evenly",
+    gap: 0,
+    flexGrow: 0,
     flexShrink: 0,
     backgroundColor: "#111613",
     borderTopWidth: 1,
     borderTopColor: "#303A33",
   },
   item: {
-    minWidth: 92,
-    height: 44,
+    flex: 1,
+    minWidth: 0,
+    height: 46,
+    padding: 0,
+    margin: 0,
     alignItems: "center",
     justifyContent: "center",
     gap: 1,
   },
   icone: {
-    minWidth: 34,
-    height: 25,
+    minWidth: 36,
+    height: 26,
     paddingHorizontal: 7,
-    borderRadius: 9,
+    margin: 0,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: "transparent",
     alignItems: "center",
@@ -151,7 +158,7 @@ const estilos = StyleSheet.create({
   },
   emoji: {
     fontSize: 21,
-    lineHeight: 23,
+    lineHeight: 24,
   },
   iconeComunidadeFundo: {
     paddingHorizontal: 7,
@@ -161,10 +168,7 @@ const estilos = StyleSheet.create({
     height: 23,
     position: "relative",
   },
-  cabecaComunidade: {
-    position: "absolute",
-    borderRadius: 8,
-  },
+  cabecaComunidade: { position: "absolute", borderRadius: 8 },
   cabecaEsquerda: { width: 7, height: 7, left: 1, top: 4 },
   cabecaCentral: { width: 8, height: 8, left: 9.5, top: 0 },
   cabecaDireita: { width: 7, height: 7, right: 1, top: 4 },
@@ -183,6 +187,8 @@ const estilos = StyleSheet.create({
     fontSize: 10,
     lineHeight: 12,
     fontWeight: "700",
+    margin: 0,
+    padding: 0,
   },
   divisor: {
     width: 1,

@@ -15,9 +15,9 @@
     <link
       rel="apple-touch-icon"
       sizes="180x180"
-      href="/apple-touch-icon-v2.png"
+      href="/apple-touch-icon-v3.png"
     />
-    <link rel="manifest" href="/manifest.json?v=20261023" />
+    <link rel="manifest" href="/manifest.json?v=20261023-barra2" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Treino Família" />
@@ -42,7 +42,7 @@
       body {
         overflow: hidden;
         overscroll-behavior: none;
-        background-color: #101312;
+        background: #101312;
       }
 
       #root {
@@ -52,7 +52,20 @@
         height: 100%;
         min-height: 0;
         overflow: hidden;
-        background-color: #101312;
+        background: #101312;
+      }
+
+      #navegacao-inferior {
+        box-sizing: border-box !important;
+        height: 48px !important;
+        min-height: 48px !important;
+        max-height: 48px !important;
+        flex: 0 0 48px !important;
+        margin: 0 !important;
+        padding: 0 6px !important;
+        overflow: hidden;
+        background: #111613 !important;
+        border-top: 1px solid #303a33 !important;
       }
     </style>
   </head>
