@@ -146,7 +146,7 @@ const estilos = StyleSheet.create({
   },
   icone: {
     minWidth: 29,
-    height: 18,
+    height: 10,
     paddingHorizontal: 4,
     margin: 0,
     borderRadius: 6,
