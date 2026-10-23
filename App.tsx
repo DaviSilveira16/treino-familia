@@ -149,19 +149,13 @@ export default function App() {
       return;
     }
 
-    const assinatura = BackHandler.addEventListener(
-      "hardwareBackPress",
-      () => {
-        if (
-          referenciaNavegacao.isReady() &&
-          referenciaNavegacao.canGoBack()
-        ) {
-          referenciaNavegacao.goBack();
-          return true;
-        }
-        return false;
-      },
-    );
+    const assinatura = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (referenciaNavegacao.isReady() && referenciaNavegacao.canGoBack()) {
+        referenciaNavegacao.goBack();
+        return true;
+      }
+      return false;
+    });
 
     return () => assinatura.remove();
   }, [sessao]);
@@ -499,7 +493,7 @@ export default function App() {
   if (carregando) {
     return (
       <View style={estilos.carregando}>
-        <StatusBar barStyle="light-content" backgroundColor="#101312" />
+        <StatusBar barStyle="light-content"/>
         <ActivityIndicator size="large" color={corTema} />
         <Text style={estilos.textoCarregando}>
           Carregando Treino Família...
@@ -514,7 +508,7 @@ export default function App() {
         style={estilos.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <StatusBar barStyle="light-content" backgroundColor="#101312" />
+        <StatusBar barStyle="light-content"/>
 
         <ScrollView
           contentContainerStyle={estilos.conteudoAutenticacao}
@@ -711,281 +705,305 @@ export default function App() {
   return (
     <NavigationContainer ref={referenciaNavegacao}>
       <View style={{ flex: 1, backgroundColor: "#101312" }}>
-      <StatusBar barStyle="light-content" backgroundColor="#101312" />
+        <StatusBar barStyle="light-content"/>
 
-      <Pilha.Navigator
-        initialRouteName="Inicio"
-        screenOptions={{
-          headerShown: false,
-          gestureEnabled: Platform.OS !== "web",
-          gestureDirection: "horizontal",
-          gestureResponseDistance: 40,
-          gestureVelocityImpact: 0.3,
-          cardOverlayEnabled: true,
-          cardShadowEnabled: true,
-          detachPreviousScreen: Platform.OS === "web" ? false : undefined,
-          cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
-          transitionSpec: {
-            open: {
-              animation: "timing",
-              config: {
-                duration: 280,
+        <Pilha.Navigator
+          initialRouteName="Inicio"
+          screenOptions={{
+            headerShown: false,
+            gestureEnabled: Platform.OS !== "web",
+            gestureDirection: "horizontal",
+            gestureResponseDistance: 40,
+            gestureVelocityImpact: 0.3,
+            cardOverlayEnabled: true,
+            cardShadowEnabled: true,
+            detachPreviousScreen: Platform.OS === "web" ? false : undefined,
+            cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
+            transitionSpec: {
+              open: {
+                animation: "timing",
+                config: {
+                  duration: 280,
+                },
+              },
+              close: {
+                animation: "timing",
+                config: {
+                  duration: 240,
+                },
               },
             },
-            close: {
-              animation: "timing",
-              config: {
-                duration: 240,
-              },
+            cardStyle: {
+              flex: 1,
+              backgroundColor:
+                Platform.OS === "web" ? "transparent" : "#101312",
             },
-          },
-          cardStyle: {
-            flex: 1,
-            backgroundColor: Platform.OS === "web" ? "transparent" : "#101312",
-          },
-        }}
-      >
-        <Pilha.Screen name="Inicio">
-          {({ navigation }) => (
-            <View style={estilos.container}>
-              <ScrollView
-                contentContainerStyle={estilos.conteudoHome}
-                showsVerticalScrollIndicator={false}
-              >
-                <View style={estilos.topoHome}>
-                  <View style={estilos.informacoesUsuario}>
-                    <Text style={[estilos.marcaPequena, { color: corTema }]}>
-                      TREINO FAMÍLIA
-                    </Text>
+          }}
+        >
+          <Pilha.Screen name="Inicio">
+            {({ navigation }) => (
+              <View style={estilos.container}>
+                <ScrollView
+                  contentContainerStyle={estilos.conteudoHome}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <View style={estilos.topoHome}>
+                    <View style={estilos.informacoesUsuario}>
+                      <Text style={[estilos.marcaPequena, { color: corTema }]}>
+                        TREINO FAMÍLIA
+                      </Text>
 
-                    <Text
-                      style={estilos.tituloHome}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
+                      <Text
+                        style={estilos.tituloHome}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                      >
+                        Olá, {nomeUsuario}!
+                      </Text>
+
+                      <Text style={estilos.subtituloHome}>
+                        Vamos treinar hoje?
+                      </Text>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[
+                        estilos.avatar,
+                        {
+                          backgroundColor: `${corTema}30`,
+                          borderColor: corTema,
+                        },
+                      ]}
+                      onPress={() => navigation.navigate("perfil")}
+                      activeOpacity={0.8}
                     >
-                      Olá, {nomeUsuario}!
-                    </Text>
+                      {fotoUrl ? (
+                        <Image
+                          source={{ uri: fotoUrl }}
+                          style={estilos.imagemAvatar}
+                        />
+                      ) : (
+                        <Text style={[estilos.avatarTexto, { color: corTema }]}>
+                          {nomeUsuario.charAt(0).toUpperCase()}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
 
-                    <Text style={estilos.subtituloHome}>
-                      Vamos treinar hoje?
-                    </Text>
+                  <View
+                    style={[
+                      estilos.banner,
+                      {
+                        backgroundColor: `${corTema}18`,
+                        borderColor: `${corTema}70`,
+                      },
+                    ]}
+                  >
+                    <Text style={estilos.bannerEmoji}>🔥</Text>
+
+                    <View style={estilos.bannerTextoContainer}>
+                      <Text style={estilos.bannerTitulo}>
+                        Sua evolução começa aqui
+                      </Text>
+
+                      <Text style={estilos.bannerDescricao}>
+                        Mantenha a consistência e supere seus limites.
+                      </Text>
+                    </View>
+                  </View>
+
+                  <TreinoDoDia
+                    onAbrirProgramacao={() => navigation.navigate("frequencia")}
+                    onAbrirTreino={() => navigation.navigate("treinos")}
+                    corTema={corTema}
+                  />
+
+                  <ResumoSemanal corTema={corTema} />
+
+                  <Text style={estilos.tituloSecao}>Seu espaço de treino</Text>
+
+                  <View style={estilos.listaCartoes}>
+                    {telas.map((tela) => (
+                      <TouchableOpacity
+                        key={tela.id}
+                        style={estilos.cartaoHome}
+                        onPress={() => navigation.navigate(tela.id)}
+                        activeOpacity={0.8}
+                      >
+                        <View
+                          style={[
+                            estilos.iconeCartao,
+                            { backgroundColor: `${corTema}20` },
+                          ]}
+                        >
+                          <Text style={estilos.emojiCartao}>{tela.emoji}</Text>
+                        </View>
+
+                        <View style={estilos.textoCartao}>
+                          <Text style={estilos.tituloCartao}>
+                            {tela.titulo}
+                          </Text>
+
+                          <Text style={estilos.descricaoCartao}>
+                            {tela.descricao}
+                          </Text>
+                        </View>
+
+                        <Text style={[estilos.setaCartao, { color: corTema }]}>
+                          ›
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
                   </View>
 
                   <TouchableOpacity
-                    style={[
-                      estilos.avatar,
-                      {
-                        backgroundColor: `${corTema}30`,
-                        borderColor: corTema,
-                      },
-                    ]}
-                    onPress={() => navigation.navigate("perfil")}
+                    style={estilos.botaoSair}
+                    onPress={sair}
                     activeOpacity={0.8}
                   >
-                    {fotoUrl ? (
-                      <Image
-                        source={{ uri: fotoUrl }}
-                        style={estilos.imagemAvatar}
-                      />
-                    ) : (
-                      <Text style={[estilos.avatarTexto, { color: corTema }]}>
-                        {nomeUsuario.charAt(0).toUpperCase()}
-                      </Text>
-                    )}
+                    <Text style={estilos.textoBotaoSair}>Sair da conta</Text>
                   </TouchableOpacity>
-                </View>
 
-                <View
-                  style={[
-                    estilos.banner,
-                    {
-                      backgroundColor: `${corTema}18`,
-                      borderColor: `${corTema}70`,
-                    },
-                  ]}
-                >
-                  <Text style={estilos.bannerEmoji}>🔥</Text>
+                  <Text style={estilos.rodapeHome}>
+                    Treino Família · Evoluindo juntos
+                  </Text>
+                </ScrollView>
+              </View>
+            )}
+          </Pilha.Screen>
 
-                  <View style={estilos.bannerTextoContainer}>
-                    <Text style={estilos.bannerTitulo}>
-                      Sua evolução começa aqui
-                    </Text>
+          <Pilha.Screen name="perfil">
+            {({ navigation }) => (
+              <NavegacaoVoltarGlobal
+                onVoltar={() => navigation.goBack()}
+                ativo={Platform.OS === "web" && navigation.canGoBack()}
+              >
+                <Perfil
+                  usuario={sessao.user}
+                  onVoltar={() => navigation.goBack()}
+                  onTemaAlterado={setCorTema}
+                />
+              </NavegacaoVoltarGlobal>
+            )}
+          </Pilha.Screen>
 
-                    <Text style={estilos.bannerDescricao}>
-                      Mantenha a consistência e supere seus limites.
-                    </Text>
-                  </View>
-                </View>
-
-                <TreinoDoDia
-                  onAbrirProgramacao={() => navigation.navigate("frequencia")}
-                  onAbrirTreino={() => navigation.navigate("treinos")}
+          <Pilha.Screen name="treinos">
+            {({ navigation }) => (
+              <NavegacaoVoltarGlobal
+                onVoltar={() => navigation.goBack()}
+                ativo={Platform.OS === "web" && navigation.canGoBack()}
+              >
+                <MeusTreinos
+                  onVoltar={() => navigation.goBack()}
+                  onIniciarTreino={(treino) =>
+                    navigation.navigate("treinoAtivo", {
+                      planId: treino.id,
+                      planName: treino.name,
+                    })
+                  }
                   corTema={corTema}
                 />
+              </NavegacaoVoltarGlobal>
+            )}
+          </Pilha.Screen>
 
-                <ResumoSemanal corTema={corTema} />
-
-                <Text style={estilos.tituloSecao}>Seu espaço de treino</Text>
-
-                <View style={estilos.listaCartoes}>
-                  {telas.map((tela) => (
-                    <TouchableOpacity
-                      key={tela.id}
-                      style={estilos.cartaoHome}
-                      onPress={() => navigation.navigate(tela.id)}
-                      activeOpacity={0.8}
-                    >
-                      <View
-                        style={[
-                          estilos.iconeCartao,
-                          { backgroundColor: `${corTema}20` },
-                        ]}
-                      >
-                        <Text style={estilos.emojiCartao}>{tela.emoji}</Text>
-                      </View>
-
-                      <View style={estilos.textoCartao}>
-                        <Text style={estilos.tituloCartao}>{tela.titulo}</Text>
-
-                        <Text style={estilos.descricaoCartao}>
-                          {tela.descricao}
-                        </Text>
-                      </View>
-
-                      <Text style={[estilos.setaCartao, { color: corTema }]}>
-                        ›
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <TouchableOpacity
-                  style={estilos.botaoSair}
-                  onPress={sair}
-                  activeOpacity={0.8}
-                >
-                  <Text style={estilos.textoBotaoSair}>Sair da conta</Text>
-                </TouchableOpacity>
-
-                <Text style={estilos.rodapeHome}>
-                  Treino Família · Evoluindo juntos
-                </Text>
-              </ScrollView>
-            </View>
-          )}
-        </Pilha.Screen>
-
-        <Pilha.Screen name="perfil">
-          {({ navigation }) => (
-            <NavegacaoVoltarGlobal
-              onVoltar={() => navigation.goBack()}
-              ativo={Platform.OS === "web" && navigation.canGoBack()}
-            >
-              <Perfil
-                usuario={sessao.user}
+          <Pilha.Screen name="cardios">
+            {({ navigation }) => (
+              <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                onTemaAlterado={setCorTema}
-              />
-            </NavegacaoVoltarGlobal>
-          )}
-        </Pilha.Screen>
+                ativo={Platform.OS === "web" && navigation.canGoBack()}
+              >
+                <MeusCardios
+                  onVoltar={() => navigation.goBack()}
+                  corTema={corTema}
+                />
+              </NavegacaoVoltarGlobal>
+            )}
+          </Pilha.Screen>
 
-        <Pilha.Screen name="treinos">
-          {({ navigation }) => (
-            <NavegacaoVoltarGlobal
-              onVoltar={() => navigation.goBack()}
-              ativo={Platform.OS === "web" && navigation.canGoBack()}
-            >
-              <MeusTreinos
+          <Pilha.Screen name="evolucao">
+            {({ navigation }) => (
+              <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                onIniciarTreino={(treino) => navigation.navigate("treinoAtivo", { planId: treino.id, planName: treino.name })}
-                corTema={corTema}
-              />
-            </NavegacaoVoltarGlobal>
-          )}
-        </Pilha.Screen>
+                ativo={Platform.OS === "web" && navigation.canGoBack()}
+              >
+                <EvolucaoFisica
+                  onVoltar={() => navigation.goBack()}
+                  corTema={corTema}
+                />
+              </NavegacaoVoltarGlobal>
+            )}
+          </Pilha.Screen>
 
-        <Pilha.Screen name="cardios">
-          {({ navigation }) => (
-            <NavegacaoVoltarGlobal
-              onVoltar={() => navigation.goBack()}
-              ativo={Platform.OS === "web" && navigation.canGoBack()}
-            >
-              <MeusCardios
+          <Pilha.Screen name="historico">
+            {({ navigation }) => (
+              <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                corTema={corTema}
-              />
-            </NavegacaoVoltarGlobal>
-          )}
-        </Pilha.Screen>
+                ativo={Platform.OS === "web" && navigation.canGoBack()}
+              >
+                <HistoricoTreinos
+                  onVoltar={() => navigation.goBack()}
+                  corTema={corTema}
+                />
+              </NavegacaoVoltarGlobal>
+            )}
+          </Pilha.Screen>
 
-        <Pilha.Screen name="evolucao">
-          {({ navigation }) => (
-            <NavegacaoVoltarGlobal
-              onVoltar={() => navigation.goBack()}
-              ativo={Platform.OS === "web" && navigation.canGoBack()}
-            >
-              <EvolucaoFisica
+          <Pilha.Screen name="frequencia">
+            {({ navigation }) => (
+              <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                corTema={corTema}
-              />
-            </NavegacaoVoltarGlobal>
-          )}
-        </Pilha.Screen>
+                ativo={Platform.OS === "web" && navigation.canGoBack()}
+              >
+                <Frequencia
+                  onVoltar={() => navigation.goBack()}
+                  corTema={corTema}
+                />
+              </NavegacaoVoltarGlobal>
+            )}
+          </Pilha.Screen>
 
-        <Pilha.Screen name="historico">
-          {({ navigation }) => (
-            <NavegacaoVoltarGlobal
-              onVoltar={() => navigation.goBack()}
-              ativo={Platform.OS === "web" && navigation.canGoBack()}
-            >
-              <HistoricoTreinos
+          <Pilha.Screen name="comunidade">
+            {({ navigation }) => (
+              <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                corTema={corTema}
-              />
-            </NavegacaoVoltarGlobal>
-          )}
-        </Pilha.Screen>
+                ativo={Platform.OS === "web" && navigation.canGoBack()}
+              >
+                <ComunidadeFamilia corTema={corTema} />
+              </NavegacaoVoltarGlobal>
+            )}
+          </Pilha.Screen>
 
-        <Pilha.Screen name="frequencia">
-          {({ navigation }) => (
-            <NavegacaoVoltarGlobal
-              onVoltar={() => navigation.goBack()}
-              ativo={Platform.OS === "web" && navigation.canGoBack()}
-            >
-              <Frequencia
+          <Pilha.Screen name="evolucaoTreinos">
+            {({ navigation }) => (
+              <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                corTema={corTema}
-              />
-            </NavegacaoVoltarGlobal>
-          )}
-        </Pilha.Screen>
+                ativo={Platform.OS === "web" && navigation.canGoBack()}
+              >
+                <EvolucaoTreinos
+                  onVoltar={() => navigation.goBack()}
+                  corTema={corTema}
+                />
+              </NavegacaoVoltarGlobal>
+            )}
+          </Pilha.Screen>
 
-        <Pilha.Screen name="comunidade">
-          {({ navigation }) => (
-            <NavegacaoVoltarGlobal onVoltar={() => navigation.goBack()} ativo={Platform.OS === "web" && navigation.canGoBack()}>
-              <ComunidadeFamilia corTema={corTema} />
-            </NavegacaoVoltarGlobal>
-          )}
-        </Pilha.Screen>
-
-        <Pilha.Screen name="evolucaoTreinos">
-          {({ navigation }) => (
-            <NavegacaoVoltarGlobal onVoltar={() => navigation.goBack()} ativo={Platform.OS === "web" && navigation.canGoBack()}>
-              <EvolucaoTreinos onVoltar={() => navigation.goBack()} corTema={corTema} />
-            </NavegacaoVoltarGlobal>
-          )}
-        </Pilha.Screen>
-
-        <Pilha.Screen name="treinoAtivo">
-          {({ navigation, route }) => (
-            <NavegacaoVoltarGlobal onVoltar={() => navigation.goBack()} ativo={Platform.OS === "web" && navigation.canGoBack()}>
-              <TreinoAtivo route={route} onVoltar={() => navigation.goBack()} corTema={corTema} />
-            </NavegacaoVoltarGlobal>
-          )}
-        </Pilha.Screen>
-      </Pilha.Navigator>
-      {sessao ? <NavegacaoInferior corTema={corTema} /> : null}
+          <Pilha.Screen name="treinoAtivo">
+            {({ navigation, route }) => (
+              <NavegacaoVoltarGlobal
+                onVoltar={() => navigation.goBack()}
+                ativo={Platform.OS === "web" && navigation.canGoBack()}
+              >
+                <TreinoAtivo
+                  route={route}
+                  onVoltar={() => navigation.goBack()}
+                  corTema={corTema}
+                />
+              </NavegacaoVoltarGlobal>
+            )}
+          </Pilha.Screen>
+        </Pilha.Navigator>
+        {sessao ? <NavegacaoInferior corTema={corTema} /> : null}
       </View>
     </NavigationContainer>
   );
