@@ -7,6 +7,7 @@ import {
   Platform,
   StyleSheet,
 } from "react-native";
+import { useIsFocused } from "@react-navigation/native";
 
 type Props = {
   children: ReactNode;
@@ -19,6 +20,7 @@ export default function NavegacaoVoltarGlobal({
   onVoltar,
   ativo = true,
 }: Props) {
+  const estaEmFoco = useIsFocused();
   const voltarRef = useRef(onVoltar);
   const ativoRef = useRef(ativo);
   const fechandoRef = useRef(false);
@@ -100,7 +102,12 @@ export default function NavegacaoVoltarGlobal({
   ).current;
 
   useEffect(() => {
-    if (Platform.OS === "ios" || Platform.OS === "web" || !ativo) {
+    if (
+      Platform.OS === "ios" ||
+      Platform.OS === "web" ||
+      !ativo ||
+      !estaEmFoco
+    ) {
       return;
     }
 
@@ -110,7 +117,7 @@ export default function NavegacaoVoltarGlobal({
     });
 
     return () => assinatura.remove();
-  }, [ativo]);
+  }, [ativo, estaEmFoco]);
 
   return (
     <Animated.View

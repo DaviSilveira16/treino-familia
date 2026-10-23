@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../supabase";
 
 type Familia = { id: string; name: string; invite_code: string };
@@ -68,6 +69,105 @@ function dataRelativa(data: string) {
 function numero(valor: unknown) {
   const n = Number(valor);
   return Number.isFinite(n) ? n : 0;
+}
+
+function mensagemErro(problema: unknown, alternativa: string) {
+  if (problema instanceof Error && problema.message.trim()) {
+    return problema.message;
+  }
+  if (typeof problema === "string" && problema.trim()) {
+    return problema;
+  }
+  if (problema && typeof problema === "object") {
+    const detalhe = problema as {
+      message?: unknown;
+      details?: unknown;
+      hint?: unknown;
+      code?: unknown;
+      statusCode?: unknown;
+    };
+    const partes = [detalhe.message, detalhe.details, detalhe.hint].filter(
+      (item): item is string =>
+        typeof item === "string" && item.trim().length > 0,
+    );
+    if (partes.length) {
+      const codigo = typeof detalhe.code === "string" ? detalhe.code : "";
+      const status =
+        typeof detalhe.statusCode === "string" ? detalhe.statusCode : "";
+      const identificador = [status, codigo].filter(Boolean).join(" · ");
+      return identificador
+        ? `${partes.join("\n")}\n(${identificador})`
+        : partes.join("\n");
+    }
+  }
+  return alternativa;
+}
+
+function base64ParaArrayBuffer(conteudo: string): ArrayBuffer {
+  const alfabeto =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const base64 = conteudo.replace(/^data:[^,]*,/, "").replace(/\s/g, "");
+  const preenchimento = base64.endsWith("==")
+    ? 2
+    : base64.endsWith("=")
+      ? 1
+      : 0;
+  const bytes = new Uint8Array(
+    Math.max(0, Math.floor((base64.length * 3) / 4) - preenchimento),
+  );
+  let acumulador = 0;
+  let bitsDisponiveis = 0;
+  let indice = 0;
+
+  for (const caractere of base64) {
+    if (caractere === "=") break;
+    const valor = alfabeto.indexOf(caractere);
+    if (valor < 0) continue;
+    acumulador = ((acumulador << 6) | valor) & 0xffffff;
+    bitsDisponiveis += 6;
+    if (bitsDisponiveis >= 8) {
+      bitsDisponiveis -= 8;
+      if (indice < bytes.length) {
+        bytes[indice++] = (acumulador >> bitsDisponiveis) & 0xff;
+      }
+    }
+  }
+  return bytes.buffer;
+}
+
+async function obterConteudoFoto(
+  asset: ImagePicker.ImagePickerAsset,
+): Promise<Blob | ArrayBuffer> {
+  if (Platform.OS === "web" && asset.file) {
+    return asset.file;
+  }
+
+  if (Platform.OS === "web") {
+    const resposta = await fetch(asset.uri);
+    if (!resposta.ok) {
+      throw new Error(
+        `Não foi possível ler a foto selecionada (HTTP ${resposta.status}). Selecione a imagem novamente.`,
+      );
+    }
+    const blob = await resposta.blob();
+    if (!blob.size) {
+      throw new Error("A foto selecionada está vazia. Escolha outra imagem.");
+    }
+    return blob;
+  }
+
+  const base64 =
+    asset.base64 ||
+    (await FileSystem.readAsStringAsync(asset.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    }));
+  const arquivo = base64ParaArrayBuffer(base64);
+  if (!arquivo.byteLength) {
+    throw new Error(
+      "Não foi possível ler os dados da foto no aparelho. Selecione-a novamente.",
+    );
+  }
+  return arquivo;
 }
 
 export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
@@ -386,13 +486,55 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         snapshot = treino.exercicios;
       }
       if (tipoPublicacao === "foto" && fotoSelecionada) {
-        const blob = await (await fetch(fotoSelecionada.uri)).blob();
-        const mime = fotoSelecionada.mimeType || "image/jpeg";
-        const extensao = (mime.split("/")[1] || "jpeg").replace("jpeg", "jpg");
-        caminhoFoto = `${familia.id}/${usuarioId}/${Date.now()}.${extensao}`;
+        const mime = (
+          fotoSelecionada.mimeType ||
+          fotoSelecionada.file?.type ||
+          "image/jpeg"
+        ).toLowerCase();
+        const extensoes: Record<string, string> = {
+          "image/jpeg": "jpg",
+          "image/png": "png",
+          "image/webp": "webp",
+          "image/heic": "heic",
+          "image/heif": "heif",
+          "image/avif": "avif",
+          "image/gif": "gif",
+        };
+        if (!extensoes[mime]) {
+          throw new Error(
+            "Formato de imagem não suportado. Use JPG, PNG, WEBP, HEIC, HEIF, AVIF ou GIF.",
+          );
+        }
+        const tamanhoInformado =
+          fotoSelecionada.fileSize ?? fotoSelecionada.file?.size;
+        if (
+          typeof tamanhoInformado === "number" &&
+          tamanhoInformado > 10 * 1024 * 1024
+        ) {
+          throw new Error(
+            "A foto ultrapassa o limite de 10 MB. Escolha uma imagem menor.",
+          );
+        }
+        const conteudo = await obterConteudoFoto(fotoSelecionada);
+        const tamanhoReal =
+          conteudo instanceof ArrayBuffer
+            ? conteudo.byteLength
+            : (conteudo as Blob).size;
+        if (tamanhoReal > 10 * 1024 * 1024) {
+          throw new Error(
+            "A foto ultrapassa o limite de 10 MB. Escolha uma imagem menor.",
+          );
+        }
+        caminhoFoto = `${familia.id}/${usuarioId}/${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}.${extensoes[mime]}`;
         const { error } = await supabase.storage
           .from("community-photos")
-          .upload(caminhoFoto, blob, { contentType: mime, upsert: false });
+          .upload(caminhoFoto, conteudo, {
+            contentType: mime,
+            cacheControl: "3600",
+            upsert: false,
+          });
         if (error) throw error;
       }
       const { error } = await supabase.from("community_posts").insert({
@@ -413,11 +555,17 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       setTipoPublicacao("texto");
       await carregar();
     } catch (problema) {
-      if (caminhoFoto)
-        await supabase.storage.from("community-photos").remove([caminhoFoto]);
+      if (caminhoFoto) {
+        try {
+          await supabase.storage.from("community-photos").remove([caminhoFoto]);
+        } catch {}
+      }
       avisar(
         "Não foi possível publicar",
-        problema instanceof Error ? problema.message : "Tente novamente.",
+        mensagemErro(
+          problema,
+          "O Supabase recusou a publicação. Confira se o bucket community-photos e as políticas de armazenamento foram configurados no SQL Editor.",
+        ),
       );
     } finally {
       setPublicando(false);
@@ -684,13 +832,17 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         <View style={estilos.opcoesPublicacao}>
           {(
             [
-              ["texto", "✍️ Texto"],
-              ["foto", "📷 Foto"],
-              ["treino", "🏋️ Treino"],
-            ] as [TipoPublicacao, string][]
-          ).map(([valor, rotulo]) => (
+              ["texto", "✍️", "Texto"],
+              ["foto", "📷", "Foto"],
+              ["treino", "🏋️", "Treino"],
+            ] as [TipoPublicacao, string, string][]
+          ).map(([valor, icone, rotulo]) => (
             <TouchableOpacity
               key={valor}
+              accessibilityRole="button"
+              accessibilityLabel={
+                rotulo === "Treino" ? "Compartilhar treino" : rotulo
+              }
               onPress={() => {
                 setTipoPublicacao(valor);
                 if (valor !== "foto") setFotoSelecionada(null);
@@ -703,14 +855,18 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
                 },
               ]}
             >
-              <Text
-                style={[
-                  estilos.opcaoTexto,
-                  tipoPublicacao === valor && { color: corTema },
-                ]}
-              >
-                {rotulo}
-              </Text>
+              <View style={estilos.conteudoOpcao}>
+                <Text style={estilos.iconeOpcao}>{icone}</Text>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    estilos.opcaoTexto,
+                    tipoPublicacao === valor && { color: corTema },
+                  ]}
+                >
+                  {rotulo}
+                </Text>
+              </View>
             </TouchableOpacity>
           ))}
         </View>
@@ -1066,6 +1222,8 @@ const estilos = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 12,
   },
+  conteudoOpcao: { flexDirection: "row", alignItems: "center", gap: 6 },
+  iconeOpcao: { fontSize: 13 },
   opcaoTexto: { color: "#C8D1CB", fontSize: 12, fontWeight: "800" },
   fotoArea: { gap: 10 },
   previewFoto: {

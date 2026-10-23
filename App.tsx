@@ -139,6 +139,8 @@ export default function App() {
   const [enviando, setEnviando] = useState(false);
   const [corTema, setCorTema] = useState(COR_PADRAO);
   const [rotaAtual, setRotaAtual] = useState<keyof Rotas>("Inicio");
+  const assinaturaHistoricoWeb = useRef("");
+  const ignorarProximoHistoricoWeb = useRef(false);
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof document === "undefined") return;
@@ -194,16 +196,93 @@ export default function App() {
   }, []);
 
   function atualizarRotaAtual() {
-    const rota = referenciaNavegacao.getCurrentRoute()?.name;
-    if (rota) {
-      setRotaAtual(rota as keyof Rotas);
+    const rota = referenciaNavegacao.getCurrentRoute();
+    const estado = referenciaNavegacao.getRootState();
+    if (!rota) return;
+
+    setRotaAtual(rota.name as keyof Rotas);
+
+    if (Platform.OS !== "web" || typeof window === "undefined" || !estado) {
+      return;
     }
+
+    const assinatura = `${estado.index}:${estado.routes
+      .map((item) => `${item.key}:${item.name}`)
+      .join("|")}`;
+    if (assinatura === assinaturaHistoricoWeb.current) return;
+
+    assinaturaHistoricoWeb.current = assinatura;
+    if (ignorarProximoHistoricoWeb.current) {
+      ignorarProximoHistoricoWeb.current = false;
+      return;
+    }
+
+    window.history.pushState(
+      {
+        treinoFamilia: true,
+        assinatura,
+        rota: rota.name,
+        parametros: rota.params ?? null,
+      },
+      "",
+      window.location.href,
+    );
   }
 
   function atualizarSessao(novaSessao: Session | null) {
     setSessao(novaSessao);
     setCorTema(obterCorTema(novaSessao?.user.user_metadata?.tema_cor));
   }
+
+  useEffect(() => {
+    if (Platform.OS !== "web" || !sessao || typeof window === "undefined") {
+      return;
+    }
+
+    function tratarVoltaDoNavegador(evento: PopStateEvent) {
+      if (!referenciaNavegacao.isReady()) return;
+      const estadoAnterior = evento.state as {
+        treinoFamilia?: boolean;
+        assinatura?: string;
+        rota?: string;
+        parametros?: unknown;
+      } | null;
+      if (!estadoAnterior?.treinoFamilia || !estadoAnterior.rota) return;
+
+      const rotaAtualWeb = referenciaNavegacao.getCurrentRoute()?.name;
+      if (
+        estadoAnterior.assinatura &&
+        estadoAnterior.assinatura === assinaturaHistoricoWeb.current
+      ) {
+        if (referenciaNavegacao.canGoBack()) {
+          ignorarProximoHistoricoWeb.current = true;
+          referenciaNavegacao.goBack();
+        }
+        return;
+      }
+
+      ignorarProximoHistoricoWeb.current = true;
+      try {
+        if (
+          estadoAnterior.rota === rotaAtualWeb &&
+          referenciaNavegacao.canGoBack()
+        ) {
+          referenciaNavegacao.goBack();
+          return;
+        }
+        referenciaNavegacao.navigate(
+          estadoAnterior.rota as keyof Rotas,
+          estadoAnterior.parametros as never,
+        );
+      } catch {
+        ignorarProximoHistoricoWeb.current = false;
+        if (referenciaNavegacao.canGoBack()) referenciaNavegacao.goBack();
+      }
+    }
+
+    window.addEventListener("popstate", tratarVoltaDoNavegador);
+    return () => window.removeEventListener("popstate", tratarVoltaDoNavegador);
+  }, [sessao]);
 
   useEffect(() => {
     if (Platform.OS !== "android" || !sessao) {
@@ -964,7 +1043,7 @@ export default function App() {
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                ativo={Platform.OS === "web" && navigation.canGoBack()}
+                ativo={navigation.canGoBack()}
               >
                 <Perfil
                   usuario={sessao.user}
@@ -979,7 +1058,7 @@ export default function App() {
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                ativo={Platform.OS === "web" && navigation.canGoBack()}
+                ativo={navigation.canGoBack()}
               >
                 <MeusTreinos
                   onVoltar={() => navigation.goBack()}
@@ -999,7 +1078,7 @@ export default function App() {
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                ativo={Platform.OS === "web" && navigation.canGoBack()}
+                ativo={navigation.canGoBack()}
               >
                 <MeusCardios
                   onVoltar={() => navigation.goBack()}
@@ -1013,7 +1092,7 @@ export default function App() {
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                ativo={Platform.OS === "web" && navigation.canGoBack()}
+                ativo={navigation.canGoBack()}
               >
                 <EvolucaoFisica
                   onVoltar={() => navigation.goBack()}
@@ -1027,7 +1106,7 @@ export default function App() {
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                ativo={Platform.OS === "web" && navigation.canGoBack()}
+                ativo={navigation.canGoBack()}
               >
                 <HistoricoTreinos
                   onVoltar={() => navigation.goBack()}
@@ -1041,7 +1120,7 @@ export default function App() {
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                ativo={Platform.OS === "web" && navigation.canGoBack()}
+                ativo={navigation.canGoBack()}
               >
                 <Frequencia
                   onVoltar={() => navigation.goBack()}
@@ -1055,7 +1134,7 @@ export default function App() {
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                ativo={Platform.OS === "web" && navigation.canGoBack()}
+                ativo={navigation.canGoBack()}
               >
                 <ComunidadeFamilia corTema={corTema} />
               </NavegacaoVoltarGlobal>
@@ -1066,7 +1145,7 @@ export default function App() {
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                ativo={Platform.OS === "web" && navigation.canGoBack()}
+                ativo={navigation.canGoBack()}
               >
                 <EvolucaoTreinos
                   onVoltar={() => navigation.goBack()}
@@ -1080,7 +1159,7 @@ export default function App() {
             {({ navigation, route }) => (
               <NavegacaoVoltarGlobal
                 onVoltar={() => navigation.goBack()}
-                ativo={Platform.OS === "web" && navigation.canGoBack()}
+                ativo={navigation.canGoBack()}
               >
                 <TreinoAtivo
                   route={route}
