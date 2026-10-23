@@ -118,9 +118,9 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    height: 34,
-    minHeight: 34,
-    maxHeight: 34,
+    height: 30,
+    minHeight: 30,
+    maxHeight: 30,
     padding: 0,
     paddingHorizontal: 6,
     margin: 0,
@@ -137,7 +137,7 @@ const estilos = StyleSheet.create({
   item: {
     flex: 1,
     minWidth: 0,
-    height: 32,
+    height: 28,
     padding: 0,
     margin: 0,
     alignItems: "center",
@@ -145,8 +145,8 @@ const estilos = StyleSheet.create({
     gap: 0,
   },
   icone: {
-    minWidth: 26,
-    height: 17,
+    minWidth: 23,
+    height: 14,
     paddingHorizontal: 4,
     margin: 0,
     borderRadius: 6,
@@ -155,7 +155,7 @@ const estilos = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  emoji: { fontSize: 12, lineHeight: 14 },
+  emoji: { fontSize: 10, lineHeight: 11 },
   iconeComunidadeFundo: { paddingHorizontal: 4 },
   desenhoComunidade: { width: 20, height: 15, position: "relative" },
   cabecaComunidade: { position: "absolute", borderRadius: 8 },
@@ -174,11 +174,11 @@ const estilos = StyleSheet.create({
   corpoDireito: { width: 7, height: 6, right: 0, top: 9 },
   rotulo: {
     color: "#9AA69D",
-    fontSize: 8,
-    lineHeight: 9,
+    fontSize: 7,
+    lineHeight: 8,
     fontWeight: "700",
     margin: 0,
     padding: 0,
   },
-  divisor: { width: 1, height: 16, backgroundColor: "#303A33" },
+  divisor: { width: 1, height: 13, backgroundColor: "#303A33" },
 });

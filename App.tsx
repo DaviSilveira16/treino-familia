@@ -163,15 +163,14 @@ export default function App() {
     };
 
     document.documentElement.style.height = "100%";
-    // O body e o #root já usam position: fixed com inset: 0 no index.html.
-    // Deixamos a altura automática para não ultrapassar o viewport do iPhone
-    // quando o PWA é aberto na Tela de Início e cortar a navegação inferior.
-    document.body.style.height = "auto";
+    // Mantém o documento e o contêiner do React com altura definida.
+    // Altura automática pode colapsar a tela no Expo Web/PWA.
+    document.body.style.height = "100%";
     document.body.style.minHeight = "0";
     document.body.style.margin = "0";
     document.body.style.overflow = "hidden";
     document.body.style.backgroundColor = "#111613";
-    raiz.style.height = "auto";
+    raiz.style.height = "100%";
     raiz.style.minHeight = "0";
     raiz.style.width = "100%";
     raiz.style.overflow = "hidden";
