@@ -87,7 +87,9 @@ export default function NavegacaoInferior({
           Comunidade
         </Text>
       </TouchableOpacity>
+
       <View style={estilos.divisor} />
+
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Ir para treinos"
@@ -116,15 +118,17 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    height: 44,
-    minHeight: 44,
-    maxHeight: 44,
-    paddingTop: 0,
-    paddingHorizontal: 8,
+    height: 34,
+    minHeight: 34,
+    maxHeight: 34,
+    padding: 0,
+    paddingHorizontal: 6,
+    margin: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-evenly",
     gap: 0,
+    flexGrow: 0,
     flexShrink: 0,
     backgroundColor: "#111613",
     borderTopWidth: 1,
@@ -133,38 +137,48 @@ const estilos = StyleSheet.create({
   item: {
     flex: 1,
     minWidth: 0,
-    height: 42,
+    height: 32,
+    padding: 0,
+    margin: 0,
     alignItems: "center",
     justifyContent: "center",
     gap: 0,
   },
   icone: {
-    minWidth: 30,
-    height: 21,
-    paddingHorizontal: 5,
-    borderRadius: 7,
+    minWidth: 26,
+    height: 17,
+    paddingHorizontal: 4,
+    margin: 0,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
-  emoji: { fontSize: 14, lineHeight: 17 },
-  iconeComunidadeFundo: { paddingHorizontal: 6 },
-  desenhoComunidade: { width: 22, height: 19, position: "relative" },
+  emoji: { fontSize: 12, lineHeight: 14 },
+  iconeComunidadeFundo: { paddingHorizontal: 4 },
+  desenhoComunidade: { width: 20, height: 15, position: "relative" },
   cabecaComunidade: { position: "absolute", borderRadius: 8 },
-  cabecaEsquerda: { width: 6, height: 6, left: 1, top: 4 },
-  cabecaCentral: { width: 7, height: 7, left: 9, top: 0 },
-  cabecaDireita: { width: 6, height: 6, right: 1, top: 4 },
+  cabecaEsquerda: { width: 5, height: 5, left: 1, top: 3 },
+  cabecaCentral: { width: 6, height: 6, left: 7, top: 0 },
+  cabecaDireita: { width: 5, height: 5, right: 1, top: 3 },
   corpoComunidade: {
     position: "absolute",
-    borderTopLeftRadius: 6,
-    borderTopRightRadius: 6,
+    borderTopLeftRadius: 5,
+    borderTopRightRadius: 5,
     borderBottomLeftRadius: 2,
     borderBottomRightRadius: 2,
   },
-  corpoEsquerdo: { width: 8, height: 8, left: 0, top: 12 },
-  corpoCentral: { width: 10, height: 11, left: 7.5, top: 9 },
-  corpoDireito: { width: 8, height: 8, right: 0, top: 12 },
-  rotulo: { color: "#9AA69D", fontSize: 9, lineHeight: 11, fontWeight: "700" },
-  divisor: { width: 1, height: 20, backgroundColor: "#303A33" },
+  corpoEsquerdo: { width: 7, height: 6, left: 0, top: 9 },
+  corpoCentral: { width: 8, height: 8, left: 6, top: 7 },
+  corpoDireito: { width: 7, height: 6, right: 0, top: 9 },
+  rotulo: {
+    color: "#9AA69D",
+    fontSize: 8,
+    lineHeight: 9,
+    fontWeight: "700",
+    margin: 0,
+    padding: 0,
+  },
+  divisor: { width: 1, height: 16, backgroundColor: "#303A33" },
 });
