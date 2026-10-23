@@ -118,9 +118,9 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    height: 25,
-    minHeight: 25,
-    maxHeight: 25,
+    height: 30,
+    minHeight: 30,
+    maxHeight: 30,
     padding: 0,
     paddingHorizontal: 6,
     margin: 0,
