@@ -25,8 +25,31 @@ export default function NavegacaoInferior({
 
   return (
     <View
-      style={[estilos.barra, { paddingBottom: Platform.OS === "ios" ? 2 : 0 }]}
+      style={[estilos.barra, { paddingBottom: Platform.OS === "ios" ? 5 : 3 }]}
     >
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Ir para treinos"
+        onPress={() => onNavegar("Inicio")}
+        style={estilos.item}
+        activeOpacity={0.8}
+      >
+        <View
+          style={[
+            estilos.icone,
+            !comunidadeAtiva && {
+              backgroundColor: `${corTema}24`,
+              borderColor: `${corTema}90`,
+            },
+          ]}
+        >
+          <Text style={estilos.emoji}>🏋️</Text>
+        </View>
+        <Text style={[estilos.rotulo, !comunidadeAtiva && { color: corTema }]}>
+          Treinos
+        </Text>
+      </TouchableOpacity>
+      <View style={estilos.divisor} />
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
@@ -95,69 +118,43 @@ export default function NavegacaoInferior({
           Comunidade
         </Text>
       </TouchableOpacity>
-      <View style={estilos.divisor} />
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel="Ir para treinos"
-        onPress={() => onNavegar("Inicio")}
-        style={estilos.item}
-        activeOpacity={0.8}
-      >
-        <View
-          style={[
-            estilos.icone,
-            !comunidadeAtiva && {
-              backgroundColor: `${corTema}24`,
-              borderColor: `${corTema}90`,
-            },
-          ]}
-        >
-          <Text style={estilos.emoji}>🏋️</Text>
-        </View>
-        <Text style={[estilos.rotulo, !comunidadeAtiva && { color: corTema }]}>
-          Treinos
-        </Text>
-      </TouchableOpacity>
     </View>
   );
 }
 
 const estilos = StyleSheet.create({
   barra: {
-    height: 58,
-    minHeight: 58,
-    paddingTop: 3,
-    paddingHorizontal: 8,
+    minHeight: 54,
+    paddingTop: 4,
+    paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-evenly",
-    gap: 0,
+    justifyContent: "center",
+    gap: 22,
     flexShrink: 0,
     backgroundColor: "#111613",
     borderTopWidth: 1,
     borderTopColor: "#303A33",
   },
   item: {
-    flex: 1,
-    minWidth: 0,
-    height: 55,
+    minWidth: 92,
     alignItems: "center",
     justifyContent: "center",
-    gap: 0,
+    gap: 2,
   },
   icone: {
-    minWidth: 34,
-    height: 25,
-    paddingHorizontal: 7,
-    borderRadius: 9,
+    minWidth: 38,
+    height: 27,
+    paddingHorizontal: 9,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
-  emoji: { fontSize: 16 },
+  emoji: { fontSize: 18 },
   iconeComunidadeFundo: { paddingHorizontal: 9 },
-  desenhoComunidade: { width: 22, height: 19, position: "relative" },
+  desenhoComunidade: { width: 25, height: 22, position: "relative" },
   cabecaComunidade: { position: "absolute", borderRadius: 8 },
   cabecaEsquerda: { width: 6, height: 6, left: 1, top: 4 },
   cabecaCentral: { width: 7, height: 7, left: 9, top: 0 },
