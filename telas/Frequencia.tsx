@@ -30,6 +30,7 @@ type Sessao = {
   plan_id: string | null;
   started_at: string;
   notes: string | null;
+  status?: string | null;
 };
 
 type CardioModelo = {
@@ -188,7 +189,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           .order("created_at", { ascending: true }),
         supabase
           .from("workout_sessions")
-          .select("id, plan_id, started_at, notes")
+          .select("id, plan_id, started_at, notes, status")
           .eq("user_id", usuario.user.id)
           .order("started_at", { ascending: false }),
         supabase
@@ -252,7 +253,9 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     ...Array.from({ length: quantidadeDias }, (_, indice) => indice + 1),
   ];
   const sessoesDoDia = sessoes.filter(
-    (sessao) => dataDaSessao(sessao.started_at) === dataSelecionada,
+    (sessao) =>
+      sessao.status !== "em_andamento" &&
+      dataDaSessao(sessao.started_at) === dataSelecionada,
   );
   const cardiosDoDia = sessoesCardio.filter(
     (sessao) => dataDaSessao(sessao.started_at) === dataSelecionada,
@@ -310,7 +313,9 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       : null;
   const diasTreinados = new Set([
     ...sessoes
-      .filter((sessao) => sessao.plan_id !== null)
+      .filter(
+        (sessao) => sessao.plan_id !== null && sessao.status !== "em_andamento",
+      )
       .map((sessao) => dataDaSessao(sessao.started_at)),
     ...sessoesCardio.map((sessao) => dataDaSessao(sessao.started_at)),
   ]);
@@ -319,6 +324,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       .filter((sessao) => {
         const data = new Date(sessao.started_at);
         return (
+          sessao.status !== "em_andamento" &&
           sessao.plan_id !== null &&
           data.getFullYear() === ano &&
           data.getMonth() === mes

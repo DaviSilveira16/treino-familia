@@ -38,6 +38,9 @@ import MeusTreinos from "./telas/MeusTreinos";
 import MeusCardios from "./telas/MeusCardios";
 import EvolucaoFisica from "./telas/EvolucaoFisica";
 import HistoricoTreinos from "./telas/HistoricoTreinos";
+import TreinoAtivo from "./telas/TreinoAtivo";
+import EvolucaoTreinos from "./telas/EvolucaoTreinos";
+import ResumoSemanal from "./telas/ResumoSemanal";
 import NavegacaoVoltarGlobal from "./telas/NavegacaoVoltarGlobal";
 
 type ModoAutenticacao = "login" | "cadastro" | "recuperar";
@@ -50,6 +53,8 @@ type Rotas = {
   evolucao: undefined;
   historico: undefined;
   frequencia: undefined;
+  evolucaoTreinos: undefined;
+  treinoAtivo: { planId: string; planName: string };
 };
 
 const Pilha = createStackNavigator<Rotas>();
@@ -96,6 +101,12 @@ const telas = [
     titulo: "Evolução física",
     descricao: "Acompanhe seu peso e suas medidas",
     emoji: "📈",
+  },
+  {
+    id: "evolucaoTreinos",
+    titulo: "Evolução dos treinos",
+    descricao: "Compare cargas, repetições e volume por exercício",
+    emoji: "📊",
   },
   {
     id: "historico",
@@ -802,6 +813,8 @@ export default function App() {
                   corTema={corTema}
                 />
 
+                <ResumoSemanal corTema={corTema} />
+
                 <Text style={estilos.tituloSecao}>Seu espaço de treino</Text>
 
                 <View style={estilos.listaCartoes}>
@@ -875,6 +888,12 @@ export default function App() {
             >
               <MeusTreinos
                 onVoltar={() => navigation.goBack()}
+                onIniciarTreino={(treino) =>
+                  navigation.navigate("treinoAtivo", {
+                    planId: treino.id,
+                    planName: treino.name,
+                  })
+                }
                 corTema={corTema}
               />
             </NavegacaoVoltarGlobal>
@@ -930,6 +949,35 @@ export default function App() {
               ativo={Platform.OS === "web" && navigation.canGoBack()}
             >
               <Frequencia
+                onVoltar={() => navigation.goBack()}
+                corTema={corTema}
+              />
+            </NavegacaoVoltarGlobal>
+          )}
+        </Pilha.Screen>
+
+        <Pilha.Screen name="evolucaoTreinos">
+          {({ navigation }) => (
+            <NavegacaoVoltarGlobal
+              onVoltar={() => navigation.goBack()}
+              ativo={Platform.OS === "web" && navigation.canGoBack()}
+            >
+              <EvolucaoTreinos
+                onVoltar={() => navigation.goBack()}
+                corTema={corTema}
+              />
+            </NavegacaoVoltarGlobal>
+          )}
+        </Pilha.Screen>
+
+        <Pilha.Screen name="treinoAtivo">
+          {({ navigation, route }) => (
+            <NavegacaoVoltarGlobal
+              onVoltar={() => navigation.goBack()}
+              ativo={Platform.OS === "web" && navigation.canGoBack()}
+            >
+              <TreinoAtivo
+                route={route}
                 onVoltar={() => navigation.goBack()}
                 corTema={corTema}
               />

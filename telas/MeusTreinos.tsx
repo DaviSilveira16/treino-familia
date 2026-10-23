@@ -37,10 +37,15 @@ type SerieCarga = {
 
 type Props = {
   onVoltar: () => void;
+  onIniciarTreino: (treino: Treino) => void;
   corTema?: string;
 };
 
-export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
+export default function MeusTreinos({
+  onVoltar,
+  onIniciarTreino,
+  corTema = "#0878D1",
+}: Props) {
   const estilos = criarEstilos(corTema);
   function mostrarMensagem(titulo: string, mensagem: string) {
     if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -956,6 +961,34 @@ export default function MeusTreinos({ onVoltar, corTema = "#0878D1" }: Props) {
               <Text style={estilos.tituloSecao}>
                 Exercícios — {treinoSelecionado.name}
               </Text>
+              {exercicios.length > 0 &&
+                !mostrarFormularioExercicio &&
+                !exercicioEditando &&
+                !exercicioParaCarga && (
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: corTema,
+                      borderRadius: 12,
+                      paddingVertical: 14,
+                      paddingHorizontal: 16,
+                      alignItems: "center",
+                      marginTop: 10,
+                      marginBottom: 8,
+                    }}
+                    onPress={() => onIniciarTreino(treinoSelecionado)}
+                    activeOpacity={0.85}
+                  >
+                    <Text
+                      style={{
+                        color: "#101312",
+                        fontSize: 15,
+                        fontWeight: "800",
+                      }}
+                    >
+                      ▶ Iniciar treino com cronômetro
+                    </Text>
+                  </TouchableOpacity>
+                )}
               {mostrarFormularioExercicio && (
                 <View style={estilos.formulario}>
                   <View style={estilos.cabecalhoFormulario}>

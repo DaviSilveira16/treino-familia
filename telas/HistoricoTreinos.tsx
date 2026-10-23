@@ -27,6 +27,15 @@ type SessaoTreino = {
   started_at: string;
   finished_at: string | null;
   notes: string | null;
+  status?: string | null;
+  duration_minutes?: number | null;
+  intensity?: string | null;
+  active_calories?: number | null;
+  volume_kg?: number | null;
+  exercises_count?: number | null;
+  sets_completed?: number | null;
+  reps_completed?: number | null;
+  met_value?: number | null;
 };
 type SerieTreino = {
   id: string;
@@ -148,7 +157,9 @@ export default function HistoricoTreinos({
       setHistoricoCardio((cardios ?? []) as SessaoCardioHistorico[]);
       const { data: sessoes, error: erroSessoes } = await supabase
         .from("workout_sessions")
-        .select("id, plan_id, started_at, finished_at, notes")
+        .select(
+          "id, plan_id, started_at, finished_at, notes, status, duration_minutes, intensity, active_calories, volume_kg, exercises_count, sets_completed, reps_completed, met_value",
+        )
         .eq("user_id", usuarioId)
         .order("started_at", { ascending: false });
       if (erroSessoes) {
@@ -158,7 +169,9 @@ export default function HistoricoTreinos({
         );
         return;
       }
-      const listaSessoes = (sessoes ?? []) as SessaoTreino[];
+      const listaSessoes = ((sessoes ?? []) as SessaoTreino[]).filter(
+        (sessao) => sessao.status !== "em_andamento",
+      );
       if (listaSessoes.length === 0) {
         setHistorico([]);
         return;
@@ -434,6 +447,47 @@ export default function HistoricoTreinos({
                           ? ` – ${formatarHora(sessao.finished_at)}`
                           : ""}
                       </Text>
+                      {sessao.duration_minutes != null && (
+                        <Text style={estilos.hora}>
+                          Duração real:{" "}
+                          {Number(sessao.duration_minutes).toLocaleString(
+                            "pt-BR",
+                            { maximumFractionDigits: 1 },
+                          )}{" "}
+                          min
+                          {sessao.intensity
+                            ? ` · Intensidade ${sessao.intensity}`
+                            : ""}
+                        </Text>
+                      )}
+                      {sessao.active_calories != null && (
+                        <Text
+                          style={[estilos.resumoSessao, { color: corTema }]}
+                        >
+                          🔥 {Math.round(Number(sessao.active_calories))} kcal
+                          ativas estimadas
+                          {sessao.met_value != null
+                            ? ` · ${sessao.met_value} MET`
+                            : ""}
+                        </Text>
+                      )}
+                      {sessao.volume_kg != null && (
+                        <Text style={estilos.hora}>
+                          Volume registrado:{" "}
+                          {Math.round(Number(sessao.volume_kg)).toLocaleString(
+                            "pt-BR",
+                          )}{" "}
+                          kg·reps
+                        </Text>
+                      )}
+                      {sessao.reps_completed != null && (
+                        <Text style={estilos.hora}>
+                          Repetições concluídas:{" "}
+                          {Number(sessao.reps_completed).toLocaleString(
+                            "pt-BR",
+                          )}
+                        </Text>
+                      )}
                       <Text style={[estilos.resumoSessao, { color: corTema }]}>
                         {todosExercicios.length}{" "}
                         {todosExercicios.length === 1
