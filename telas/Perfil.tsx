@@ -6,7 +6,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -14,6 +13,9 @@ import {
   View,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import * as FileSystem from "expo-file-system/legacy";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
 
@@ -37,6 +39,275 @@ const TEMAS = [
   { nome: "Ciano", cor: "#22D3EE" },
   { nome: "Amarelo", cor: "#FACC15" },
 ];
+
+type RegistroExportacao = Record<string, any>;
+type PeriodoRelatorio = "30" | "90" | "365" | "todos";
+
+async function buscarTodosOsRegistros(
+  tabela: string,
+  idUsuario: string,
+): Promise<RegistroExportacao[]> {
+  const resultado: RegistroExportacao[] = [];
+  const tamanhoPagina = 500;
+  let inicio = 0;
+
+  while (true) {
+    const resposta = await (supabase as any)
+      .from(tabela)
+      .select("*")
+      .eq("user_id", idUsuario)
+      .order("id", { ascending: true })
+      .range(inicio, inicio + tamanhoPagina - 1);
+
+    if (resposta.error) {
+      throw new Error(
+        `Não foi possível ler ${tabela}: ${resposta.error.message}`,
+      );
+    }
+
+    const pagina = (resposta.data ?? []) as RegistroExportacao[];
+    resultado.push(...pagina);
+    if (pagina.length < tamanhoPagina) break;
+    inicio += tamanhoPagina;
+  }
+
+  return resultado;
+}
+
+async function buscarSeriesDasSessoes(
+  idUsuario: string,
+  idsSessoes: string[],
+): Promise<RegistroExportacao[]> {
+  const resultado: RegistroExportacao[] = [];
+  const tamanhoGrupo = 100;
+  const tamanhoPagina = 500;
+
+  for (let posicao = 0; posicao < idsSessoes.length; posicao += tamanhoGrupo) {
+    const grupoIds = idsSessoes.slice(posicao, posicao + tamanhoGrupo);
+    let inicio = 0;
+
+    while (true) {
+      const resposta = await supabase
+        .from("workout_sets")
+        .select("*")
+        .eq("user_id", idUsuario)
+        .in("session_id", grupoIds)
+        .order("set_number", { ascending: true })
+        .range(inicio, inicio + tamanhoPagina - 1);
+
+      if (resposta.error) {
+        throw new Error(
+          `Não foi possível ler as séries dos treinos: ${resposta.error.message}`,
+        );
+      }
+
+      const pagina = (resposta.data ?? []) as unknown as RegistroExportacao[];
+      resultado.push(...pagina);
+      if (pagina.length < tamanhoPagina) break;
+      inicio += tamanhoPagina;
+    }
+  }
+
+  return resultado;
+}
+
+function escaparHtml(valor: unknown): string {
+  return String(valor ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatarDataRelatorio(valor: unknown): string {
+  if (!valor) return "Não informada";
+  const texto = String(valor);
+  const data = /^\d{4}-\d{2}-\d{2}$/.test(texto)
+    ? new Date(`${texto}T12:00:00`)
+    : new Date(texto);
+  if (Number.isNaN(data.getTime())) return texto;
+  return data.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function formatarNumeroRelatorio(valor: unknown, maximo = 1): string {
+  if (valor === null || valor === undefined || valor === "") return "—";
+  const numero = Number(valor);
+  if (!Number.isFinite(numero)) return "—";
+  return numero.toLocaleString("pt-BR", { maximumFractionDigits: maximo });
+}
+
+function dataInicialRelatorio(periodo: PeriodoRelatorio): Date | null {
+  if (periodo === "todos") return null;
+  const dias = Number(periodo);
+  const inicio = new Date();
+  inicio.setHours(0, 0, 0, 0);
+  inicio.setDate(inicio.getDate() - dias + 1);
+  return inicio;
+}
+
+function registroNoPeriodo(valor: unknown, inicio: Date | null): boolean {
+  if (!inicio) return true;
+  if (!valor) return false;
+  const texto = String(valor);
+  const data = /^\d{4}-\d{2}-\d{2}$/.test(texto)
+    ? new Date(`${texto}T12:00:00`)
+    : new Date(texto);
+  return !Number.isNaN(data.getTime()) && data >= inicio;
+}
+
+function criarHtmlRelatorio(dados: {
+  nome: string;
+  email: string;
+  corTema: string;
+  periodoTexto: string;
+  perfil: Record<string, unknown>;
+  treinos: RegistroExportacao[];
+  series: RegistroExportacao[];
+  planos: RegistroExportacao[];
+  cardios: RegistroExportacao[];
+  medicoes: RegistroExportacao[];
+}): string {
+  const planosPorId = new Map(
+    dados.planos.map((plano) => [
+      String(plano.id),
+      String(plano.name ?? "Treino"),
+    ]),
+  );
+  const seriesPorSessao = new Map<string, RegistroExportacao[]>();
+  for (const serie of dados.series) {
+    const idSessao = String(serie.session_id ?? "");
+    const lista = seriesPorSessao.get(idSessao) ?? [];
+    lista.push(serie);
+    seriesPorSessao.set(idSessao, lista);
+  }
+
+  let totalMinutos = 0;
+  let totalCalorias = 0;
+  let contagemCalorias = 0;
+  for (const sessao of dados.treinos) {
+    totalMinutos += Number(sessao.duration_minutes) || 0;
+    if (
+      sessao.active_calories !== null &&
+      sessao.active_calories !== undefined
+    ) {
+      totalCalorias += Number(sessao.active_calories) || 0;
+      contagemCalorias += 1;
+    }
+  }
+  for (const cardio of dados.cardios) {
+    totalMinutos += Number(cardio.duration_minutes) || 0;
+    const valorCalorias = cardio.active_calories ?? cardio.calories;
+    if (valorCalorias !== null && valorCalorias !== undefined) {
+      totalCalorias += Number(valorCalorias) || 0;
+      contagemCalorias += 1;
+    }
+  }
+
+  const htmlTreinos = dados.treinos.length
+    ? dados.treinos
+        .map((sessao) => {
+          const lista = seriesPorSessao.get(String(sessao.id)) ?? [];
+          const grupos = new Map<string, RegistroExportacao[]>();
+          for (const serie of lista) {
+            const nomeExercicio = String(
+              serie.exercise_name ?? "Exercício sem nome",
+            );
+            const grupo = grupos.get(nomeExercicio) ?? [];
+            grupo.push(serie);
+            grupos.set(nomeExercicio, grupo);
+          }
+          const linhasSeries = Array.from(grupos.entries())
+            .map(([nomeExercicio, grupo]) => {
+              const reps = grupo.reduce(
+                (total, serie) => total + (Number(serie.reps) || 0),
+                0,
+              );
+              const volume = grupo.reduce(
+                (total, serie) =>
+                  total +
+                  (Number(serie.reps) || 0) * (Number(serie.weight_kg) || 0),
+                0,
+              );
+              const maiorCarga = Math.max(
+                0,
+                ...grupo.map((serie) => Number(serie.weight_kg) || 0),
+              );
+              return `<tr><td>${escaparHtml(nomeExercicio)}</td><td>${grupo.length}</td><td>${reps}</td><td>${formatarNumeroRelatorio(maiorCarga, 2)} kg</td><td>${formatarNumeroRelatorio(volume, 2)} kg</td></tr>`;
+            })
+            .join("");
+          const calorias =
+            sessao.active_calories == null
+              ? "Não estimadas"
+              : `${formatarNumeroRelatorio(sessao.active_calories, 0)} kcal`;
+          const tituloTreino = sessao.plan_id
+            ? (planosPorId.get(String(sessao.plan_id)) ?? "Treino registrado")
+            : "Treino registrado";
+          return `<section class="registro"><h3>${escaparHtml(tituloTreino)}</h3><p class="meta">${formatarDataRelatorio(sessao.started_at)} · ${formatarNumeroRelatorio(sessao.duration_minutes, 0)} min · Intensidade: ${escaparHtml(sessao.intensity ?? "não informada")} · ${calorias}</p>${lista.length ? `<table><thead><tr><th>Exercício</th><th>Séries</th><th>Reps.</th><th>Maior carga</th><th>Volume</th></tr></thead><tbody>${linhasSeries}</tbody></table>` : `<p class="vazio">Não há séries detalhadas nesta sessão.</p>`}</section>`;
+        })
+        .join("")
+    : `<p class="vazio">Nenhum treino concluído no período.</p>`;
+
+  const htmlCardios = dados.cardios.length
+    ? `<table><thead><tr><th>Data</th><th>Atividade</th><th>Duração</th><th>Distância</th><th>Calorias</th><th>Detalhes</th></tr></thead><tbody>${dados.cardios
+        .map((cardio) => {
+          const calorias = cardio.active_calories ?? cardio.calories;
+          const detalhes = [
+            cardio.intensity ? `Intensidade: ${cardio.intensity}` : "",
+            cardio.incline_percent != null
+              ? `Inclinação: ${cardio.incline_percent}%`
+              : "",
+            cardio.floors_up != null ? `Andares: ${cardio.floors_up}` : "",
+            cardio.notes ? `Obs.: ${cardio.notes}` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          return `<tr><td>${formatarDataRelatorio(cardio.started_at)}</td><td>${escaparHtml(cardio.activity_name ?? cardio.activity_type ?? "Cardio")}</td><td>${formatarNumeroRelatorio(cardio.duration_minutes, 0)} min</td><td>${cardio.distance_km == null ? "—" : `${formatarNumeroRelatorio(cardio.distance_km, 2)} km`}</td><td>${calorias == null ? "—" : `${formatarNumeroRelatorio(calorias, 0)} kcal`}</td><td>${escaparHtml(detalhes || "—")}</td></tr>`;
+        })
+        .join("")}</tbody></table>`
+    : `<p class="vazio">Nenhum cardio registrado no período.</p>`;
+
+  const htmlMedicoes = dados.medicoes.length
+    ? `<table><thead><tr><th>Data</th><th>Peso</th><th>Gordura corporal</th><th>Cintura</th><th>Quadril</th><th>Peito</th></tr></thead><tbody>${dados.medicoes.map((medicao) => `<tr><td>${formatarDataRelatorio(medicao.measured_at)}</td><td>${medicao.weight_kg == null ? "—" : `${formatarNumeroRelatorio(medicao.weight_kg)} kg`}</td><td>${medicao.body_fat_percentage == null ? "—" : `${formatarNumeroRelatorio(medicao.body_fat_percentage)}%`}</td><td>${medicao.waist_cm == null ? "—" : `${formatarNumeroRelatorio(medicao.waist_cm)} cm`}</td><td>${medicao.hip_cm == null ? "—" : `${formatarNumeroRelatorio(medicao.hip_cm)} cm`}</td><td>${medicao.chest_cm == null ? "—" : `${formatarNumeroRelatorio(medicao.chest_cm)} cm`}</td></tr>`).join("")}</tbody></table>`
+    : `<p class="vazio">Nenhuma medição física registrada no período.</p>`;
+
+  const altura =
+    dados.perfil.altura_cm == null
+      ? "—"
+      : `${escaparHtml(dados.perfil.altura_cm)} cm`;
+  const peso =
+    dados.perfil.peso_kg == null
+      ? "—"
+      : `${escaparHtml(dados.perfil.peso_kg)} kg`;
+  const idade =
+    dados.perfil.idade == null
+      ? "—"
+      : `${escaparHtml(dados.perfil.idade)} anos`;
+  const sexo =
+    dados.perfil.sexo === "masculino"
+      ? "Masculino"
+      : dados.perfil.sexo === "feminino"
+        ? "Feminino"
+        : "—";
+  const cor = /^#[0-9a-fA-F]{6}$/.test(dados.corTema)
+    ? dados.corTema
+    : "#35D07F";
+
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Relatório Treino Família</title><style>
+    @page{size:A4;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#202722;background:#fff;font-size:10.5pt;line-height:1.45;margin:0}header{border-bottom:3px solid ${cor};padding-bottom:14px;margin-bottom:18px}h1{font-size:24pt;margin:0 0 5px;color:#152019}h2{font-size:15pt;color:#152019;border-bottom:1px solid #d9e0db;padding-bottom:6px;margin:24px 0 10px;break-after:avoid}h3{font-size:12pt;margin:0 0 4px;color:#152019}p{margin:4px 0}.muted,.meta,.vazio{color:#637068;font-size:9pt}.resumo{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.indicador{flex:1 1 22%;min-width:115px;padding:10px;border:1px solid #d9e0db;border-top:3px solid ${cor};border-radius:7px}.indicador strong{display:block;font-size:16pt;margin-top:3px}table{border-collapse:collapse;width:100%;margin:8px 0 12px;font-size:8.8pt}th{text-align:left;background:#edf2ee;color:#243229;font-weight:700}th,td{padding:6px;border-bottom:1px solid #e2e7e3;vertical-align:top;overflow-wrap:anywhere}tr{break-inside:avoid}.registro{border:1px solid #e0e6e1;border-radius:8px;padding:10px;margin:10px 0;break-inside:avoid}.perfil{display:flex;flex-wrap:wrap;gap:12px 20px}.perfil span{display:inline-block}.rodape{border-top:1px solid #d9e0db;margin-top:24px;padding-top:8px;font-size:8pt;color:#68746c}.aviso{background:#f1f5f2;padding:10px;border-left:3px solid ${cor};margin-top:14px;font-size:8.5pt}@media print{.registro,table{break-inside:auto}h2,h3{break-after:avoid}thead{display:table-header-group}}
+    </style></head><body><header><h1>Treino Família</h1><p><strong>Relatório pessoal de atividades</strong></p><p class="muted">Período: ${escaparHtml(dados.periodoTexto)} · Gerado em ${formatarDataRelatorio(new Date().toISOString())}</p><p class="muted">${escaparHtml(dados.nome)}${dados.email ? ` · ${escaparHtml(dados.email)}` : ""}</p></header>
+    <h2>Resumo do período</h2><div class="resumo"><div class="indicador">Musculação<strong>${dados.treinos.length}</strong></div><div class="indicador">Cardios<strong>${dados.cardios.length}</strong></div><div class="indicador">Tempo registrado<strong>${formatarNumeroRelatorio(totalMinutos, 0)} min</strong></div><div class="indicador">Calorias disponíveis<strong>${contagemCalorias ? `${formatarNumeroRelatorio(totalCalorias, 0)} kcal` : "—"}</strong></div></div>
+    <h2>Perfil</h2><div class="perfil"><span><strong>Peso atual:</strong> ${peso}</span><span><strong>Altura:</strong> ${altura}</span><span><strong>Idade:</strong> ${idade}</span><span><strong>Sexo usado no cálculo:</strong> ${sexo}</span></div>
+    <h2>Treinos de musculação</h2>${htmlTreinos}
+    <h2>Cardios</h2>${htmlCardios}
+    <h2>Evolução física</h2>${htmlMedicoes}
+    <div class="aviso">As calorias apresentadas são estimativas registradas pelo aplicativo, não medições exatas. Sessões antigas sem estimativa permanecem sem cálculo retroativo. Este relatório contém dados pessoais: guarde e compartilhe apenas em locais seguros.</div>
+    <div class="rodape">Treino Família · Relatório gerado a partir dos registros da conta conectada. Nenhum dado foi alterado durante a exportação.</div></body></html>`;
+}
 
 type Props = {
   usuario: User;
@@ -92,7 +363,10 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
       : "",
   );
   const [salvandoDadosCalorias, setSalvandoDadosCalorias] = useState(false);
+  const [exportandoRelatorio, setExportandoRelatorio] = useState(false);
   const [exportandoBackup, setExportandoBackup] = useState(false);
+  const [periodoRelatorio, setPeriodoRelatorio] =
+    useState<PeriodoRelatorio>("90");
 
   function metadadosComPerfil(adicionais: Record<string, unknown> = {}) {
     const pesoInformado = pesoKg.trim()
@@ -202,6 +476,156 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
     }
   }
 
+  async function exportarRelatorioPdf() {
+    if (exportandoRelatorio) return;
+
+    let janelaRelatorio: Window | null = null;
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      janelaRelatorio = window.open("", "_blank");
+      if (!janelaRelatorio) {
+        window.alert(
+          "O navegador bloqueou a janela do relatório. Permita pop-ups para o Treino Família e tente novamente.",
+        );
+        return;
+      }
+      janelaRelatorio.document.open();
+      janelaRelatorio.document.write(
+        "<!DOCTYPE html><html lang='pt-BR'><meta charset='utf-8'><title>Preparando relatório</title><body style='font-family:Arial;padding:32px;color:#202722'><h2>Preparando seu relatório…</h2><p>Estamos organizando seus registros. A janela de impressão será aberta em seguida.</p></body></html>",
+      );
+      janelaRelatorio.document.close();
+    }
+
+    setExportandoRelatorio(true);
+    try {
+      const { data: respostaUsuario, error: erroUsuario } =
+        await supabase.auth.getUser();
+      if (erroUsuario || !respostaUsuario.user) {
+        throw new Error(
+          "Entre novamente na sua conta antes de exportar o relatório.",
+        );
+      }
+
+      const usuarioRelatorio = respostaUsuario.user;
+      const inicio = dataInicialRelatorio(periodoRelatorio);
+      const [sessoesBrutas, cardiosBrutos, medicoesBrutas, planos] =
+        await Promise.all([
+          buscarTodosOsRegistros("workout_sessions", usuarioRelatorio.id),
+          buscarTodosOsRegistros("cardio_sessions", usuarioRelatorio.id),
+          buscarTodosOsRegistros("physical_measurements", usuarioRelatorio.id),
+          buscarTodosOsRegistros("workout_plans", usuarioRelatorio.id),
+        ]);
+
+      const treinos = sessoesBrutas
+        .filter(
+          (sessao) =>
+            sessao.status !== "em_andamento" &&
+            registroNoPeriodo(sessao.started_at, inicio),
+        )
+        .sort(
+          (a, b) =>
+            new Date(String(b.started_at)).getTime() -
+            new Date(String(a.started_at)).getTime(),
+        );
+      const cardios = cardiosBrutos
+        .filter((cardio) => registroNoPeriodo(cardio.started_at, inicio))
+        .sort(
+          (a, b) =>
+            new Date(String(b.started_at)).getTime() -
+            new Date(String(a.started_at)).getTime(),
+        );
+      const medicoes = medicoesBrutas
+        .filter((medicao) => registroNoPeriodo(medicao.measured_at, inicio))
+        .sort(
+          (a, b) =>
+            new Date(String(b.measured_at)).getTime() -
+            new Date(String(a.measured_at)).getTime(),
+        );
+      const idsSessoes = treinos.map((sessao) => String(sessao.id));
+      const series =
+        idsSessoes.length > 0
+          ? await buscarSeriesDasSessoes(usuarioRelatorio.id, idsSessoes)
+          : [];
+      const meta = usuarioRelatorio.user_metadata ?? {};
+      const opcoesPeriodo: Record<PeriodoRelatorio, string> = {
+        "30": "Últimos 30 dias",
+        "90": "Últimos 90 dias",
+        "365": "Últimos 12 meses",
+        todos: "Todo o histórico",
+      };
+      const html = criarHtmlRelatorio({
+        nome:
+          typeof meta.nome === "string" && meta.nome.trim()
+            ? meta.nome
+            : "Usuário do Treino Família",
+        email: usuarioRelatorio.email ?? "",
+        corTema,
+        periodoTexto: opcoesPeriodo[periodoRelatorio],
+        perfil: {
+          peso_kg: meta.peso_kg ?? null,
+          altura_cm: meta.altura_cm ?? null,
+          idade: meta.idade ?? null,
+          sexo: meta.sexo ?? null,
+        },
+        treinos,
+        series,
+        planos,
+        cardios,
+        medicoes,
+      });
+
+      const dataArquivo = new Date().toISOString().slice(0, 10);
+      const nomeArquivo = `treino-familia-relatorio-${dataArquivo}.pdf`;
+      if (Platform.OS === "web") {
+        if (!janelaRelatorio || janelaRelatorio.closed) {
+          throw new Error(
+            "A janela do relatório foi fechada. Tente novamente e permita pop-ups.",
+          );
+        }
+        janelaRelatorio.document.open();
+        janelaRelatorio.document.write(html);
+        janelaRelatorio.document.close();
+        janelaRelatorio.document.title = nomeArquivo;
+        window.setTimeout(() => {
+          if (janelaRelatorio && !janelaRelatorio.closed) {
+            janelaRelatorio.focus();
+            janelaRelatorio.print();
+          }
+        }, 700);
+      } else {
+        const arquivoPdf = await Print.printToFileAsync({
+          html,
+          width: 595,
+          height: 842,
+          margins: { top: 36, bottom: 36, left: 36, right: 36 },
+        });
+        const compartilhamentoDisponivel = await Sharing.isAvailableAsync();
+        if (!compartilhamentoDisponivel) {
+          throw new Error(
+            `O PDF foi criado, mas o compartilhamento não está disponível neste aparelho. Arquivo: ${arquivoPdf.uri}`,
+          );
+        }
+        await Sharing.shareAsync(arquivoPdf.uri, {
+          mimeType: "application/pdf",
+          UTI: "com.adobe.pdf",
+          dialogTitle: "Salvar ou compartilhar relatório",
+        });
+      }
+    } catch (erro) {
+      if (janelaRelatorio && !janelaRelatorio.closed) janelaRelatorio.close();
+      const mensagem =
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível gerar o relatório.";
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        window.alert(`Não foi possível gerar o PDF.\n\n${mensagem}`);
+      } else {
+        Alert.alert("Erro ao gerar relatório", mensagem);
+      }
+    } finally {
+      setExportandoRelatorio(false);
+    }
+  }
+
   async function exportarBackup() {
     if (exportandoBackup) return;
     setExportandoBackup(true);
@@ -226,33 +650,12 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
         "cardio_sessions",
         "physical_measurements",
       ] as const;
-      const dadosTabelas: Record<string, Record<string, unknown>[]> = {};
-      const tamanhoPagina = 500;
-
+      const dadosTabelas: Record<string, RegistroExportacao[]> = {};
       for (const tabela of tabelas) {
-        const linhas: Record<string, unknown>[] = [];
-        let inicio = 0;
-
-        while (true) {
-          const { data, error } = await supabase
-            .from(tabela)
-            .select("*")
-            .eq("user_id", usuarioBackup.id)
-            .range(inicio, inicio + tamanhoPagina - 1);
-
-          if (error) {
-            throw new Error(
-              `Não foi possível incluir ${tabela} no backup: ${error.message}`,
-            );
-          }
-
-          const pagina = (data ?? []) as unknown as Record<string, unknown>[];
-          linhas.push(...pagina);
-          if (pagina.length < tamanhoPagina) break;
-          inicio += tamanhoPagina;
-        }
-
-        dadosTabelas[tabela] = linhas;
+        dadosTabelas[tabela] = await buscarTodosOsRegistros(
+          tabela,
+          usuarioBackup.id,
+        );
       }
 
       const metadados = usuarioBackup.user_metadata ?? {};
@@ -276,13 +679,12 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
         },
         tabelas: dadosTabelas,
         observacao:
-          "Este arquivo contém os registros tabulares e referências às fotos. Os arquivos de imagem armazenados no Supabase Storage não são incorporados ao JSON.",
+          "O arquivo contém registros e referências das fotos, mas não incorpora os arquivos de imagem armazenados no Supabase Storage. Não inclui senhas nem tokens.",
       };
 
       const conteudo = JSON.stringify(backup, null, 2);
       const dataArquivo = new Date().toISOString().slice(0, 10);
       const nomeArquivo = `treino-familia-backup-${dataArquivo}.json`;
-
       if (Platform.OS === "web" && typeof document !== "undefined") {
         const arquivo = new Blob([conteudo], {
           type: "application/json;charset=utf-8",
@@ -296,12 +698,24 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
         link.remove();
         window.setTimeout(() => URL.revokeObjectURL(url), 1500);
         window.alert(
-          "Backup exportado. Guarde o arquivo JSON em um local seguro. As imagens continuam armazenadas no Supabase.",
+          "Backup JSON exportado. Guarde o arquivo em local privado e seguro. As fotos continuam armazenadas no Supabase.",
         );
       } else {
-        await Share.share({
-          title: "Backup Treino Família",
-          message: conteudo,
+        if (!FileSystem.cacheDirectory)
+          throw new Error(
+            "Não foi possível acessar o armazenamento temporário deste aparelho.",
+          );
+        const uri = `${FileSystem.cacheDirectory}${nomeArquivo}`;
+        await FileSystem.writeAsStringAsync(uri, conteudo);
+        if (!(await Sharing.isAvailableAsync())) {
+          throw new Error(
+            `O backup foi criado, mas o compartilhamento não está disponível. Arquivo: ${uri}`,
+          );
+        }
+        await Sharing.shareAsync(uri, {
+          mimeType: "application/json",
+          UTI: "public.json",
+          dialogTitle: "Guardar backup completo",
         });
       }
     } catch (erro) {
@@ -816,36 +1230,106 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
         </View>
 
         <View style={estilos.cartao}>
-          <Text style={estilos.tituloSecao}>Backup dos seus dados</Text>
+          <Text style={estilos.tituloSecao}>Meus dados</Text>
           <Text style={estilos.descricaoSecao}>
-            Exporte uma cópia em JSON dos seus treinos, exercícios, cargas,
-            sessões, cardios e medições físicas. O arquivo inclui os caminhos
-            das fotos, mas não os arquivos de imagem. Guarde o backup em um
-            local privado e seguro.
+            Baixe um relatório fácil de ler para guardar ou compartilhar. O
+            backup completo é separado e serve como cópia técnica dos registros
+            da sua conta.
           </Text>
+          <Text style={estilos.rotulo}>Período do relatório</Text>
+          <View style={estilos.opcoesPeriodo}>
+            {(
+              [
+                ["30", "30 dias"],
+                ["90", "90 dias"],
+                ["365", "12 meses"],
+                ["todos", "Todo o histórico"],
+              ] as const
+            ).map(([valor, rotulo]) => {
+              const selecionado = periodoRelatorio === valor;
+              return (
+                <TouchableOpacity
+                  key={valor}
+                  style={[
+                    estilos.opcaoPeriodo,
+                    selecionado && {
+                      borderColor: corTema,
+                      backgroundColor: `${corTema}20`,
+                    },
+                  ]}
+                  onPress={() => setPeriodoRelatorio(valor)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: selecionado }}
+                >
+                  <Text
+                    style={[
+                      estilos.textoOpcaoPeriodo,
+                      selecionado && { color: corTema },
+                    ]}
+                  >
+                    {rotulo}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           <TouchableOpacity
             style={[
               estilos.botaoPrincipal,
               { backgroundColor: corTema },
-              exportandoBackup && estilos.botaoDesabilitado,
+              exportandoRelatorio && estilos.botaoDesabilitado,
             ]}
-            onPress={exportarBackup}
-            disabled={exportandoBackup}
+            onPress={exportarRelatorioPdf}
+            disabled={exportandoRelatorio || exportandoBackup}
           >
-            {exportandoBackup ? (
+            {exportandoRelatorio ? (
               <ActivityIndicator color="#101312" />
             ) : (
               <Text style={estilos.textoBotaoPrincipal}>
-                Exportar meus dados (.json)
+                Gerar relatório em PDF
+              </Text>
+            )}
+          </TouchableOpacity>
+          <Text
+            style={[estilos.descricaoSecao, { marginTop: 10, marginBottom: 0 }]}
+          >
+            No navegador, será aberta a impressão: escolha “Salvar como PDF”. No
+            aplicativo instalado, use a opção de salvar ou compartilhar o
+            arquivo gerado.
+          </Text>
+        </View>
+
+        <View style={estilos.cartao}>
+          <Text style={estilos.tituloSecao}>Backup completo</Text>
+          <Text style={estilos.descricaoSecao}>
+            Guarde este arquivo JSON em local privado e seguro. Ele contém os
+            registros tabulares da sua conta e as referências das fotos, mas não
+            os arquivos de imagem. Não é um relatório para leitura e ainda não
+            possui uma função de restauração automática dentro do aplicativo.
+          </Text>
+          <TouchableOpacity
+            style={[
+              estilos.botaoSecundario,
+              { borderColor: corTema },
+              exportandoBackup && estilos.botaoDesabilitado,
+            ]}
+            onPress={exportarBackup}
+            disabled={exportandoBackup || exportandoRelatorio}
+          >
+            {exportandoBackup ? (
+              <ActivityIndicator color={corTema} />
+            ) : (
+              <Text style={[estilos.textoBotaoSecundario, { color: corTema }]}>
+                Fazer backup completo (.json)
               </Text>
             )}
           </TouchableOpacity>
           <Text
             style={[estilos.descricaoSecao, { marginTop: 12, marginBottom: 0 }]}
           >
-            A exportação não exclui nem altera registros. Ela não substitui o
-            backup automático do projeto Supabase e não inclui senhas ou tokens
-            de acesso.
+            A exportação não altera nem exclui registros e não substitui o
+            backup administrativo do projeto Supabase. O arquivo inclui apenas
+            dados da conta conectada.
           </Text>
         </View>
       </ScrollView>
@@ -1048,6 +1532,43 @@ const estilos = StyleSheet.create({
   },
   botaoDesabilitado: {
     opacity: 0.65,
+  },
+  opcoesPeriodo: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 8,
+  },
+  opcaoPeriodo: {
+    flexGrow: 1,
+    flexBasis: "40%",
+    minHeight: 42,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#354039",
+    backgroundColor: "#101512",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  textoOpcaoPeriodo: {
+    color: "#E5EAE6",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  botaoSecundario: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 8,
+    borderWidth: 1,
+    backgroundColor: "#101512",
+  },
+  textoBotaoSecundario: {
+    fontWeight: "800",
+    fontSize: 14,
   },
   textoBotaoPrincipal: {
     color: "#101312",
