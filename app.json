@@ -25,6 +25,9 @@
       "themeColor": "#111312",
       "backgroundColor": "#111312",
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-sharing"
+    ]
   }
 }
