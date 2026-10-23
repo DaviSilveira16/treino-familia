@@ -24,10 +24,7 @@ export default function NavegacaoInferior({
   const corIconeComunidade = comunidadeAtiva ? corTema : "#9AA69D";
 
   return (
-    <View
-      nativeID="navegacao-inferior"
-      style={[estilos.barra, { paddingBottom: Platform.OS === "ios" ? 2 : 0 }]}
-    >
+    <View nativeID="navegacao-inferior" style={estilos.barra}>
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
@@ -125,8 +122,8 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    height: 58,
-    minHeight: 58,
+    height: 62,
+    minHeight: 62,
     paddingTop: 3,
     paddingHorizontal: 8,
     flexDirection: "row",
@@ -141,7 +138,7 @@ const estilos = StyleSheet.create({
   item: {
     flex: 1,
     minWidth: 0,
-    height: 55,
+    height: 58,
     alignItems: "center",
     justifyContent: "center",
     gap: 0,
