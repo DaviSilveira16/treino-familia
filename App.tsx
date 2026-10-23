@@ -162,20 +162,17 @@ export default function App() {
       fundoRaiz: raiz.style.backgroundColor,
     };
 
-    const estaInstaladoComoAplicativo =
-      window.matchMedia?.("(display-mode: standalone)").matches === true ||
-      (window.navigator as Navigator & { standalone?: boolean }).standalone ===
-        true;
-    const alturaAplicativo = estaInstaladoComoAplicativo ? "100lvh" : "100dvh";
-
     document.documentElement.style.height = "100%";
-    document.body.style.height = alturaAplicativo;
-    document.body.style.minHeight = alturaAplicativo;
+    // O body e o #root já usam position: fixed com inset: 0 no index.html.
+    // Deixamos a altura automática para não ultrapassar o viewport do iPhone
+    // quando o PWA é aberto na Tela de Início e cortar a navegação inferior.
+    document.body.style.height = "auto";
+    document.body.style.minHeight = "0";
     document.body.style.margin = "0";
     document.body.style.overflow = "hidden";
     document.body.style.backgroundColor = "#101312";
-    raiz.style.height = alturaAplicativo;
-    raiz.style.minHeight = alturaAplicativo;
+    raiz.style.height = "auto";
+    raiz.style.minHeight = "0";
     raiz.style.width = "100%";
     raiz.style.overflow = "hidden";
     raiz.style.backgroundColor = "#101312";

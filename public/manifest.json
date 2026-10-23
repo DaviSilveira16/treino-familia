@@ -29,5 +29,8 @@
       "purpose": "maskable"
     }
   ],
-  "display_override": ["fullscreen", "standalone"]
+  "display_override": [
+    "fullscreen",
+    "standalone"
+  ]
 }
