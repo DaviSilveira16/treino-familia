@@ -41,7 +41,6 @@ const TEMAS = [
 ];
 
 type RegistroExportacao = Record<string, any>;
-type PeriodoRelatorio = "30" | "90" | "365" | "todos";
 
 async function buscarTodosOsRegistros(
   tabela: string,
@@ -141,23 +140,74 @@ function formatarNumeroRelatorio(valor: unknown, maximo = 1): string {
   return numero.toLocaleString("pt-BR", { maximumFractionDigits: maximo });
 }
 
-function dataInicialRelatorio(periodo: PeriodoRelatorio): Date | null {
-  if (periodo === "todos") return null;
-  const dias = Number(periodo);
-  const inicio = new Date();
-  inicio.setHours(0, 0, 0, 0);
-  inicio.setDate(inicio.getDate() - dias + 1);
-  return inicio;
+function formatarDataCampo(data: Date): string {
+  const dia = String(data.getDate()).padStart(2, "0");
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  const ano = data.getFullYear();
+  return `${dia}/${mes}/${ano}`;
 }
 
-function registroNoPeriodo(valor: unknown, inicio: Date | null): boolean {
-  if (!inicio) return true;
+function dataPadraoRelatorio(diasAtras: number): string {
+  const data = new Date();
+  data.setHours(0, 0, 0, 0);
+  data.setDate(data.getDate() - diasAtras);
+  return formatarDataCampo(data);
+}
+
+function formatarEntradaData(texto: string): string {
+  const digitos = texto.replace(/\D/g, "").slice(0, 8);
+  if (digitos.length <= 2) return digitos;
+  if (digitos.length <= 4) return `${digitos.slice(0, 2)}/${digitos.slice(2)}`;
+  return `${digitos.slice(0, 2)}/${digitos.slice(2, 4)}/${digitos.slice(4)}`;
+}
+
+function converterDataCampo(texto: string): Date | null {
+  const correspondencia = texto.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!correspondencia) return null;
+  const dia = Number(correspondencia[1]);
+  const mes = Number(correspondencia[2]);
+  const ano = Number(correspondencia[3]);
+  const data = new Date(ano, mes - 1, dia);
+  if (
+    data.getFullYear() !== ano ||
+    data.getMonth() !== mes - 1 ||
+    data.getDate() !== dia
+  )
+    return null;
+  data.setHours(0, 0, 0, 0);
+  return data;
+}
+
+function formatarDataIsoParaCampo(valor: string): string {
+  const correspondencia = valor.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!correspondencia) return "";
+  return `${correspondencia[3]}/${correspondencia[2]}/${correspondencia[1]}`;
+}
+
+function formatarDataCampoParaIso(valor: string): string {
+  const correspondencia = valor.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!correspondencia) return "";
+  return `${correspondencia[3]}-${correspondencia[2]}-${correspondencia[1]}`;
+}
+
+function registroNoIntervalo(valor: unknown, inicio: Date, fim: Date): boolean {
   if (!valor) return false;
   const texto = String(valor);
-  const data = /^\d{4}-\d{2}-\d{2}$/.test(texto)
-    ? new Date(`${texto}T12:00:00`)
-    : new Date(texto);
-  return !Number.isNaN(data.getTime()) && data >= inicio;
+  let data: Date;
+  const apenasData = texto.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (apenasData) {
+    data = new Date(
+      Number(apenasData[1]),
+      Number(apenasData[2]) - 1,
+      Number(apenasData[3]),
+    );
+  } else {
+    data = new Date(texto);
+  }
+  if (Number.isNaN(data.getTime())) return false;
+  const limiteFinal = new Date(fim);
+  limiteFinal.setHours(23, 59, 59, 999);
+  return data >= inicio && data <= limiteFinal;
 }
 
 function criarHtmlRelatorio(dados: {
@@ -298,8 +348,8 @@ function criarHtmlRelatorio(dados: {
     : "#35D07F";
 
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Relatório Treino Família</title><style>
-    @page{size:A4;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#202722;background:#fff;font-size:10.5pt;line-height:1.45;margin:0}header{border-bottom:3px solid ${cor};padding-bottom:14px;margin-bottom:18px}h1{font-size:24pt;margin:0 0 5px;color:#152019}h2{font-size:15pt;color:#152019;border-bottom:1px solid #d9e0db;padding-bottom:6px;margin:24px 0 10px;break-after:avoid}h3{font-size:12pt;margin:0 0 4px;color:#152019}p{margin:4px 0}.muted,.meta,.vazio{color:#637068;font-size:9pt}.resumo{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.indicador{flex:1 1 22%;min-width:115px;padding:10px;border:1px solid #d9e0db;border-top:3px solid ${cor};border-radius:7px}.indicador strong{display:block;font-size:16pt;margin-top:3px}table{border-collapse:collapse;width:100%;margin:8px 0 12px;font-size:8.8pt}th{text-align:left;background:#edf2ee;color:#243229;font-weight:700}th,td{padding:6px;border-bottom:1px solid #e2e7e3;vertical-align:top;overflow-wrap:anywhere}tr{break-inside:avoid}.registro{border:1px solid #e0e6e1;border-radius:8px;padding:10px;margin:10px 0;break-inside:avoid}.perfil{display:flex;flex-wrap:wrap;gap:12px 20px}.perfil span{display:inline-block}.rodape{border-top:1px solid #d9e0db;margin-top:24px;padding-top:8px;font-size:8pt;color:#68746c}.aviso{background:#f1f5f2;padding:10px;border-left:3px solid ${cor};margin-top:14px;font-size:8.5pt}@media print{.registro,table{break-inside:auto}h2,h3{break-after:avoid}thead{display:table-header-group}}
-    </style></head><body><header><h1>Treino Família</h1><p><strong>Relatório pessoal de atividades</strong></p><p class="muted">Período: ${escaparHtml(dados.periodoTexto)} · Gerado em ${formatarDataRelatorio(new Date().toISOString())}</p><p class="muted">${escaparHtml(dados.nome)}${dados.email ? ` · ${escaparHtml(dados.email)}` : ""}</p></header>
+    @page{size:A4;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#202722;background:#fff;font-size:10.5pt;line-height:1.45;margin:0}.barra-acoes{position:sticky;top:0;z-index:10;display:flex;justify-content:flex-end;gap:10px;padding:12px 16px;background:#101312;border-bottom:1px solid #354039}.botao-acao{border:0;border-radius:9px;padding:11px 16px;background:${cor};color:#101312;font-weight:800;font-size:14px;cursor:pointer}.botao-sair{background:#252d28;color:#f0f3f1;border:1px solid #536158}@media print{.barra-acoes{display:none}}header{border-bottom:3px solid ${cor};padding-bottom:14px;margin-bottom:18px}h1{font-size:24pt;margin:0 0 5px;color:#152019}h2{font-size:15pt;color:#152019;border-bottom:1px solid #d9e0db;padding-bottom:6px;margin:24px 0 10px;break-after:avoid}h3{font-size:12pt;margin:0 0 4px;color:#152019}p{margin:4px 0}.muted,.meta,.vazio{color:#637068;font-size:9pt}.resumo{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.indicador{flex:1 1 22%;min-width:115px;padding:10px;border:1px solid #d9e0db;border-top:3px solid ${cor};border-radius:7px}.indicador strong{display:block;font-size:16pt;margin-top:3px}table{border-collapse:collapse;width:100%;margin:8px 0 12px;font-size:8.8pt}th{text-align:left;background:#edf2ee;color:#243229;font-weight:700}th,td{padding:6px;border-bottom:1px solid #e2e7e3;vertical-align:top;overflow-wrap:anywhere}tr{break-inside:avoid}.registro{border:1px solid #e0e6e1;border-radius:8px;padding:10px;margin:10px 0;break-inside:avoid}.perfil{display:flex;flex-wrap:wrap;gap:12px 20px}.perfil span{display:inline-block}.rodape{border-top:1px solid #d9e0db;margin-top:24px;padding-top:8px;font-size:8pt;color:#68746c}.aviso{background:#f1f5f2;padding:10px;border-left:3px solid ${cor};margin-top:14px;font-size:8.5pt}@media print{.registro,table{break-inside:auto}h2,h3{break-after:avoid}thead{display:table-header-group}}
+    </style></head><body><div class="barra-acoes" role="toolbar" aria-label="Ações do relatório"><button class="botao-acao" type="button" onclick="window.focus();window.print()">Baixar / Salvar PDF</button><button class="botao-acao botao-sair" type="button" onclick="(function(){window.close();if(!window.closed){window.location.href=document.referrer||'/'}})()">Sair do relatório</button></div><header><h1>Treino Família</h1><p><strong>Relatório pessoal de atividades</strong></p><p class="muted">Período: ${escaparHtml(dados.periodoTexto)} · Gerado em ${formatarDataRelatorio(new Date().toISOString())}</p><p class="muted">${escaparHtml(dados.nome)}${dados.email ? ` · ${escaparHtml(dados.email)}` : ""}</p></header>
     <h2>Resumo do período</h2><div class="resumo"><div class="indicador">Musculação<strong>${dados.treinos.length}</strong></div><div class="indicador">Cardios<strong>${dados.cardios.length}</strong></div><div class="indicador">Tempo registrado<strong>${formatarNumeroRelatorio(totalMinutos, 0)} min</strong></div><div class="indicador">Calorias disponíveis<strong>${contagemCalorias ? `${formatarNumeroRelatorio(totalCalorias, 0)} kcal` : "—"}</strong></div></div>
     <h2>Perfil</h2><div class="perfil"><span><strong>Peso atual:</strong> ${peso}</span><span><strong>Altura:</strong> ${altura}</span><span><strong>Idade:</strong> ${idade}</span><span><strong>Sexo usado no cálculo:</strong> ${sexo}</span></div>
     <h2>Treinos de musculação</h2>${htmlTreinos}
@@ -365,8 +415,12 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
   const [salvandoDadosCalorias, setSalvandoDadosCalorias] = useState(false);
   const [exportandoRelatorio, setExportandoRelatorio] = useState(false);
   const [exportandoBackup, setExportandoBackup] = useState(false);
-  const [periodoRelatorio, setPeriodoRelatorio] =
-    useState<PeriodoRelatorio>("90");
+  const [dataInicioRelatorio, setDataInicioRelatorio] = useState(() =>
+    dataPadraoRelatorio(89),
+  );
+  const [dataFimRelatorio, setDataFimRelatorio] = useState(() =>
+    dataPadraoRelatorio(0),
+  );
 
   function metadadosComPerfil(adicionais: Record<string, unknown> = {}) {
     const pesoInformado = pesoKg.trim()
@@ -479,6 +533,24 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
   async function exportarRelatorioPdf() {
     if (exportandoRelatorio) return;
 
+    const inicioSelecionado = converterDataCampo(dataInicioRelatorio);
+    const fimSelecionado = converterDataCampo(dataFimRelatorio);
+    if (!inicioSelecionado || !fimSelecionado) {
+      const mensagem =
+        "Informe uma data inicial e final válidas no formato DD/MM/AAAA.";
+      if (Platform.OS === "web" && typeof window !== "undefined")
+        window.alert(mensagem);
+      else Alert.alert("Datas inválidas", mensagem);
+      return;
+    }
+    if (inicioSelecionado.getTime() > fimSelecionado.getTime()) {
+      const mensagem = "A data inicial não pode ser posterior à data final.";
+      if (Platform.OS === "web" && typeof window !== "undefined")
+        window.alert(mensagem);
+      else Alert.alert("Período inválido", mensagem);
+      return;
+    }
+
     let janelaRelatorio: Window | null = null;
     if (Platform.OS === "web" && typeof window !== "undefined") {
       janelaRelatorio = window.open("", "_blank");
@@ -506,7 +578,8 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
       }
 
       const usuarioRelatorio = respostaUsuario.user;
-      const inicio = dataInicialRelatorio(periodoRelatorio);
+      const inicio = inicioSelecionado;
+      const fim = fimSelecionado;
       const [sessoesBrutas, cardiosBrutos, medicoesBrutas, planos] =
         await Promise.all([
           buscarTodosOsRegistros("workout_sessions", usuarioRelatorio.id),
@@ -519,7 +592,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
         .filter(
           (sessao) =>
             sessao.status !== "em_andamento" &&
-            registroNoPeriodo(sessao.started_at, inicio),
+            registroNoIntervalo(sessao.started_at, inicio, fim),
         )
         .sort(
           (a, b) =>
@@ -527,14 +600,16 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
             new Date(String(a.started_at)).getTime(),
         );
       const cardios = cardiosBrutos
-        .filter((cardio) => registroNoPeriodo(cardio.started_at, inicio))
+        .filter((cardio) => registroNoIntervalo(cardio.started_at, inicio, fim))
         .sort(
           (a, b) =>
             new Date(String(b.started_at)).getTime() -
             new Date(String(a.started_at)).getTime(),
         );
       const medicoes = medicoesBrutas
-        .filter((medicao) => registroNoPeriodo(medicao.measured_at, inicio))
+        .filter((medicao) =>
+          registroNoIntervalo(medicao.measured_at, inicio, fim),
+        )
         .sort(
           (a, b) =>
             new Date(String(b.measured_at)).getTime() -
@@ -546,12 +621,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
           ? await buscarSeriesDasSessoes(usuarioRelatorio.id, idsSessoes)
           : [];
       const meta = usuarioRelatorio.user_metadata ?? {};
-      const opcoesPeriodo: Record<PeriodoRelatorio, string> = {
-        "30": "Últimos 30 dias",
-        "90": "Últimos 90 dias",
-        "365": "Últimos 12 meses",
-        todos: "Todo o histórico",
-      };
+      const periodoTexto = `${dataInicioRelatorio} até ${dataFimRelatorio}`;
       const html = criarHtmlRelatorio({
         nome:
           typeof meta.nome === "string" && meta.nome.trim()
@@ -559,7 +629,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
             : "Usuário do Treino Família",
         email: usuarioRelatorio.email ?? "",
         corTema,
-        periodoTexto: opcoesPeriodo[periodoRelatorio],
+        periodoTexto,
         perfil: {
           peso_kg: meta.peso_kg ?? null,
           altura_cm: meta.altura_cm ?? null,
@@ -573,8 +643,9 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
         medicoes,
       });
 
-      const dataArquivo = new Date().toISOString().slice(0, 10);
-      const nomeArquivo = `treino-familia-relatorio-${dataArquivo}.pdf`;
+      const dataArquivoInicio = formatarDataCampoParaIso(dataInicioRelatorio);
+      const dataArquivoFim = formatarDataCampoParaIso(dataFimRelatorio);
+      const nomeArquivo = `treino-familia-relatorio-${dataArquivoInicio}-a-${dataArquivoFim}.pdf`;
       if (Platform.OS === "web") {
         if (!janelaRelatorio || janelaRelatorio.closed) {
           throw new Error(
@@ -586,11 +657,9 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
         janelaRelatorio.document.close();
         janelaRelatorio.document.title = nomeArquivo;
         window.setTimeout(() => {
-          if (janelaRelatorio && !janelaRelatorio.closed) {
+          if (janelaRelatorio && !janelaRelatorio.closed)
             janelaRelatorio.focus();
-            janelaRelatorio.print();
-          }
-        }, 700);
+        }, 100);
       } else {
         const arquivoPdf = await Print.printToFileAsync({
           html,
@@ -1237,41 +1306,96 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
             da sua conta.
           </Text>
           <Text style={estilos.rotulo}>Período do relatório</Text>
-          <View style={estilos.opcoesPeriodo}>
-            {(
-              [
-                ["30", "30 dias"],
-                ["90", "90 dias"],
-                ["365", "12 meses"],
-                ["todos", "Todo o histórico"],
-              ] as const
-            ).map(([valor, rotulo]) => {
-              const selecionado = periodoRelatorio === valor;
-              return (
-                <TouchableOpacity
-                  key={valor}
-                  style={[
-                    estilos.opcaoPeriodo,
-                    selecionado && {
-                      borderColor: corTema,
-                      backgroundColor: `${corTema}20`,
-                    },
-                  ]}
-                  onPress={() => setPeriodoRelatorio(valor)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: selecionado }}
-                >
-                  <Text
-                    style={[
-                      estilos.textoOpcaoPeriodo,
-                      selecionado && { color: corTema },
-                    ]}
-                  >
-                    {rotulo}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+          <Text
+            style={[
+              estilos.descricaoSecao,
+              { marginTop: -8, marginBottom: 12 },
+            ]}
+          >
+            Escolha as duas datas. O PDF incluirá somente os registros
+            realizados entre elas, inclusive.
+          </Text>
+          <View style={estilos.gradeDatasRelatorio}>
+            <View style={estilos.campoDataRelatorio}>
+              <Text style={estilos.rotulo}>Data inicial</Text>
+              {Platform.OS === "web" ? (
+                React.createElement("input" as any, {
+                  type: "date",
+                  value: formatarDataCampoParaIso(dataInicioRelatorio),
+                  max: formatarDataCampoParaIso(dataFimRelatorio) || undefined,
+                  onChange: (evento: any) =>
+                    setDataInicioRelatorio(
+                      formatarDataIsoParaCampo(evento?.target?.value ?? ""),
+                    ),
+                  "aria-label": "Data inicial do relatório",
+                  style: {
+                    width: "100%",
+                    height: 46,
+                    boxSizing: "border-box",
+                    padding: "0 12px",
+                    borderRadius: 10,
+                    border: "1px solid #354039",
+                    backgroundColor: "#101512",
+                    color: "#E5EAE6",
+                    fontSize: 14,
+                  },
+                })
+              ) : (
+                <TextInput
+                  style={estilos.inputDataRelatorio}
+                  value={dataInicioRelatorio}
+                  onChangeText={(valor) =>
+                    setDataInicioRelatorio(formatarEntradaData(valor))
+                  }
+                  placeholder="DD/MM/AAAA"
+                  placeholderTextColor="#828A85"
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={10}
+                  accessibilityLabel="Data inicial do relatório"
+                />
+              )}
+            </View>
+            <View style={estilos.campoDataRelatorio}>
+              <Text style={estilos.rotulo}>Data final</Text>
+              {Platform.OS === "web" ? (
+                React.createElement("input" as any, {
+                  type: "date",
+                  value: formatarDataCampoParaIso(dataFimRelatorio),
+                  min:
+                    formatarDataCampoParaIso(dataInicioRelatorio) || undefined,
+                  max: formatarDataCampoParaIso(dataPadraoRelatorio(0)),
+                  onChange: (evento: any) =>
+                    setDataFimRelatorio(
+                      formatarDataIsoParaCampo(evento?.target?.value ?? ""),
+                    ),
+                  "aria-label": "Data final do relatório",
+                  style: {
+                    width: "100%",
+                    height: 46,
+                    boxSizing: "border-box",
+                    padding: "0 12px",
+                    borderRadius: 10,
+                    border: "1px solid #354039",
+                    backgroundColor: "#101512",
+                    color: "#E5EAE6",
+                    fontSize: 14,
+                  },
+                })
+              ) : (
+                <TextInput
+                  style={estilos.inputDataRelatorio}
+                  value={dataFimRelatorio}
+                  onChangeText={(valor) =>
+                    setDataFimRelatorio(formatarEntradaData(valor))
+                  }
+                  placeholder="DD/MM/AAAA"
+                  placeholderTextColor="#828A85"
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={10}
+                  accessibilityLabel="Data final do relatório"
+                />
+              )}
+            </View>
           </View>
           <TouchableOpacity
             style={[
@@ -1286,16 +1410,18 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
               <ActivityIndicator color="#101312" />
             ) : (
               <Text style={estilos.textoBotaoPrincipal}>
-                Gerar relatório em PDF
+                Abrir relatório e opções do PDF
               </Text>
             )}
           </TouchableOpacity>
           <Text
             style={[estilos.descricaoSecao, { marginTop: 10, marginBottom: 0 }]}
           >
-            No navegador, será aberta a impressão: escolha “Salvar como PDF”. No
-            aplicativo instalado, use a opção de salvar ou compartilhar o
-            arquivo gerado.
+            No navegador, o relatório abre em uma nova janela. Dentro dele,
+            toque em “Baixar / Salvar PDF” e escolha “Salvar como PDF” na janela
+            de impressão. Para voltar ao app, toque em “Sair do relatório”. No
+            aplicativo instalado, use o menu para salvar/compartilhar ou cancele
+            para voltar.
           </Text>
         </View>
 
@@ -1533,29 +1659,27 @@ const estilos = StyleSheet.create({
   botaoDesabilitado: {
     opacity: 0.65,
   },
-  opcoesPeriodo: {
+  gradeDatasRelatorio: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 8,
+    gap: 12,
+    marginBottom: 10,
   },
-  opcaoPeriodo: {
-    flexGrow: 1,
-    flexBasis: "40%",
-    minHeight: 42,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    borderRadius: 10,
+  campoDataRelatorio: {
+    flex: 1,
+    minWidth: 180,
+    gap: 6,
+  },
+  inputDataRelatorio: {
+    minHeight: 46,
     borderWidth: 1,
     borderColor: "#354039",
+    borderRadius: 10,
     backgroundColor: "#101512",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  textoOpcaoPeriodo: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     color: "#E5EAE6",
-    fontSize: 13,
-    fontWeight: "700",
+    fontSize: 14,
   },
   botaoSecundario: {
     paddingVertical: 14,
