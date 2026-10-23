@@ -19,11 +19,6 @@ import {
   type IntensidadeCardio,
   type SexoCardio,
 } from "../servicos/caloriasCardio";
-import {
-  estimarCaloriasAtivasTreino,
-  type IntensidadeTreino,
-  type SerieCalculoTreino,
-} from "../servicos/caloriasTreino";
 
 type Treino = {
   id: string;
@@ -35,18 +30,6 @@ type Sessao = {
   plan_id: string | null;
   started_at: string;
   notes: string | null;
-  duration_minutes?: number | null;
-  intensity?: string | null;
-  active_calories?: number | null;
-  weight_kg_snapshot?: number | null;
-  height_cm_snapshot?: number | null;
-  age_snapshot?: number | null;
-  sex_snapshot?: string | null;
-  met_value?: number | null;
-  exercise_count?: number | null;
-  sets_count?: number | null;
-  total_reps?: number | null;
-  total_volume_kg?: number | null;
 };
 
 type CardioModelo = {
@@ -71,7 +54,6 @@ type SessaoCardio = {
   incline_percent?: number | null;
   heart_rate_avg?: number | null;
   speed_kmh?: number | null;
-  cadence_rpm?: number | null;
   weight_kg_snapshot?: number | null;
   height_cm_snapshot?: number | null;
   age_snapshot?: number | null;
@@ -137,13 +119,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const [modelosCardio, setModelosCardio] = useState<CardioModelo[]>([]);
   const [sessoesCardio, setSessoesCardio] = useState<SessaoCardio[]>([]);
   const [treinoSelecionado, setTreinoSelecionado] = useState("");
-  const [duracaoTreino, setDuracaoTreino] = useState("");
-  const [intensidadeTreino, setIntensidadeTreino] =
-    useState<IntensidadeTreino | null>(null);
-  const [seriesTreinoPrevistas, setSeriesTreinoPrevistas] = useState<
-    SerieCalculoTreino[]
-  >([]);
-  const [carregandoResumoTreino, setCarregandoResumoTreino] = useState(false);
   const [cardioSelecionado, setCardioSelecionado] = useState("");
   const [pesoUsuario, setPesoUsuario] = useState<number | null>(null);
   const [alturaUsuario, setAlturaUsuario] = useState<number | null>(null);
@@ -155,7 +130,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     useState<IntensidadeCardio | null>(null);
   const [inclinacaoCardio, setInclinacaoCardio] = useState("0");
   const [andaresSubidos, setAndaresSubidos] = useState("");
-  const [cadenciaBicicleta, setCadenciaBicicleta] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [registroParaExcluir, setRegistroParaExcluir] = useState<{
@@ -214,9 +188,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           .order("created_at", { ascending: true }),
         supabase
           .from("workout_sessions")
-          .select(
-            "id, plan_id, started_at, notes, duration_minutes, intensity, active_calories, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, met_value, exercise_count, sets_count, total_reps, total_volume_kg",
-          )
+          .select("id, plan_id, started_at, notes")
           .eq("user_id", usuario.user.id)
           .order("started_at", { ascending: false }),
         supabase
@@ -229,7 +201,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         supabase
           .from("cardio_sessions")
           .select(
-            "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, cadence_rpm, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
+            "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
           )
           .eq("user_id", usuario.user.id)
           .order("started_at", { ascending: false }),
@@ -364,92 +336,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   function mudarMes(direcao: number) {
     setMesAtual(new Date(ano, mes + direcao, 1));
   }
-  async function selecionarTreinoParaRegistro(id: string) {
-    setTreinoSelecionado(id);
-    setDuracaoTreino("");
-    setIntensidadeTreino(null);
-    setSeriesTreinoPrevistas([]);
-    setCarregandoResumoTreino(true);
-    try {
-      const { data: exercicios, error: erroExercicios } = await supabase
-        .from("exercises")
-        .select("id, name, sets_goal, reps_goal")
-        .eq("user_id", usuarioId)
-        .eq("plan_id", id)
-        .order("position", { ascending: true });
-      if (erroExercicios) throw erroExercicios;
-      const listaExercicios = exercicios ?? [];
-      const { data: referencias, error: erroReferencias } =
-        listaExercicios.length
-          ? await supabase
-              .from("exercise_load_defaults")
-              .select("exercise_id, set_number, reps, weight_kg")
-              .eq("user_id", usuarioId)
-              .in(
-                "exercise_id",
-                listaExercicios.map((exercicio) => exercicio.id),
-              )
-              .order("set_number", { ascending: true })
-          : { data: [], error: null };
-      if (erroReferencias) throw erroReferencias;
-      const series = listaExercicios.flatMap((exercicio) => {
-        const seriesSalvas = (referencias ?? []).filter(
-          (item) => item.exercise_id === exercicio.id,
-        );
-        const quantidade = Math.max(
-          Number(exercicio.sets_goal) || 1,
-          seriesSalvas.length,
-          1,
-        );
-        const repeticoesPadrao =
-          Number(String(exercicio.reps_goal ?? "8").match(/\d+/)?.[0] ?? 8) ||
-          8;
-        return Array.from({ length: quantidade }, (_, indice) => {
-          const serie = seriesSalvas.find(
-            (item) => Number(item.set_number) === indice + 1,
-          );
-          return {
-            exercise_id: exercicio.id,
-            exercise_name: exercicio.name,
-            set_number: indice + 1,
-            reps: Number(serie?.reps ?? repeticoesPadrao),
-            weight_kg: Number(serie?.weight_kg ?? 0),
-          };
-        });
-      });
-      setSeriesTreinoPrevistas(series);
-    } catch (erro) {
-      setTreinoSelecionado("");
-      Alert.alert(
-        "Erro ao preparar a estimativa",
-        erro instanceof Error
-          ? erro.message
-          : "Não foi possível carregar as séries, repetições e cargas do treino.",
-      );
-    } finally {
-      setCarregandoResumoTreino(false);
-    }
-  }
-
-  const duracaoTreinoNumerica = lerNumero(duracaoTreino);
-  const estimativaTreino =
-    perfilCaloriasCompleto &&
-    intensidadeTreino &&
-    duracaoTreinoNumerica !== null &&
-    Number.isFinite(duracaoTreinoNumerica) &&
-    Number.isInteger(duracaoTreinoNumerica) &&
-    duracaoTreinoNumerica > 0
-      ? estimarCaloriasAtivasTreino({
-          pesoKg: pesoUsuario!,
-          alturaCm: alturaUsuario!,
-          idade: idadeUsuario!,
-          sexo: sexoUsuario!,
-          duracaoMinutos: duracaoTreinoNumerica,
-          intensidade: intensidadeTreino,
-          series: seriesTreinoPrevistas,
-        })
-      : null;
-
   async function registrarTreino() {
     if (!usuarioId || !treinoSelecionado || !dataSelecionada) {
       Alert.alert("Atenção", "Selecione um treino para registrar.");
@@ -462,35 +348,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       );
       return;
     }
-    if (!perfilCaloriasCompleto) {
-      Alert.alert(
-        "Complete seu perfil",
-        "Informe peso, altura, idade e sexo em Meu Perfil para estimar as calorias da musculação.",
-      );
-      return;
-    }
-    const duracao = lerNumero(duracaoTreino);
-    if (
-      duracao === null ||
-      !Number.isFinite(duracao) ||
-      !Number.isInteger(duracao) ||
-      duracao <= 0 ||
-      duracao > 600
-    ) {
-      Alert.alert(
-        "Duração necessária",
-        "Informe a duração real em minutos inteiros, maior que zero e até 600 minutos.",
-      );
-      return;
-    }
-    if (intensidadeTreino === null) {
-      Alert.alert(
-        "Intensidade necessária",
-        "Selecione a intensidade geral da sessão de musculação.",
-      );
-      return;
-    }
-
     setSalvando(true);
     try {
       const [anoSelecionado, mesSelecionado, diaSelecionado] = dataSelecionada
@@ -527,7 +384,11 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         );
         return;
       }
-      if ((sessoesExistentes ?? []).some((sessao) => sessao.plan_id !== null)) {
+      const existeTreinoNoDia = (sessoesExistentes ?? []).some(
+        (sessao) => sessao.plan_id !== null,
+      );
+
+      if (existeTreinoNoDia) {
         await carregarDados();
         Alert.alert(
           "Treino já registrado",
@@ -535,19 +396,56 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         );
         return;
       }
+      const dataRegistro = new Date(
+        anoSelecionado,
+        mesSelecionado - 1,
+        diaSelecionado,
+        12,
+        0,
+        0,
+        0,
+      ).toISOString();
+      const { data: novaSessao, error } = await supabase
+        .from("workout_sessions")
+        .insert({
+          user_id: usuarioId,
+          plan_id: treinoSelecionado,
+          started_at: dataRegistro,
+          finished_at: dataRegistro,
+          notes: "Treino registrado pelo calendário",
+        })
+        .select("id")
+        .single();
+      if (error || !novaSessao) {
+        Alert.alert(
+          "Erro ao registrar",
+          error?.message ?? "Não foi possível criar a sessão.",
+        );
+        return;
+      }
 
-      // Recarrega as referências antes de criar a sessão para que a cópia e a estimativa
-      // correspondam aos mesmos dados de séries, repetições e cargas.
       const { data: exercicios, error: erroExercicios } = await supabase
         .from("exercises")
         .select("id, name, sets_goal, reps_goal")
         .eq("user_id", usuarioId)
         .eq("plan_id", treinoSelecionado)
         .order("position", { ascending: true });
-      if (erroExercicios) throw erroExercicios;
+      if (erroExercicios) {
+        await supabase
+          .from("workout_sessions")
+          .delete()
+          .eq("id", novaSessao.id)
+          .eq("user_id", usuarioId);
+        Alert.alert(
+          "Erro ao registrar",
+          `Não foi possível carregar os exercícios do treino: ${erroExercicios.message}`,
+        );
+        return;
+      }
+
       const listaExercicios = exercicios ?? [];
       const { data: referencias, error: erroReferencias } =
-        listaExercicios.length
+        listaExercicios.length > 0
           ? await supabase
               .from("exercise_load_defaults")
               .select("exercise_id, set_number, reps, weight_kg")
@@ -558,7 +456,18 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
               )
               .order("set_number", { ascending: true })
           : { data: [], error: null };
-      if (erroReferencias) throw erroReferencias;
+      if (erroReferencias) {
+        await supabase
+          .from("workout_sessions")
+          .delete()
+          .eq("id", novaSessao.id)
+          .eq("user_id", usuarioId);
+        Alert.alert(
+          "Erro ao registrar",
+          `Não foi possível carregar as cargas salvas: ${erroReferencias.message}`,
+        );
+        return;
+      }
 
       const seriesDaSessao = listaExercicios.flatMap((exercicio) => {
         const seriesSalvas = (referencias ?? []).filter(
@@ -578,6 +487,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           );
           return {
             user_id: usuarioId,
+            session_id: novaSessao.id,
             exercise_id: exercicio.id,
             exercise_name: exercicio.name,
             set_number: indice + 1,
@@ -586,81 +496,11 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           };
         });
       });
-      const estimativa = estimarCaloriasAtivasTreino({
-        pesoKg: pesoUsuario!,
-        alturaCm: alturaUsuario!,
-        idade: idadeUsuario!,
-        sexo: sexoUsuario!,
-        duracaoMinutos: duracao,
-        intensidade: intensidadeTreino,
-        series: seriesDaSessao.map(
-          ({ exercise_id, exercise_name, set_number, reps, weight_kg }) => ({
-            exercise_id,
-            exercise_name,
-            set_number,
-            reps,
-            weight_kg,
-          }),
-        ),
-      });
-      if (!estimativa) {
-        Alert.alert(
-          "Não foi possível calcular",
-          "Confira os dados do perfil, duração e intensidade informados.",
-        );
-        return;
-      }
-
-      const dataRegistro = new Date(
-        anoSelecionado,
-        mesSelecionado - 1,
-        diaSelecionado,
-        12,
-        0,
-        0,
-        0,
-      ).toISOString();
-      const { data: novaSessao, error } = await supabase
-        .from("workout_sessions")
-        .insert({
-          user_id: usuarioId,
-          plan_id: treinoSelecionado,
-          started_at: dataRegistro,
-          finished_at: dataRegistro,
-          notes: "Treino registrado pelo calendário",
-          duration_minutes: duracao,
-          intensity: intensidadeTreino,
-          active_calories: estimativa.caloriasAtivas,
-          weight_kg_snapshot: pesoUsuario,
-          height_cm_snapshot: alturaUsuario,
-          age_snapshot: idadeUsuario,
-          sex_snapshot: sexoUsuario,
-          met_value: estimativa.met,
-          exercise_count: estimativa.quantidadeExercicios,
-          sets_count: estimativa.quantidadeSeries,
-          total_reps: estimativa.repeticoesTotais,
-          total_volume_kg: estimativa.volumeCargaKg,
-        })
-        .select("id")
-        .single();
-      if (error || !novaSessao) {
-        Alert.alert(
-          "Erro ao registrar",
-          error?.message ??
-            "Não foi possível criar a sessão. Confirme se executou o SQL aditivo de calorias para musculação.",
-        );
-        return;
-      }
 
       if (seriesDaSessao.length > 0) {
         const { error: erroSnapshot } = await supabase
           .from("workout_sets")
-          .insert(
-            seriesDaSessao.map((serie) => ({
-              ...serie,
-              session_id: novaSessao.id,
-            })),
-          );
+          .insert(seriesDaSessao);
         if (erroSnapshot) {
           await supabase
             .from("workout_sessions")
@@ -677,20 +517,12 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
 
       await carregarDados();
       setTreinoSelecionado("");
-      setDuracaoTreino("");
-      setIntensidadeTreino(null);
-      setSeriesTreinoPrevistas([]);
       Alert.alert(
         "Treino registrado",
-        `Estimativa de ${estimativa.caloriasAtivas} kcal ativas. Foram preservadas ${estimativa.quantidadeSeries} séries, ${estimativa.repeticoesTotais} repetições e ${estimativa.volumeCargaKg.toLocaleString("pt-BR")} kg × repetições. O resultado é aproximado e ficou salvo com o peso e os parâmetros usados nesta sessão. Alterar o treino ou perfil não muda este registro.`,
+        "O treino e uma cópia das cargas e exercícios foram salvos no histórico.",
       );
-    } catch (erro) {
-      Alert.alert(
-        "Erro ao registrar",
-        erro instanceof Error
-          ? erro.message
-          : "Não foi possível registrar o treino.",
-      );
+    } catch {
+      Alert.alert("Erro", "Não foi possível registrar o treino.");
     } finally {
       setSalvando(false);
     }
@@ -710,7 +542,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     setIntensidadeCardio(null);
     setInclinacaoCardio(categoria === "esteira" ? "0" : "");
     setAndaresSubidos("");
-    setCadenciaBicicleta("");
   }
 
   async function registrarCardio() {
@@ -750,9 +581,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           : 0
         : null;
     const andares = andaresSubidos.trim() ? lerNumero(andaresSubidos) : null;
-    const cadencia = cadenciaBicicleta.trim()
-      ? lerNumero(cadenciaBicicleta)
-      : null;
 
     if (
       duracao === null ||
@@ -825,20 +653,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       );
       return;
     }
-    if (
-      categoria === "bicicleta" &&
-      cadenciaBicicleta.trim() &&
-      (cadencia === null ||
-        !Number.isFinite(cadencia) ||
-        cadencia < 1 ||
-        cadencia > 250)
-    ) {
-      Alert.alert(
-        "Cadência inválida",
-        "Informe a cadência em RPM entre 1 e 250, ou deixe o campo vazio.",
-      );
-      return;
-    }
     const estimativa = estimarCaloriasAtivas({
       tipo: modelo.tipo,
       intensidade: intensidadeCardio,
@@ -896,12 +710,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
             : null,
         heart_rate_avg: null,
         speed_kmh: estimativa.velocidadeKmh,
-        cadence_rpm:
-          categoria === "bicicleta" &&
-          cadencia !== null &&
-          Number.isFinite(cadencia)
-            ? cadencia
-            : null,
         weight_kg_snapshot: pesoUsuario,
         height_cm_snapshot: alturaUsuario,
         age_snapshot: idadeUsuario,
@@ -915,7 +723,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setDistanciaCardio("");
       setInclinacaoCardio("0");
       setAndaresSubidos("");
-      setCadenciaBicicleta("");
       await carregarDados();
       Alert.alert(
         "Cardio registrado",
@@ -1071,9 +878,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                     onPress={() => {
                       setDataSelecionada(data);
                       setTreinoSelecionado("");
-                      setDuracaoTreino("");
-                      setIntensidadeTreino(null);
-                      setSeriesTreinoPrevistas([]);
                     }}
                   >
                     <Text
@@ -1143,7 +947,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                         borderColor: corTema,
                       },
                     ]}
-                    onPress={() => selecionarTreinoParaRegistro(treino.id)}
+                    onPress={() => setTreinoSelecionado(treino.id)}
                   >
                     <Text
                       style={[
@@ -1157,117 +961,14 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                   </TouchableOpacity>
                 );
               })}
-              {treinoSelecionado ? (
-                <View style={estilos.blocoEstimativaTreino}>
-                  <Text style={estilos.rotulo}>
-                    Duração real do treino (minutos)
-                  </Text>
-                  <TextInput
-                    style={estilos.inputCardio}
-                    value={duracaoTreino}
-                    onChangeText={setDuracaoTreino}
-                    keyboardType="decimal-pad"
-                    placeholder="Ex.: 60"
-                    placeholderTextColor="#849087"
-                  />
-                  <Text style={estilos.rotulo}>
-                    Intensidade geral da sessão
-                  </Text>
-                  <View style={estilos.opcoesIntensidade}>
-                    {(
-                      [
-                        { valor: "leve", rotulo: "Leve" },
-                        { valor: "moderada", rotulo: "Moderada" },
-                        { valor: "intensa", rotulo: "Intensa" },
-                      ] as const
-                    ).map((opcao) => (
-                      <TouchableOpacity
-                        key={opcao.valor}
-                        style={[
-                          estilos.botaoIntensidade,
-                          intensidadeTreino === opcao.valor && {
-                            borderColor: corTema,
-                            backgroundColor: `${corTema}20`,
-                          },
-                        ]}
-                        onPress={() => setIntensidadeTreino(opcao.valor)}
-                      >
-                        <Text
-                          style={{
-                            color:
-                              intensidadeTreino === opcao.valor
-                                ? corTema
-                                : "#D0D7D2",
-                            textAlign: "center",
-                            fontWeight: "700",
-                          }}
-                        >
-                          {opcao.rotulo}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  {carregandoResumoTreino ? (
-                    <Text style={estilos.textoSecundario}>
-                      Carregando séries, repetições e cargas salvas...
-                    </Text>
-                  ) : estimativaTreino ? (
-                    <View style={estilos.resumoCaloriasTreino}>
-                      <Text
-                        style={[
-                          estilos.resumoCaloriasTitulo,
-                          { color: corTema },
-                        ]}
-                      >
-                        Estimativa antes de salvar
-                      </Text>
-                      <Text style={estilos.resumoCaloriasValor}>
-                        {estimativaTreino.caloriasAtivas} kcal ativas
-                      </Text>
-                      <Text style={estilos.textoSecundario}>
-                        {estimativaTreino.quantidadeExercicios} exercícios ·{" "}
-                        {estimativaTreino.quantidadeSeries} séries ·{" "}
-                        {estimativaTreino.repeticoesTotais} repetições
-                      </Text>
-                      <Text style={estilos.textoSecundario}>
-                        Volume de carga registrado:{" "}
-                        {estimativaTreino.volumeCargaKg.toLocaleString("pt-BR")}{" "}
-                        kg × repetições · MET {estimativaTreino.met}
-                      </Text>
-                      <Text style={estilos.notaCaloriasTreino}>
-                        Estimativa baseada no peso do perfil, duração e
-                        intensidade. Cargas, séries e repetições ficam salvas
-                        junto à sessão; volume de carga não é convertido
-                        diretamente em calorias por não haver uma fórmula
-                        validada para isso.
-                      </Text>
-                    </View>
-                  ) : (
-                    <Text style={estilos.textoSecundario}>
-                      {!perfilCaloriasCompleto
-                        ? "Complete peso, altura, idade e sexo em Meu Perfil para calcular as calorias."
-                        : "Informe a duração e selecione a intensidade para ver a estimativa."}
-                    </Text>
-                  )}
-                </View>
-              ) : null}
               <TouchableOpacity
                 style={[
                   estilos.botaoSalvar,
                   { backgroundColor: corTema },
-                  (salvando ||
-                    carregandoResumoTreino ||
-                    !treinoSelecionado ||
-                    !estimativaTreino) &&
-                    estilos.botaoDesabilitado,
+                  (salvando || !treinoSelecionado) && estilos.botaoDesabilitado,
                 ]}
                 onPress={registrarTreino}
-                disabled={
-                  salvando ||
-                  carregandoResumoTreino ||
-                  !treinoSelecionado ||
-                  !estimativaTreino
-                }
+                disabled={salvando || !treinoSelecionado}
               >
                 {salvando ? (
                   <ActivityIndicator color="#101312" />
@@ -1308,17 +1009,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                             },
                           )}
                         </Text>
-                        {sessao.active_calories != null ? (
-                          <Text
-                            style={[
-                              estilos.textoSecundario,
-                              { color: corTema },
-                            ]}
-                          >
-                            {sessao.active_calories} kcal ativas estimadas ·{" "}
-                            {sessao.duration_minutes ?? "—"} min
-                          </Text>
-                        ) : null}
                       </View>
                       <TouchableOpacity
                         style={[
@@ -1473,6 +1163,18 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                       </TouchableOpacity>
                     ))}
                   </View>
+                  {intensidadeCardio !== null ? (
+                    <Text style={estilos.textoSecundario}>
+                      {intensidadeCardio === "leve"
+                        ? "Leve: esforço confortável, com respiração pouco acelerada e conversa fácil. Usa um MET menor e estima menor gasto por minuto."
+                        : intensidadeCardio === "moderada"
+                          ? "Moderada: respiração mais acelerada, mas ainda é possível falar frases completas. Usa um MET intermediário."
+                          : "Intensa: respiração forte e conversa limitada a poucas palavras. Usa um MET maior e estima maior gasto por minuto."}
+                      {estimativaCalorias
+                        ? ` MET estimado para esta sessão: ${estimativaCalorias.met}. 1 MET representa aproximadamente o gasto energético em repouso.`
+                        : " A estimativa de MET aparecerá quando todos os dados necessários estiverem preenchidos."}
+                    </Text>
+                  ) : null}
                   {categoriaSelecionada === "escadas" ? (
                     <>
                       <Text style={estilos.rotulo}>
@@ -1490,26 +1192,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                         Informe os andares completos que você subiu. O app usa
                         esse número junto com a duração para ajustar a
                         estimativa.
-                      </Text>
-                    </>
-                  ) : null}
-                  {categoriaSelecionada === "bicicleta" ? (
-                    <>
-                      <Text style={estilos.rotulo}>
-                        Cadência da bicicleta (RPM, opcional)
-                      </Text>
-                      <TextInput
-                        style={estilos.inputCardio}
-                        value={cadenciaBicicleta}
-                        onChangeText={setCadenciaBicicleta}
-                        placeholder="Ex.: 75"
-                        placeholderTextColor="#828A85"
-                        keyboardType="number-pad"
-                      />
-                      <Text style={estilos.textoSecundario}>
-                        RPM registra pedaladas por minuto, mas não é usado
-                        sozinho no cálculo porque não informa a resistência ou
-                        potência.
                       </Text>
                     </>
                   ) : null}
@@ -1666,9 +1348,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                       {cardio.floors_up != null
                         ? ` · ${cardio.floors_up} andares subidos`
                         : ""}
-                      {cardio.cadence_rpm != null
-                        ? ` · ${cardio.cadence_rpm} RPM`
-                        : ""}
+
                       {cardio.speed_kmh != null
                         ? ` · ${cardio.speed_kmh} km/h`
                         : ""}
@@ -2029,40 +1709,6 @@ const estilos = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     marginBottom: 10,
-  },
-  blocoEstimativaTreino: {
-    backgroundColor: "#151A17",
-    borderWidth: 1,
-    borderColor: "#343D37",
-    borderRadius: 12,
-    padding: 13,
-    marginTop: 12,
-    gap: 6,
-  },
-  resumoCaloriasTreino: {
-    backgroundColor: "#17241C",
-    borderWidth: 1,
-    borderColor: "#28573A",
-    borderRadius: 10,
-    padding: 12,
-    gap: 6,
-    marginTop: 4,
-    marginBottom: 8,
-  },
-  resumoCaloriasTitulo: {
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  resumoCaloriasValor: {
-    color: "#F0F3F1",
-    fontSize: 22,
-    fontWeight: "900",
-  },
-  notaCaloriasTreino: {
-    color: "#A9B2AC",
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 3,
   },
   botaoSalvar: {
     borderRadius: 12,
