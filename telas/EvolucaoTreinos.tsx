@@ -1,4 +1,10 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   PanResponder,
@@ -64,6 +70,11 @@ export default function EvolucaoTreinos({
   >({});
   const [exercicioSelecionado, setExercicioSelecionado] = useState("");
   const [buscaExercicio, setBuscaExercicio] = useState("");
+  const [larguraSeletor, setLarguraSeletor] = useState(0);
+  const seletorRef = useRef<ScrollView | null>(null);
+  const posicoesExerciciosRef = useRef<
+    Record<string, { x: number; width: number }>
+  >({});
   const selecionadoRef = useRef(exercicioSelecionado);
   selecionadoRef.current = exercicioSelecionado;
 
@@ -197,17 +208,52 @@ export default function EvolucaoTreinos({
       ),
     [nomes, pontosPorExercicio, buscaExercicio],
   );
-  nomesRef.current = nomes;
+  nomesRef.current = nomesVisiveis;
   selecionadoRef.current = exercicioSelecionado;
-  const indiceSelecionado = Math.max(0, nomes.indexOf(exercicioSelecionado));
+
+  useEffect(() => {
+    if (
+      nomesVisiveis.length > 0 &&
+      !nomesVisiveis.includes(exercicioSelecionado)
+    ) {
+      setExercicioSelecionado(nomesVisiveis[0]);
+    }
+  }, [nomesVisiveis, exercicioSelecionado]);
+
+  const indiceSelecionado = nomesVisiveis.indexOf(exercicioSelecionado);
+  const rolarParaExercicioSelecionado = useCallback(
+    (chave: string) => {
+      const posicao = posicoesExerciciosRef.current[chave];
+      const largura = larguraSeletor;
+      if (!posicao || largura <= 0 || !seletorRef.current) return;
+      const x = Math.max(0, posicao.x - (largura - posicao.width) / 2);
+      seletorRef.current.scrollTo({ x, animated: true });
+    },
+    [larguraSeletor],
+  );
+
+  useEffect(() => {
+    if (!exercicioSelecionado) return;
+    rolarParaExercicioSelecionado(exercicioSelecionado);
+  }, [
+    exercicioSelecionado,
+    larguraSeletor,
+    nomesVisiveis,
+    rolarParaExercicioSelecionado,
+  ]);
+
   const selecionarAnterior = useCallback(() => {
     if (indiceSelecionado > 0)
-      setExercicioSelecionado(nomes[indiceSelecionado - 1]);
-  }, [indiceSelecionado, nomes]);
+      setExercicioSelecionado(nomesVisiveis[indiceSelecionado - 1]);
+  }, [indiceSelecionado, nomesVisiveis]);
   const selecionarProximo = useCallback(() => {
-    if (indiceSelecionado < nomes.length - 1)
-      setExercicioSelecionado(nomes[indiceSelecionado + 1]);
-  }, [indiceSelecionado, nomes]);
+    if (
+      indiceSelecionado >= 0 &&
+      indiceSelecionado < nomesVisiveis.length - 1
+    ) {
+      setExercicioSelecionado(nomesVisiveis[indiceSelecionado + 1]);
+    }
+  }, [indiceSelecionado, nomesVisiveis]);
   const gestoExercicios = useMemo(
     () =>
       PanResponder.create({
@@ -323,17 +369,21 @@ export default function EvolucaoTreinos({
                 <Text style={estilos.textoSeta}>‹</Text>
               </TouchableOpacity>
               <Text style={estilos.contadorExercicio}>
-                {nomes.length
-                  ? `${indiceSelecionado + 1} de ${nomes.length}`
-                  : "0 de 0"}
+                {indiceSelecionado >= 0
+                  ? `${indiceSelecionado + 1} de ${nomesVisiveis.length}`
+                  : `0 de ${nomesVisiveis.length}`}
               </Text>
               <TouchableOpacity
                 accessibilityLabel="Próximo exercício"
-                disabled={indiceSelecionado >= nomes.length - 1}
+                disabled={
+                  indiceSelecionado < 0 ||
+                  indiceSelecionado >= nomesVisiveis.length - 1
+                }
                 onPress={selecionarProximo}
                 style={[
                   estilos.setaExercicio,
-                  indiceSelecionado >= nomes.length - 1 &&
+                  (indiceSelecionado < 0 ||
+                    indiceSelecionado >= nomesVisiveis.length - 1) &&
                     estilos.setaDesabilitada,
                 ]}
               >
@@ -341,22 +391,37 @@ export default function EvolucaoTreinos({
               </TouchableOpacity>
             </View>
             <ScrollView
+              ref={seletorRef}
               horizontal
               nestedScrollEnabled
               directionalLockEnabled
               showsHorizontalScrollIndicator
               contentContainerStyle={estilos.seletor}
               style={estilos.listaSeletor}
+              onLayout={(evento) =>
+                setLarguraSeletor(evento.nativeEvent.layout.width)
+              }
             >
               {nomesVisiveis.map((chave) => (
                 <TouchableOpacity
                   key={chave}
                   onPress={() => setExercicioSelecionado(chave)}
+                  onLayout={(evento) => {
+                    const { x, width } = evento.nativeEvent.layout;
+                    posicoesExerciciosRef.current[chave] = { x, width };
+                    if (chave === selecionadoRef.current)
+                      rolarParaExercicioSelecionado(chave);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    selected: exercicioSelecionado === chave,
+                  }}
                   style={[
                     estilos.botaoExercicio,
                     exercicioSelecionado === chave && {
                       borderColor: corTema,
                       backgroundColor: `${corTema}20`,
+                      borderWidth: 2,
                     },
                   ]}
                 >
