@@ -1,11 +1,5 @@
 import React from "react";
-import {
-  Platform,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 type RotaInferior = "Inicio" | "comunidade";
 
@@ -21,41 +15,15 @@ export default function NavegacaoInferior({
   onNavegar,
 }: Props) {
   const comunidadeAtiva = rotaAtual === "comunidade";
+  const treinosAtivo = !comunidadeAtiva;
   const corIconeComunidade = comunidadeAtiva ? corTema : "#9AA69D";
 
   return (
-    <View
-      style={[estilos.barra, { paddingBottom: Platform.OS === "ios" ? 5 : 3 }]}
-    >
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel="Ir para treinos"
-        onPress={() => onNavegar("Inicio")}
-        style={estilos.item}
-        activeOpacity={0.8}
-      >
-        <View
-          style={[
-            estilos.icone,
-            !comunidadeAtiva && {
-              backgroundColor: `${corTema}24`,
-              borderColor: `${corTema}90`,
-            },
-          ]}
-        >
-          <Text style={estilos.emoji}>🏋️</Text>
-        </View>
-        <Text style={[estilos.rotulo, !comunidadeAtiva && { color: corTema }]}>
-          Treinos
-        </Text>
-      </TouchableOpacity>
-      <View style={estilos.divisor} />
+    <View style={estilos.barra}>
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
-        onPress={() => {
-          if (!comunidadeAtiva) onNavegar("comunidade");
-        }}
+        onPress={() => onNavegar("comunidade")}
         style={estilos.item}
         activeOpacity={0.8}
       >
@@ -118,14 +86,42 @@ export default function NavegacaoInferior({
           Comunidade
         </Text>
       </TouchableOpacity>
+
+      <View style={estilos.divisor} />
+
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Ir para treinos"
+        onPress={() => onNavegar("Inicio")}
+        style={estilos.item}
+        activeOpacity={0.8}
+      >
+        <View
+          style={[
+            estilos.icone,
+            treinosAtivo && {
+              backgroundColor: `${corTema}24`,
+              borderColor: `${corTema}90`,
+            },
+          ]}
+        >
+          <Text style={estilos.emoji}>🏋️</Text>
+        </View>
+        <Text style={[estilos.rotulo, treinosAtivo && { color: corTema }]}>
+          Treinos
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 const estilos = StyleSheet.create({
   barra: {
-    minHeight: 54,
-    paddingTop: 4,
+    height: 50,
+    minHeight: 50,
+    maxHeight: 50,
+    paddingTop: 2,
+    paddingBottom: 2,
     paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
@@ -138,27 +134,40 @@ const estilos = StyleSheet.create({
   },
   item: {
     minWidth: 92,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
-    gap: 2,
+    gap: 1,
   },
   icone: {
-    minWidth: 38,
-    height: 27,
-    paddingHorizontal: 9,
-    borderRadius: 10,
+    minWidth: 34,
+    height: 25,
+    paddingHorizontal: 7,
+    borderRadius: 9,
     borderWidth: 1,
     borderColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
-  emoji: { fontSize: 18 },
-  iconeComunidadeFundo: { paddingHorizontal: 9 },
-  desenhoComunidade: { width: 25, height: 22, position: "relative" },
-  cabecaComunidade: { position: "absolute", borderRadius: 8 },
-  cabecaEsquerda: { width: 6, height: 6, left: 1, top: 4 },
-  cabecaCentral: { width: 7, height: 7, left: 9, top: 0 },
-  cabecaDireita: { width: 6, height: 6, right: 1, top: 4 },
+  emoji: {
+    fontSize: 21,
+    lineHeight: 23,
+  },
+  iconeComunidadeFundo: {
+    paddingHorizontal: 7,
+  },
+  desenhoComunidade: {
+    width: 27,
+    height: 23,
+    position: "relative",
+  },
+  cabecaComunidade: {
+    position: "absolute",
+    borderRadius: 8,
+  },
+  cabecaEsquerda: { width: 7, height: 7, left: 1, top: 4 },
+  cabecaCentral: { width: 8, height: 8, left: 9.5, top: 0 },
+  cabecaDireita: { width: 7, height: 7, right: 1, top: 4 },
   corpoComunidade: {
     position: "absolute",
     borderTopLeftRadius: 6,
@@ -167,8 +176,17 @@ const estilos = StyleSheet.create({
     borderBottomRightRadius: 2,
   },
   corpoEsquerdo: { width: 8, height: 8, left: 0, top: 12 },
-  corpoCentral: { width: 10, height: 11, left: 7.5, top: 9 },
+  corpoCentral: { width: 11, height: 12, left: 8, top: 9 },
   corpoDireito: { width: 8, height: 8, right: 0, top: 12 },
-  rotulo: { color: "#9AA69D", fontSize: 10, fontWeight: "700" },
-  divisor: { width: 1, height: 27, backgroundColor: "#303A33" },
+  rotulo: {
+    color: "#9AA69D",
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: "700",
+  },
+  divisor: {
+    width: 1,
+    height: 24,
+    backgroundColor: "#303A33",
+  },
 });
