@@ -1,5 +1,11 @@
 import React from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 type RotaInferior = "Inicio" | "comunidade";
 
@@ -18,7 +24,9 @@ export default function NavegacaoInferior({
   const corIconeComunidade = comunidadeAtiva ? corTema : "#9AA69D";
 
   return (
-    <View nativeID="navegacao-inferior" style={estilos.barra}>
+    <View
+      style={[estilos.barra, { paddingBottom: Platform.OS === "ios" ? 2 : 0 }]}
+    >
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
@@ -87,9 +95,7 @@ export default function NavegacaoInferior({
           Comunidade
         </Text>
       </TouchableOpacity>
-
       <View style={estilos.divisor} />
-
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Ir para treinos"
@@ -118,17 +124,14 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    height: 30,
-    minHeight: 30,
-    maxHeight: 30,
-    padding: 0,
-    paddingHorizontal: 6,
-    margin: 0,
+    height: 48,
+    minHeight: 48,
+    paddingTop: 2,
+    paddingHorizontal: 8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-evenly",
     gap: 0,
-    flexGrow: 0,
     flexShrink: 0,
     backgroundColor: "#111613",
     borderTopWidth: 1,
@@ -137,48 +140,38 @@ const estilos = StyleSheet.create({
   item: {
     flex: 1,
     minWidth: 0,
-    height: 29,
-    padding: 0,
-    margin: 0,
+    height: 45,
     alignItems: "center",
     justifyContent: "center",
     gap: 0,
   },
   icone: {
-    minWidth: 29,
-    height: 10,
-    paddingHorizontal: 4,
-    margin: 0,
-    borderRadius: 6,
+    minWidth: 34,
+    height: 24,
+    paddingHorizontal: 7,
+    borderRadius: 9,
     borderWidth: 1,
     borderColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
-  emoji: { fontSize: 14, lineHeight: 16 },
-  iconeComunidadeFundo: { paddingHorizontal: 4 },
-  desenhoComunidade: { width: 22, height: 16, position: "relative" },
+  emoji: { fontSize: 16 },
+  iconeComunidadeFundo: { paddingHorizontal: 9 },
+  desenhoComunidade: { width: 22, height: 19, position: "relative" },
   cabecaComunidade: { position: "absolute", borderRadius: 8 },
-  cabecaEsquerda: { width: 6, height: 6, left: 1, top: 2 },
-  cabecaCentral: { width: 7, height: 7, left: 7, top: 0 },
-  cabecaDireita: { width: 6, height: 6, right: 1, top: 2 },
+  cabecaEsquerda: { width: 6, height: 6, left: 1, top: 4 },
+  cabecaCentral: { width: 7, height: 7, left: 9, top: 0 },
+  cabecaDireita: { width: 6, height: 6, right: 1, top: 4 },
   corpoComunidade: {
     position: "absolute",
-    borderTopLeftRadius: 5,
-    borderTopRightRadius: 5,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
     borderBottomLeftRadius: 2,
     borderBottomRightRadius: 2,
   },
-  corpoEsquerdo: { width: 8, height: 6, left: 0, top: 9 },
-  corpoCentral: { width: 9, height: 8, left: 6, top: 8 },
-  corpoDireito: { width: 8, height: 6, right: 0, top: 9 },
-  rotulo: {
-    color: "#9AA69D",
-    fontSize: 8,
-    lineHeight: 9,
-    fontWeight: "700",
-    margin: 0,
-    padding: 0,
-  },
-  divisor: { width: 1, height: 16, backgroundColor: "#303A33" },
+  corpoEsquerdo: { width: 8, height: 8, left: 0, top: 12 },
+  corpoCentral: { width: 10, height: 11, left: 7.5, top: 9 },
+  corpoDireito: { width: 8, height: 8, right: 0, top: 12 },
+  rotulo: { color: "#9AA69D", fontSize: 9, fontWeight: "700" },
+  divisor: { width: 1, height: 27, backgroundColor: "#303A33" },
 });
