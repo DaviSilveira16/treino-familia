@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -91,6 +92,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
       : "",
   );
   const [salvandoDadosCalorias, setSalvandoDadosCalorias] = useState(false);
+  const [exportandoBackup, setExportandoBackup] = useState(false);
 
   function metadadosComPerfil(adicionais: Record<string, unknown> = {}) {
     const pesoInformado = pesoKg.trim()
@@ -197,6 +199,123 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
       );
     } finally {
       setSalvandoDadosCalorias(false);
+    }
+  }
+
+  async function exportarBackup() {
+    if (exportandoBackup) return;
+    setExportandoBackup(true);
+
+    try {
+      const { data: respostaUsuario, error: erroUsuario } =
+        await supabase.auth.getUser();
+      if (erroUsuario || !respostaUsuario.user) {
+        throw new Error(
+          "Entre novamente na sua conta antes de exportar os dados.",
+        );
+      }
+
+      const usuarioBackup = respostaUsuario.user;
+      const tabelas = [
+        "workout_plans",
+        "exercises",
+        "exercise_load_defaults",
+        "workout_sessions",
+        "workout_sets",
+        "cardio_activities",
+        "cardio_sessions",
+        "physical_measurements",
+      ] as const;
+      const dadosTabelas: Record<string, Record<string, unknown>[]> = {};
+      const tamanhoPagina = 500;
+
+      for (const tabela of tabelas) {
+        const linhas: Record<string, unknown>[] = [];
+        let inicio = 0;
+
+        while (true) {
+          const { data, error } = await supabase
+            .from(tabela)
+            .select("*")
+            .eq("user_id", usuarioBackup.id)
+            .range(inicio, inicio + tamanhoPagina - 1);
+
+          if (error) {
+            throw new Error(
+              `Não foi possível incluir ${tabela} no backup: ${error.message}`,
+            );
+          }
+
+          const pagina = (data ?? []) as unknown as Record<string, unknown>[];
+          linhas.push(...pagina);
+          if (pagina.length < tamanhoPagina) break;
+          inicio += tamanhoPagina;
+        }
+
+        dadosTabelas[tabela] = linhas;
+      }
+
+      const metadados = usuarioBackup.user_metadata ?? {};
+      const backup = {
+        aplicativo: "Treino Família",
+        formato: "treino-familia-backup",
+        versao: 1,
+        exportado_em: new Date().toISOString(),
+        usuario: {
+          id: usuarioBackup.id,
+          email: usuarioBackup.email ?? null,
+          perfil: {
+            nome: metadados.nome ?? null,
+            tema_cor: metadados.tema_cor ?? null,
+            foto_url: metadados.foto_url ?? null,
+            peso_kg: metadados.peso_kg ?? null,
+            altura_cm: metadados.altura_cm ?? null,
+            idade: metadados.idade ?? null,
+            sexo: metadados.sexo ?? null,
+          },
+        },
+        tabelas: dadosTabelas,
+        observacao:
+          "Este arquivo contém os registros tabulares e referências às fotos. Os arquivos de imagem armazenados no Supabase Storage não são incorporados ao JSON.",
+      };
+
+      const conteudo = JSON.stringify(backup, null, 2);
+      const dataArquivo = new Date().toISOString().slice(0, 10);
+      const nomeArquivo = `treino-familia-backup-${dataArquivo}.json`;
+
+      if (Platform.OS === "web" && typeof document !== "undefined") {
+        const arquivo = new Blob([conteudo], {
+          type: "application/json;charset=utf-8",
+        });
+        const url = URL.createObjectURL(arquivo);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = nomeArquivo;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+        window.alert(
+          "Backup exportado. Guarde o arquivo JSON em um local seguro. As imagens continuam armazenadas no Supabase.",
+        );
+      } else {
+        await Share.share({
+          title: "Backup Treino Família",
+          message: conteudo,
+        });
+      }
+    } catch (erro) {
+      const mensagem =
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível exportar os dados. Nenhum registro foi alterado.";
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        window.alert(`Erro ao exportar backup\n\n${mensagem}`);
+      } else {
+        Alert.alert("Erro ao exportar backup", mensagem);
+      }
+    } finally {
+      setExportandoBackup(false);
     }
   }
 
@@ -694,6 +813,40 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
               <Text style={estilos.textoBotaoPrincipal}>Alterar senha</Text>
             )}
           </TouchableOpacity>
+        </View>
+
+        <View style={estilos.cartao}>
+          <Text style={estilos.tituloSecao}>Backup dos seus dados</Text>
+          <Text style={estilos.descricaoSecao}>
+            Exporte uma cópia em JSON dos seus treinos, exercícios, cargas,
+            sessões, cardios e medições físicas. O arquivo inclui os caminhos
+            das fotos, mas não os arquivos de imagem. Guarde o backup em um
+            local privado e seguro.
+          </Text>
+          <TouchableOpacity
+            style={[
+              estilos.botaoPrincipal,
+              { backgroundColor: corTema },
+              exportandoBackup && estilos.botaoDesabilitado,
+            ]}
+            onPress={exportarBackup}
+            disabled={exportandoBackup}
+          >
+            {exportandoBackup ? (
+              <ActivityIndicator color="#101312" />
+            ) : (
+              <Text style={estilos.textoBotaoPrincipal}>
+                Exportar meus dados (.json)
+              </Text>
+            )}
+          </TouchableOpacity>
+          <Text
+            style={[estilos.descricaoSecao, { marginTop: 12, marginBottom: 0 }]}
+          >
+            A exportação não exclui nem altera registros. Ela não substitui o
+            backup automático do projeto Supabase e não inclui senhas ou tokens
+            de acesso.
+          </Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

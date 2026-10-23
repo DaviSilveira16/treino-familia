@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 
 import {
@@ -133,6 +133,11 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const [andaresSubidos, setAndaresSubidos] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+  const envioCardioEmAndamento = useRef(false);
+  const chaveCardioPendente = useRef<{
+    fingerprint: string;
+    chave: string;
+  } | null>(null);
   const [registroParaExcluir, setRegistroParaExcluir] = useState<{
     tipo: "treino" | "cardio";
     id: string;
@@ -681,6 +686,8 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       return;
     }
 
+    if (envioCardioEmAndamento.current) return;
+    envioCardioEmAndamento.current = true;
     setSalvando(true);
     try {
       const [anoSelecionado, mesSelecionado, diaSelecionado] = dataSelecionada
@@ -695,25 +702,48 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         0,
         0,
       ).toISOString();
-      const { error } = await supabase.from("cardio_sessions").insert({
+      const distanciaSalva =
+        distancia !== null && Number.isFinite(distancia) ? distancia : null;
+      const inclinacaoSalva =
+        categoria === "esteira" ? (inclinacao ?? 0) : null;
+      const andaresSalvos =
+        categoria === "escadas" && andares !== null && Number.isFinite(andares)
+          ? andares
+          : null;
+      const fingerprint = JSON.stringify({
+        usuarioId,
+        dataSelecionada,
+        activityId: modelo.id,
+        duracao,
+        distancia: distanciaSalva,
+        intensidade: intensidadeCardio,
+        inclinacao: inclinacaoSalva,
+        andares: andaresSalvos,
+      });
+      if (
+        !chaveCardioPendente.current ||
+        chaveCardioPendente.current.fingerprint !== fingerprint
+      ) {
+        chaveCardioPendente.current = {
+          fingerprint,
+          chave: `cardio-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`,
+        };
+      }
+      const chaveOperacao = chaveCardioPendente.current.chave;
+      const registro = {
         user_id: usuarioId,
+        client_request_id: chaveOperacao,
         activity_id: modelo.id,
         activity_name: modelo.nome,
         activity_type: modelo.tipo,
         started_at: dataRegistro,
         duration_minutes: duracao,
-        distance_km:
-          distancia !== null && Number.isFinite(distancia) ? distancia : null,
+        distance_km: distanciaSalva,
         calories: estimativa.caloriasAtivas,
         active_calories: estimativa.caloriasAtivas,
         intensity: intensidadeCardio,
-        incline_percent: categoria === "esteira" ? (inclinacao ?? 0) : null,
-        floors_up:
-          categoria === "escadas" &&
-          andares !== null &&
-          Number.isFinite(andares)
-            ? andares
-            : null,
+        incline_percent: inclinacaoSalva,
+        floors_up: andaresSalvos,
         heart_rate_avg: null,
         speed_kmh: estimativa.velocidadeKmh,
         weight_kg_snapshot: pesoUsuario,
@@ -722,8 +752,22 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         sex_snapshot: sexoUsuario,
         met_value: estimativa.met,
         notes: modelo.observacoes,
-      });
-      if (error) throw error;
+      };
+      const { error } = await supabase.from("cardio_sessions").insert(registro);
+      if (error) {
+        if (error.code === "23505") {
+          const existente = await supabase
+            .from("cardio_sessions")
+            .select("id")
+            .eq("user_id", usuarioId)
+            .eq("client_request_id", chaveOperacao)
+            .maybeSingle();
+          if (existente.error || !existente.data) throw error;
+        } else {
+          throw error;
+        }
+      }
+      chaveCardioPendente.current = null;
       setCardioSelecionado("");
       setDuracaoCardio("");
       setDistanciaCardio("");
@@ -737,11 +781,10 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     } catch (erro) {
       Alert.alert(
         "Erro ao registrar cardio",
-        erro instanceof Error
-          ? erro.message
-          : "Não foi possível salvar o cardio.",
+        `${erro instanceof Error ? erro.message : "Não foi possível salvar o cardio."} Se o erro mencionar client_request_id, execute a migração SQL de prevenção de envios duplicados e tente novamente.`,
       );
     } finally {
+      envioCardioEmAndamento.current = false;
       setSalvando(false);
     }
   }
