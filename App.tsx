@@ -140,6 +140,44 @@ export default function App() {
   const [corTema, setCorTema] = useState(COR_PADRAO);
   const [rotaAtual, setRotaAtual] = useState<keyof Rotas>("Inicio");
 
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof document === "undefined") return;
+
+    const raiz = document.getElementById("root");
+    if (!raiz) return;
+
+    const estilosOriginais = {
+      alturaDocumento: document.documentElement.style.height,
+      alturaCorpo: document.body.style.height,
+      alturaMinimaCorpo: document.body.style.minHeight,
+      margemCorpo: document.body.style.margin,
+      fundoCorpo: document.body.style.backgroundColor,
+      alturaRaiz: raiz.style.height,
+      alturaMinimaRaiz: raiz.style.minHeight,
+      fundoRaiz: raiz.style.backgroundColor,
+    };
+
+    document.documentElement.style.height = "100%";
+    document.body.style.height = "100dvh";
+    document.body.style.minHeight = "100dvh";
+    document.body.style.margin = "0";
+    document.body.style.backgroundColor = "#101312";
+    raiz.style.height = "100dvh";
+    raiz.style.minHeight = "100dvh";
+    raiz.style.backgroundColor = "#101312";
+
+    return () => {
+      document.documentElement.style.height = estilosOriginais.alturaDocumento;
+      document.body.style.height = estilosOriginais.alturaCorpo;
+      document.body.style.minHeight = estilosOriginais.alturaMinimaCorpo;
+      document.body.style.margin = estilosOriginais.margemCorpo;
+      document.body.style.backgroundColor = estilosOriginais.fundoCorpo;
+      raiz.style.height = estilosOriginais.alturaRaiz;
+      raiz.style.minHeight = estilosOriginais.alturaMinimaRaiz;
+      raiz.style.backgroundColor = estilosOriginais.fundoRaiz;
+    };
+  }, []);
+
   function atualizarRotaAtual() {
     const rota = referenciaNavegacao.getCurrentRoute()?.name;
     if (rota) {

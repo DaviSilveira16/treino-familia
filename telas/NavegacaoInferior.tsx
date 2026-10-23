@@ -21,10 +21,11 @@ export default function NavegacaoInferior({
   onNavegar,
 }: Props) {
   const comunidadeAtiva = rotaAtual === "comunidade";
+  const corIconeComunidade = comunidadeAtiva ? corTema : "#9AA69D";
 
   return (
     <View
-      style={[estilos.barra, { paddingBottom: Platform.OS === "ios" ? 12 : 7 }]}
+      style={[estilos.barra, { paddingBottom: Platform.OS === "ios" ? 5 : 3 }]}
     >
       <TouchableOpacity
         accessibilityRole="button"
@@ -61,13 +62,57 @@ export default function NavegacaoInferior({
         <View
           style={[
             estilos.icone,
+            estilos.iconeComunidadeFundo,
             comunidadeAtiva && {
-              backgroundColor: `${corTema}24`,
+              backgroundColor: `${corTema}18`,
               borderColor: `${corTema}90`,
             },
           ]}
         >
-          <Text style={estilos.emoji}>👥</Text>
+          <View style={estilos.desenhoComunidade}>
+            <View
+              style={[
+                estilos.cabecaComunidade,
+                estilos.cabecaEsquerda,
+                { backgroundColor: corIconeComunidade },
+              ]}
+            />
+            <View
+              style={[
+                estilos.cabecaComunidade,
+                estilos.cabecaCentral,
+                { backgroundColor: corIconeComunidade },
+              ]}
+            />
+            <View
+              style={[
+                estilos.cabecaComunidade,
+                estilos.cabecaDireita,
+                { backgroundColor: corIconeComunidade },
+              ]}
+            />
+            <View
+              style={[
+                estilos.corpoComunidade,
+                estilos.corpoEsquerdo,
+                { backgroundColor: corIconeComunidade },
+              ]}
+            />
+            <View
+              style={[
+                estilos.corpoComunidade,
+                estilos.corpoCentral,
+                { backgroundColor: corIconeComunidade },
+              ]}
+            />
+            <View
+              style={[
+                estilos.corpoComunidade,
+                estilos.corpoDireito,
+                { backgroundColor: corIconeComunidade },
+              ]}
+            />
+          </View>
         </View>
         <Text style={[estilos.rotulo, comunidadeAtiva && { color: corTema }]}>
           Comunidade
@@ -79,34 +124,51 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    minHeight: 66,
-    paddingTop: 7,
-    paddingHorizontal: 24,
+    minHeight: 54,
+    paddingTop: 4,
+    paddingHorizontal: 16,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 30,
+    gap: 22,
+    flexShrink: 0,
     backgroundColor: "#111613",
     borderTopWidth: 1,
     borderTopColor: "#303A33",
   },
   item: {
-    minWidth: 100,
+    minWidth: 92,
     alignItems: "center",
     justifyContent: "center",
-    gap: 3,
+    gap: 2,
   },
   icone: {
-    minWidth: 46,
-    height: 34,
-    paddingHorizontal: 13,
-    borderRadius: 12,
+    minWidth: 38,
+    height: 27,
+    paddingHorizontal: 9,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
-  emoji: { fontSize: 20 },
-  rotulo: { color: "#9AA69D", fontSize: 11, fontWeight: "700" },
-  divisor: { width: 1, height: 35, backgroundColor: "#303A33" },
+  emoji: { fontSize: 18 },
+  iconeComunidadeFundo: { paddingHorizontal: 9 },
+  desenhoComunidade: { width: 25, height: 22, position: "relative" },
+  cabecaComunidade: { position: "absolute", borderRadius: 8 },
+  cabecaEsquerda: { width: 6, height: 6, left: 1, top: 4 },
+  cabecaCentral: { width: 7, height: 7, left: 9, top: 0 },
+  cabecaDireita: { width: 6, height: 6, right: 1, top: 4 },
+  corpoComunidade: {
+    position: "absolute",
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 2,
+  },
+  corpoEsquerdo: { width: 8, height: 8, left: 0, top: 12 },
+  corpoCentral: { width: 10, height: 11, left: 7.5, top: 9 },
+  corpoDireito: { width: 8, height: 8, right: 0, top: 12 },
+  rotulo: { color: "#9AA69D", fontSize: 10, fontWeight: "700" },
+  divisor: { width: 1, height: 27, backgroundColor: "#303A33" },
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -75,6 +75,9 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [nomeUsuario, setNomeUsuario] = useState("Atleta");
   const [avatarUsuario, setAvatarUsuario] = useState<string | null>(null);
   const [familia, setFamilia] = useState<Familia | null>(null);
+  const [familias, setFamilias] = useState<Familia[]>([]);
+  const [familiaAtivaId, setFamiliaAtivaId] = useState<string | null>(null);
+  const familiaAtivaIdRef = useRef<string | null>(null);
   const [nomeFamilia, setNomeFamilia] = useState("Minha família");
   const [codigoConvite, setCodigoConvite] = useState("");
   const [criandoFamilia, setCriandoFamilia] = useState(false);
@@ -92,7 +95,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [planoSelecionado, setPlanoSelecionado] = useState("");
   const [publicando, setPublicando] = useState(false);
 
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async (idFamiliaSolicitada?: string) => {
     setCarregando(true);
     setErro("");
     try {
@@ -119,13 +122,22 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
             : null,
       );
 
-      const { data: associado, error: erroAssociacao } = await supabase
+      const { data: associacoes, error: erroAssociacao } = await supabase
         .from("family_members")
         .select("family_id")
-        .eq("user_id", usuario.id)
-        .maybeSingle();
+        .eq("user_id", usuario.id);
       if (erroAssociacao) throw erroAssociacao;
-      if (!associado) {
+
+      const idsFamilias = Array.from(
+        new Set(
+          (associacoes ?? []).map((item) => item.family_id).filter(Boolean),
+        ),
+      ) as string[];
+
+      if (idsFamilias.length === 0) {
+        familiaAtivaIdRef.current = null;
+        setFamiliaAtivaId(null);
+        setFamilias([]);
         setFamilia(null);
         setMembros([]);
         setPublicacoes([]);
@@ -133,19 +145,37 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         return;
       }
 
-      const { data: familiaAtual, error: erroFamilia } = await supabase
+      const { data: listaFamilias, error: erroListaFamilias } = await supabase
         .from("families")
         .select("id, name, invite_code")
-        .eq("id", associado.family_id)
-        .single();
-      if (erroFamilia || !familiaAtual)
-        throw (
-          erroFamilia ?? new Error("Não foi possível carregar sua família.")
-        );
-      setFamilia(familiaAtual as Familia);
+        .in("id", idsFamilias)
+        .order("name", { ascending: true });
+      if (erroListaFamilias) throw erroListaFamilias;
+      const familiasDisponiveis = (listaFamilias ?? []) as Familia[];
+      if (familiasDisponiveis.length === 0) {
+        familiaAtivaIdRef.current = null;
+        setFamiliaAtivaId(null);
+        setFamilias([]);
+        setFamilia(null);
+        setMembros([]);
+        setPublicacoes([]);
+        setPlanos([]);
+        return;
+      }
+
+      const idPreferido = idFamiliaSolicitada ?? familiaAtivaIdRef.current;
+      const familiaAtual =
+        familiasDisponiveis.find((item) => item.id === idPreferido) ??
+        familiasDisponiveis[0];
+      familiaAtivaIdRef.current = familiaAtual.id;
+      setFamiliaAtivaId(familiaAtual.id);
+      setFamilias(familiasDisponiveis);
+      setFamilia(familiaAtual);
 
       const [resumo, feed, listaPlanos] = await Promise.all([
-        supabase.rpc("resumo_painel_familia"),
+        supabase.rpc("resumo_painel_familia_por_id", {
+          p_family_id: familiaAtual.id,
+        }),
         supabase
           .from("community_posts")
           .select(
@@ -237,11 +267,22 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         throw new Error(
           "Não foi possível encontrar uma família com esse código.",
         );
+      const idFamiliaEntrou =
+        typeof data === "string"
+          ? data
+          : Array.isArray(data)
+            ? (data[0]?.family_id ?? data[0]?.id)
+            : data && typeof data === "object"
+              ? ((data as { family_id?: string; id?: string }).family_id ??
+                (data as { id?: string }).id)
+              : undefined;
       setCodigoConvite("");
-      await carregar();
+      await carregar(
+        typeof idFamiliaEntrou === "string" ? idFamiliaEntrou : undefined,
+      );
       avisar(
         "Você entrou na família",
-        "Agora você pode acompanhar o progresso e compartilhar publicações com o grupo.",
+        "Agora você pode alternar entre suas famílias e compartilhar publicações com o grupo selecionado.",
       );
     } catch (problema) {
       avisar(
@@ -509,6 +550,46 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           <Text style={{ color: corTema, fontSize: 22 }}>↻</Text>
         </TouchableOpacity>
       </View>
+      {familias.length > 1 ? (
+        <View style={estilos.cartaoFamilias}>
+          <Text style={estilos.tituloCartao}>Minhas famílias</Text>
+          <View style={estilos.gradeFamilias}>
+            {familias.map((item) => {
+              const selecionada = item.id === familiaAtivaId;
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: selecionada }}
+                  onPress={() => {
+                    if (item.id !== familiaAtivaId) void carregar(item.id);
+                  }}
+                  style={[
+                    estilos.opcaoFamilia,
+                    selecionada && {
+                      borderColor: corTema,
+                      backgroundColor: `${corTema}18`,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      estilos.nomeFamilia,
+                      selecionada && { color: corTema },
+                    ]}
+                  >
+                    {selecionada ? "✓ " : ""}
+                    {item.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={estilos.secundario}>
+            Selecione o grupo cujo progresso e publicações deseja visualizar.
+          </Text>
+        </View>
+      ) : null}
       <View style={estilos.cartaoCodigo}>
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={estilos.rotulo}>CÓDIGO DE CONVITE</Text>
@@ -519,6 +600,36 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
             Toque e segure o código para copiá-lo e enviar aos familiares.
           </Text>
         </View>
+      </View>
+      <View style={estilos.cartaoEntrarFamilia}>
+        <Text style={estilos.tituloCartao}>Entrar em outra família</Text>
+        <Text style={estilos.secundario}>
+          Use o código de convite de outro grupo. Você poderá alternar entre as
+          famílias das quais participa.
+        </Text>
+        <TextInput
+          value={codigoConvite}
+          onChangeText={setCodigoConvite}
+          placeholder="Código de convite"
+          placeholderTextColor="#758178"
+          style={estilos.input}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          maxLength={16}
+        />
+        <TouchableOpacity
+          onPress={entrarNaFamilia}
+          disabled={entrandoFamilia}
+          style={[estilos.botaoSecundario, { borderColor: corTema }]}
+        >
+          {entrandoFamilia ? (
+            <ActivityIndicator color={corTema} />
+          ) : (
+            <Text style={{ color: corTema, fontWeight: "800" }}>
+              Entrar com código
+            </Text>
+          )}
+        </TouchableOpacity>
       </View>
       <Text style={estilos.tituloSecao}>Progresso da família</Text>
       {membros.map((membro) => (
@@ -775,7 +886,12 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
 
 const estilos = StyleSheet.create({
   tela: { flex: 1, backgroundColor: "#101312" },
-  conteudo: { padding: 18, paddingTop: 24, paddingBottom: 28, gap: 14 },
+  conteudo: {
+    paddingHorizontal: 18,
+    paddingTop: 24,
+    paddingBottom: 14,
+    gap: 14,
+  },
   centro: {
     flex: 1,
     justifyContent: "center",
@@ -844,6 +960,33 @@ const estilos = StyleSheet.create({
     borderColor: "#2F4735",
     borderRadius: 15,
     padding: 15,
+    gap: 10,
+  },
+  cartaoFamilias: {
+    backgroundColor: "#171D19",
+    borderWidth: 1,
+    borderColor: "#2C3730",
+    borderRadius: 15,
+    padding: 14,
+    gap: 10,
+  },
+  gradeFamilias: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  opcaoFamilia: {
+    maxWidth: "100%",
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#354139",
+    backgroundColor: "#111713",
+  },
+  nomeFamilia: { color: "#D6DED8", fontSize: 12, fontWeight: "800" },
+  cartaoEntrarFamilia: {
+    backgroundColor: "#171D19",
+    borderWidth: 1,
+    borderColor: "#2C3730",
+    borderRadius: 15,
+    padding: 14,
     gap: 10,
   },
   rotulo: {
