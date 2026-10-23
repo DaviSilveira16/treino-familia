@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   BackHandler,
   AppState,
   Image,
@@ -17,6 +16,7 @@ import {
   View,
 } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
+import { Alert } from "./servicos/alerta";
 import {
   avisarAtualizacao,
   verificarAtualizacao,
@@ -141,56 +141,6 @@ export default function App() {
   const [rotaAtual, setRotaAtual] = useState<keyof Rotas>("Inicio");
   const assinaturaHistoricoWeb = useRef("");
   const ignorarProximoHistoricoWeb = useRef(false);
-
-  useEffect(() => {
-    if (Platform.OS !== "web" || typeof document === "undefined") return;
-
-    const raiz = document.getElementById("root");
-    if (!raiz) return;
-
-    const estilosOriginais = {
-      alturaDocumento: document.documentElement.style.height,
-      alturaCorpo: document.body.style.height,
-      alturaMinimaCorpo: document.body.style.minHeight,
-      margemCorpo: document.body.style.margin,
-      overflowCorpo: document.body.style.overflow,
-      fundoCorpo: document.body.style.backgroundColor,
-      alturaRaiz: raiz.style.height,
-      alturaMinimaRaiz: raiz.style.minHeight,
-      larguraRaiz: raiz.style.width,
-      overflowRaiz: raiz.style.overflow,
-      fundoRaiz: raiz.style.backgroundColor,
-    };
-
-    document.documentElement.style.height = "100%";
-    // O body e o #root já usam position: fixed com inset: 0 no index.html.
-    // Deixamos a altura automática para não ultrapassar o viewport do iPhone
-    // quando o PWA é aberto na Tela de Início e cortar a navegação inferior.
-    document.body.style.height = "auto";
-    document.body.style.minHeight = "0";
-    document.body.style.margin = "0";
-    document.body.style.overflow = "hidden";
-    document.body.style.backgroundColor = "#101312";
-    raiz.style.height = "auto";
-    raiz.style.minHeight = "0";
-    raiz.style.width = "100%";
-    raiz.style.overflow = "hidden";
-    raiz.style.backgroundColor = "#101312";
-
-    return () => {
-      document.documentElement.style.height = estilosOriginais.alturaDocumento;
-      document.body.style.height = estilosOriginais.alturaCorpo;
-      document.body.style.minHeight = estilosOriginais.alturaMinimaCorpo;
-      document.body.style.margin = estilosOriginais.margemCorpo;
-      document.body.style.overflow = estilosOriginais.overflowCorpo;
-      document.body.style.backgroundColor = estilosOriginais.fundoCorpo;
-      raiz.style.height = estilosOriginais.alturaRaiz;
-      raiz.style.minHeight = estilosOriginais.alturaMinimaRaiz;
-      raiz.style.width = estilosOriginais.larguraRaiz;
-      raiz.style.overflow = estilosOriginais.overflowRaiz;
-      raiz.style.backgroundColor = estilosOriginais.fundoRaiz;
-    };
-  }, []);
 
   function atualizarRotaAtual() {
     const rota = referenciaNavegacao.getCurrentRoute();
@@ -868,7 +818,10 @@ export default function App() {
       onReady={atualizarRotaAtual}
       onStateChange={atualizarRotaAtual}
     >
-      <View style={{ flex: 1, backgroundColor: "#101312" }}>
+      <View
+        nativeID="app-conteudo"
+        style={{ flex: 1, minHeight: 0, backgroundColor: "#101312" }}
+      >
         <StatusBar hidden={true} barStyle="light-content" />
 
         <Pilha.Navigator
@@ -1340,7 +1293,7 @@ const estilos = StyleSheet.create({
   },
   conteudoHome: {
     paddingHorizontal: 22,
-    paddingTop: 64,
+    paddingTop: Platform.OS === "web" ? 8 : 64,
     paddingBottom: 30,
   },
   topoHome: {

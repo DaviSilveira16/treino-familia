@@ -25,6 +25,7 @@ export default function NavegacaoInferior({
 
   return (
     <View
+      nativeID="navegacao-inferior"
       style={[estilos.barra, { paddingBottom: Platform.OS === "ios" ? 2 : 0 }]}
     >
       <TouchableOpacity

@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
+  Platform,
   PanResponder,
   ScrollView,
   StatusBar,
@@ -589,6 +590,7 @@ const estilos = StyleSheet.create({
   container: { flex: 1, minHeight: 0, backgroundColor: "#101312" },
   conteudo: {
     padding: 20,
+    paddingTop: Platform.OS === "web" ? 8 : 20,
     paddingBottom: 40,
     gap: 14,
     maxWidth: 900,

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +9,7 @@ import {
   View,
   Platform,
 } from "react-native";
+import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
 
 const estiloRolagemWeb =
@@ -69,6 +69,14 @@ function formatarData(valor: string) {
   return data.toLocaleDateString("pt-BR");
 }
 
+function dataHojeLocal(): string {
+  const data = new Date();
+  const ano = data.getFullYear();
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  const dia = String(data.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
 function formatarValor(valor: number | null, unidade: string) {
   if (valor === null || valor === undefined) return "—";
   return `${valor.toLocaleString("pt-BR", {
@@ -86,9 +94,7 @@ export default function EvolucaoFisica({
   const [usuarioId, setUsuarioId] = useState<string | null>(null);
   const [medicoes, setMedicoes] = useState<Medicao[]>([]);
   const [campos, setCampos] = useState<CamposMedicao>(camposVazios);
-  const [dataMedicao, setDataMedicao] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [dataMedicao, setDataMedicao] = useState(dataHojeLocal());
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
@@ -257,7 +263,7 @@ export default function EvolucaoFisica({
       }
 
       setCampos(camposVazios);
-      setDataMedicao(new Date().toISOString().slice(0, 10));
+      setDataMedicao(dataHojeLocal());
 
       await carregarMedicoes(usuarioId);
 
@@ -530,7 +536,12 @@ export default function EvolucaoFisica({
 
 const styles = StyleSheet.create({
   tela: { flex: 1, backgroundColor: "#101312" },
-  conteudo: { padding: 20, paddingBottom: 40, gap: 16 },
+  conteudo: {
+    padding: 20,
+    paddingTop: Platform.OS === "web" ? 8 : 20,
+    paddingBottom: 40,
+    gap: 16,
+  },
   carregando: {
     flex: 1,
     backgroundColor: "#101312",

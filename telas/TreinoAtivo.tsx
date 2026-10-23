@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   ScrollView,
   StatusBar,
@@ -11,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
 import {
   estimarCaloriasAtivasTreino,
@@ -932,6 +932,7 @@ const estilos = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#101312" },
   conteudo: {
     padding: 20,
+    paddingTop: Platform.OS === "web" ? 8 : 20,
     paddingBottom: 44,
     gap: 14,
     maxWidth: 820,

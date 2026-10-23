@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
   View,
   Platform,
 } from "react-native";
+import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../supabase";
 
@@ -1310,7 +1310,11 @@ const criarEstilos = (corTema: string) =>
       alignItems: "center",
       padding: 24,
     },
-    conteudo: { paddingHorizontal: 22, paddingTop: 48, paddingBottom: 40 },
+    conteudo: {
+      paddingHorizontal: 22,
+      paddingTop: Platform.OS === "web" ? 8 : 48,
+      paddingBottom: 40,
+    },
     botaoVoltar: {
       alignSelf: "flex-start",
       paddingVertical: 8,

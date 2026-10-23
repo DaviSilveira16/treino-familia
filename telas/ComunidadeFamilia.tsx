@@ -1,7 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Platform,
   ScrollView,
@@ -12,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../supabase";
@@ -1048,7 +1048,7 @@ const estilos = StyleSheet.create({
   tela: { flex: 1, backgroundColor: "#101312" },
   conteudo: {
     paddingHorizontal: 18,
-    paddingTop: 24,
+    paddingTop: Platform.OS === "web" ? 8 : 24,
     paddingBottom: 14,
     gap: 14,
   },

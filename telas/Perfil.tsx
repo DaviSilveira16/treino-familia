@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -12,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
@@ -770,7 +770,8 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
       };
 
       const conteudo = JSON.stringify(backup, null, 2);
-      const dataArquivo = new Date().toISOString().slice(0, 10);
+      const agoraLocal = new Date();
+      const dataArquivo = `${agoraLocal.getFullYear()}-${String(agoraLocal.getMonth() + 1).padStart(2, "0")}-${String(agoraLocal.getDate()).padStart(2, "0")}`;
       const nomeArquivo = `treino-familia-backup-${dataArquivo}.json`;
       if (Platform.OS === "web" && typeof document !== "undefined") {
         const arquivo = new Blob([conteudo], {
@@ -1502,7 +1503,7 @@ const estilos = StyleSheet.create({
   },
   conteudo: {
     paddingHorizontal: 22,
-    paddingTop: 58,
+    paddingTop: Platform.OS === "web" ? 8 : 58,
     paddingBottom: 36,
   },
   botaoVoltar: {

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -11,6 +10,7 @@ import {
   View,
   Platform,
 } from "react-native";
+import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
 const estiloRolagemWeb =
   Platform.OS === "web"
@@ -984,7 +984,7 @@ const estilos = StyleSheet.create({
   },
   conteudo: {
     paddingHorizontal: 22,
-    paddingTop: 54,
+    paddingTop: Platform.OS === "web" ? 8 : 54,
     paddingBottom: 36,
   },
   botaoVoltar: {

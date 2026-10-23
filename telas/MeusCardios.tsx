@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
 import { categoriaDoCardio } from "../servicos/caloriasCardio";
 
@@ -355,7 +356,11 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
 
 const estilos = StyleSheet.create({
   container: { flex: 1, minHeight: 0, backgroundColor: "#101312" },
-  conteudo: { padding: 22, paddingBottom: 44 },
+  conteudo: {
+    padding: 22,
+    paddingTop: Platform.OS === "web" ? 8 : 22,
+    paddingBottom: 44,
+  },
   voltar: { alignSelf: "flex-start", paddingVertical: 8, marginBottom: 18 },
   marca: { fontSize: 12, fontWeight: "800", letterSpacing: 2, marginBottom: 8 },
   titulo: {

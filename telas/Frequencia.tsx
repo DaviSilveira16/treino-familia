@@ -1,9 +1,8 @@
 import React, { useCallback, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
-
 import {
   ActivityIndicator,
-  Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +11,7 @@ import {
   View,
 } from "react-native";
 
+import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
 import {
   categoriaDoCardio,
@@ -1503,6 +1503,7 @@ const estilos = StyleSheet.create({
   },
   conteudo: {
     padding: 22,
+    paddingTop: Platform.OS === "web" ? 8 : 22,
     paddingBottom: 44,
   },
   centralizado: {
