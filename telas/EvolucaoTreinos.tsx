@@ -6,6 +6,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -62,114 +63,113 @@ export default function EvolucaoTreinos({
     Record<string, { nome: string; pontos: Ponto[] }>
   >({});
   const [exercicioSelecionado, setExercicioSelecionado] = useState("");
+  const [buscaExercicio, setBuscaExercicio] = useState("");
+  const selecionadoRef = useRef(exercicioSelecionado);
+  selecionadoRef.current = exercicioSelecionado;
 
-  const carregar = useCallback(
-    async (atualizacao = false) => {
-      if (atualizacao) setAtualizando(true);
-      else setCarregando(true);
-      setErro("");
-      try {
-        const { data: usuarioData, error: erroUsuario } =
-          await supabase.auth.getUser();
-        if (erroUsuario || !usuarioData.user)
-          throw new Error("Entre novamente na sua conta.");
-        const idUsuario = usuarioData.user.id;
-        const [resultadoSessoes, resultadoSeries] = await Promise.all([
-          supabase
-            .from("workout_sessions")
-            .select("id, started_at, status")
-            .eq("user_id", idUsuario)
-            .order("started_at", { ascending: true }),
-          supabase
-            .from("workout_sets")
-            .select(
-              "session_id, exercise_id, exercise_name, set_number, reps, weight_kg",
-            )
-            .eq("user_id", idUsuario)
-            .order("set_number", { ascending: true }),
-        ]);
-        if (resultadoSessoes.error) throw resultadoSessoes.error;
-        if (resultadoSeries.error) throw resultadoSeries.error;
-        const sessoes = (resultadoSessoes.data ?? []) as Sessao[];
-        const idsValidos = new Set(
-          sessoes
-            .filter((sessao) => sessao.status !== "em_andamento")
-            .map((sessao) => sessao.id),
+  const carregar = useCallback(async (atualizacao = false) => {
+    if (atualizacao) setAtualizando(true);
+    else setCarregando(true);
+    setErro("");
+    try {
+      const { data: usuarioData, error: erroUsuario } =
+        await supabase.auth.getUser();
+      if (erroUsuario || !usuarioData.user)
+        throw new Error("Entre novamente na sua conta.");
+      const idUsuario = usuarioData.user.id;
+      const [resultadoSessoes, resultadoSeries] = await Promise.all([
+        supabase
+          .from("workout_sessions")
+          .select("id, started_at, status")
+          .eq("user_id", idUsuario)
+          .order("started_at", { ascending: true }),
+        supabase
+          .from("workout_sets")
+          .select(
+            "session_id, exercise_id, exercise_name, set_number, reps, weight_kg",
+          )
+          .eq("user_id", idUsuario)
+          .order("set_number", { ascending: true }),
+      ]);
+      if (resultadoSessoes.error) throw resultadoSessoes.error;
+      if (resultadoSeries.error) throw resultadoSeries.error;
+      const sessoes = (resultadoSessoes.data ?? []) as Sessao[];
+      const idsValidos = new Set(
+        sessoes
+          .filter((sessao) => sessao.status !== "em_andamento")
+          .map((sessao) => sessao.id),
+      );
+      const sessoesPorId = new Map(
+        sessoes
+          .filter((sessao) => idsValidos.has(sessao.id))
+          .map((sessao) => [sessao.id, sessao]),
+      );
+      const grupos = new Map<
+        string,
+        { nome: string; sessao: Sessao; series: Serie[] }
+      >();
+      for (const serie of (resultadoSeries.data ?? []) as Serie[]) {
+        const sessao = sessoesPorId.get(serie.session_id);
+        if (!sessao) continue;
+        const nome = serie.exercise_name?.trim() || "Exercício sem nome";
+        const chave = normalizar(nome);
+        const chaveGrupo = `${chave}::${sessao.id}`;
+        const grupo = grupos.get(chaveGrupo) ?? { nome, sessao, series: [] };
+        grupo.series.push(serie);
+        grupos.set(chaveGrupo, grupo);
+      }
+      const porNome: Record<string, { nome: string; pontos: Ponto[] }> = {};
+      for (const grupo of grupos.values()) {
+        const chave = normalizar(grupo.nome);
+        const cargaMaxima = Math.max(
+          ...grupo.series.map((serie) => Number(serie.weight_kg) || 0),
         );
-        const sessoesPorId = new Map(
-          sessoes
-            .filter((sessao) => idsValidos.has(sessao.id))
-            .map((sessao) => [sessao.id, sessao]),
-        );
-        const grupos = new Map<
-          string,
-          { nome: string; sessao: Sessao; series: Serie[] }
-        >();
-        for (const serie of (resultadoSeries.data ?? []) as Serie[]) {
-          const sessao = sessoesPorId.get(serie.session_id);
-          if (!sessao) continue;
-          const nome = serie.exercise_name?.trim() || "Exercício sem nome";
-          const chave = normalizar(nome);
-          const chaveGrupo = `${chave}::${sessao.id}`;
-          const grupo = grupos.get(chaveGrupo) ?? { nome, sessao, series: [] };
-          grupo.series.push(serie);
-          grupos.set(chaveGrupo, grupo);
-        }
-        const porNome: Record<string, { nome: string; pontos: Ponto[] }> = {};
-        for (const grupo of grupos.values()) {
-          const chave = normalizar(grupo.nome);
-          const cargaMaxima = Math.max(
-            ...grupo.series.map((serie) => Number(serie.weight_kg) || 0),
-          );
-          const repsNaMaiorCarga = grupo.series
-            .filter((serie) => Number(serie.weight_kg) === cargaMaxima)
-            .reduce(
-              (maior, serie) => Math.max(maior, Number(serie.reps) || 0),
-              0,
-            );
-          const volume = grupo.series.reduce(
-            (total, serie) =>
-              total +
-              (Number(serie.weight_kg) || 0) * (Number(serie.reps) || 0),
+        const repsNaMaiorCarga = grupo.series
+          .filter((serie) => Number(serie.weight_kg) === cargaMaxima)
+          .reduce(
+            (maior, serie) => Math.max(maior, Number(serie.reps) || 0),
             0,
           );
-          const ponto: Ponto = {
-            id: grupo.sessao.id,
-            data: grupo.sessao.started_at,
-            cargaMaxima,
-            repsNaMaiorCarga,
-            volume,
-            quantidadeSeries: grupo.series.length,
-          };
-          if (!porNome[chave])
-            porNome[chave] = { nome: grupo.nome, pontos: [] };
-          porNome[chave].pontos.push(ponto);
-        }
-        for (const item of Object.values(porNome))
-          item.pontos.sort(
-            (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime(),
-          );
-        const atual =
-          exercicioSelecionado && porNome[exercicioSelecionado]
-            ? exercicioSelecionado
-            : (Object.keys(porNome).sort((a, b) =>
-                porNome[a].nome.localeCompare(porNome[b].nome, "pt-BR"),
-              )[0] ?? "");
-        setPontosPorExercicio(porNome);
-        setExercicioSelecionado(atual);
-      } catch (e) {
-        setErro(
-          e instanceof Error
-            ? e.message
-            : "Não foi possível carregar a evolução dos exercícios.",
+        const volume = grupo.series.reduce(
+          (total, serie) =>
+            total + (Number(serie.weight_kg) || 0) * (Number(serie.reps) || 0),
+          0,
         );
-      } finally {
-        setCarregando(false);
-        setAtualizando(false);
+        const ponto: Ponto = {
+          id: grupo.sessao.id,
+          data: grupo.sessao.started_at,
+          cargaMaxima,
+          repsNaMaiorCarga,
+          volume,
+          quantidadeSeries: grupo.series.length,
+        };
+        if (!porNome[chave]) porNome[chave] = { nome: grupo.nome, pontos: [] };
+        porNome[chave].pontos.push(ponto);
       }
-    },
-    [exercicioSelecionado],
-  );
+      for (const item of Object.values(porNome))
+        item.pontos.sort(
+          (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime(),
+        );
+      const exercicioAtual = selecionadoRef.current;
+      const atual =
+        exercicioAtual && porNome[exercicioAtual]
+          ? exercicioAtual
+          : (Object.keys(porNome).sort((a, b) =>
+              porNome[a].nome.localeCompare(porNome[b].nome, "pt-BR"),
+            )[0] ?? "");
+      setPontosPorExercicio(porNome);
+      setExercicioSelecionado(atual);
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? e.message
+          : "Não foi possível carregar a evolução dos exercícios.",
+      );
+    } finally {
+      setCarregando(false);
+      setAtualizando(false);
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -188,7 +188,15 @@ export default function EvolucaoTreinos({
     [pontosPorExercicio],
   );
   const nomesRef = useRef(nomes);
-  const selecionadoRef = useRef(exercicioSelecionado);
+  const nomesVisiveis = useMemo(
+    () =>
+      nomes.filter((chave) =>
+        normalizar(pontosPorExercicio[chave].nome).includes(
+          normalizar(buscaExercicio),
+        ),
+      ),
+    [nomes, pontosPorExercicio, buscaExercicio],
+  );
   nomesRef.current = nomes;
   selecionadoRef.current = exercicioSelecionado;
   const indiceSelecionado = Math.max(0, nomes.indexOf(exercicioSelecionado));
@@ -203,15 +211,20 @@ export default function EvolucaoTreinos({
   const gestoExercicios = useMemo(
     () =>
       PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
         onMoveShouldSetPanResponder: (_evento, gesto) =>
-          Math.abs(gesto.dx) >= 35 &&
-          Math.abs(gesto.dx) > Math.abs(gesto.dy) * 1.25,
+          Math.abs(gesto.dx) >= 18 &&
+          Math.abs(gesto.dx) > Math.abs(gesto.dy) * 1.2,
+        onMoveShouldSetPanResponderCapture: (_evento, gesto) =>
+          Math.abs(gesto.dx) >= 18 &&
+          Math.abs(gesto.dx) > Math.abs(gesto.dy) * 1.2,
+        onPanResponderTerminationRequest: () => false,
         onPanResponderRelease: (_evento, gesto) => {
           const lista = nomesRef.current;
           const indice = lista.indexOf(selecionadoRef.current);
-          if (gesto.dx <= -45 && indice >= 0 && indice < lista.length - 1) {
+          if (gesto.dx <= -35 && indice >= 0 && indice < lista.length - 1) {
             setExercicioSelecionado(lista[indice + 1]);
-          } else if (gesto.dx >= 45 && indice > 0) {
+          } else if (gesto.dx >= 35 && indice > 0) {
             setExercicioSelecionado(lista[indice - 1]);
           }
         },
@@ -274,6 +287,29 @@ export default function EvolucaoTreinos({
         ) : (
           <>
             <Text style={estilos.tituloSecao}>Selecione um exercício</Text>
+            <View style={estilos.buscaContainer}>
+              <Text style={estilos.iconeBusca}>⌕</Text>
+              <TextInput
+                value={buscaExercicio}
+                onChangeText={setBuscaExercicio}
+                placeholder="Pesquisar exercício..."
+                placeholderTextColor="#89958D"
+                accessibilityLabel="Pesquisar exercício"
+                returnKeyType="search"
+                style={estilos.campoBusca}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {buscaExercicio.length > 0 ? (
+                <TouchableOpacity
+                  onPress={() => setBuscaExercicio("")}
+                  accessibilityLabel="Limpar pesquisa"
+                  style={estilos.limparBusca}
+                >
+                  <Text style={estilos.textoLimparBusca}>×</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
             <View style={estilos.navegacaoExercicios}>
               <TouchableOpacity
                 accessibilityLabel="Exercício anterior"
@@ -312,7 +348,7 @@ export default function EvolucaoTreinos({
               contentContainerStyle={estilos.seletor}
               style={estilos.listaSeletor}
             >
-              {nomes.map((chave) => (
+              {nomesVisiveis.map((chave) => (
                 <TouchableOpacity
                   key={chave}
                   onPress={() => setExercicioSelecionado(chave)}
@@ -335,10 +371,25 @@ export default function EvolucaoTreinos({
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <View {...gestoExercicios.panHandlers}>
-              <Text style={estilos.dicaDeslize}>
-                Deslize para a esquerda ou direita para trocar de exercício.
+            {nomesVisiveis.length === 0 ? (
+              <Text style={estilos.secundario}>
+                Nenhum exercício encontrado para essa pesquisa.
               </Text>
+            ) : null}
+            <View
+              style={estilos.faixaExercicioAtual}
+              {...gestoExercicios.panHandlers}
+            >
+              <Text style={[estilos.nomeExercicioAtual, { color: corTema }]}>
+                {pontosPorExercicio[exercicioSelecionado]?.nome ??
+                  "Selecione um exercício"}
+              </Text>
+              <Text style={estilos.dicaDeslize}>
+                Passe o dedo para a esquerda ou direita aqui para trocar de
+                exercício.
+              </Text>
+            </View>
+            <View>
               <View style={estilos.gradeIndicadores}>
                 <View style={estilos.indicador}>
                   <Text style={estilos.rotulo}>MAIOR CARGA</Text>
@@ -514,6 +565,44 @@ const estilos = StyleSheet.create({
     fontWeight: "800",
     marginTop: 4,
   },
+  buscaContainer: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#354038",
+    backgroundColor: "#191E1B",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  iconeBusca: { color: "#A4ADA7", fontSize: 25, lineHeight: 28 },
+  campoBusca: {
+    flex: 1,
+    minWidth: 0,
+    color: "#F0F4F1",
+    fontSize: 15,
+    paddingVertical: 10,
+  },
+  limparBusca: {
+    width: 30,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 15,
+    backgroundColor: "#303832",
+  },
+  textoLimparBusca: { color: "#F0F4F1", fontSize: 22, lineHeight: 25 },
+  faixaExercicioAtual: {
+    backgroundColor: "#191E1B",
+    borderColor: "#354038",
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 5,
+  },
+  nomeExercicioAtual: { fontSize: 17, fontWeight: "900" },
   secundario: { color: "#A4ADA7", fontSize: 13, lineHeight: 19 },
   navegacaoExercicios: {
     flexDirection: "row",
