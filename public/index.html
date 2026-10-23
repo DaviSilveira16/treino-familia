@@ -2,22 +2,18 @@
 <html lang="%LANG_ISO_CODE%">
   <head>
     <meta charset="utf-8" />
-    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#101312" />
+    <meta name="theme-color" content="#111613" />
     <meta
       name="apple-mobile-web-app-status-bar-style"
       content="black-translucent"
     />
-    <link
-      rel="apple-touch-icon"
-      sizes="180x180"
-      href="/apple-touch-icon-v2.png?v=20261023-audit2"
-    />
-    <link rel="manifest" href="/manifest.json?v=20261023-audit2" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v3.png" />
+    <link rel="manifest" href="/manifest.json?v=20261023" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Treino Família" />
@@ -31,7 +27,7 @@
         min-height: 100%;
         margin: 0;
         padding: 0;
-        background-color: #111613;
+        background: #101312;
       }
 
       body {
@@ -39,14 +35,14 @@
         inset: 0;
         box-sizing: border-box;
         width: 100%;
-        height: auto;
+        height: 100%;
         min-height: 0;
         margin: 0;
         padding: 0;
         overflow: hidden;
         overscroll-behavior: none;
         -webkit-overflow-scrolling: touch;
-        background-color: #111613;
+        background: #101312;
       }
 
       #root,
@@ -68,33 +64,24 @@
         height: auto;
         min-height: 0;
         overflow: hidden;
-        background-color: #111613;
+        background: #101312;
       }
 
-      #app-conteudo {
-        box-sizing: border-box !important;
-        min-height: 0 !important;
-        padding-top: env(safe-area-inset-top, 0px) !important;
-        overflow: hidden;
-      }
-
-      /* A barra permanece com altura própria de 62 px, sem somar a área segura
-         ao tamanho do componente. A área do indicador do iPhone usa o mesmo
-         fundo da navegação para não parecer uma faixa preta separada. */
       #navegacao-inferior {
         box-sizing: border-box !important;
-        height: 30px !important;
-        min-height: 30px !important;
-        padding-bottom: 0 !important;
-        margin-bottom: 0 !important;
+        height: calc(58px + env(safe-area-inset-bottom, 0px)) !important;
+        min-height: calc(58px + env(safe-area-inset-bottom, 0px)) !important;
+        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+        margin: 0 !important;
         flex-shrink: 0 !important;
         background-color: #111613 !important;
+        border-bottom: 0 !important;
       }
     </style>
   </head>
 
   <body>
-    <noscript> You need to enable JavaScript to run this app. </noscript>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
   </body>
 </html>
