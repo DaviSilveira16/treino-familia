@@ -656,7 +656,7 @@ export default function TreinoAtivo({
 
   return (
     <View style={estilos.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#101312" />
+      <StatusBar barStyle="light-content" />
       <ScrollView
         contentContainerStyle={estilos.conteudo}
         showsVerticalScrollIndicator={false}

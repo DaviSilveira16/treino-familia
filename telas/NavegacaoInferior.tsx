@@ -13,7 +13,7 @@ type Props = { corTema?: string };
 export default function NavegacaoInferior({ corTema = "#35D07F" }: Props) {
   const navegacao = useNavigation<any>();
   const rotaAtual = useNavigationState(
-    (estado) => estado.routes[estado.index]?.name ?? "Inicio",
+    (estado) => estado?.routes?.[estado.index]?.name ?? "Inicio",
   );
   const comunidadeAtiva = rotaAtual === "comunidade";
 
