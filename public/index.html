@@ -24,21 +24,29 @@
     <title>%WEB_TITLE%</title>
 
     <style id="expo-reset">
-      html,
-      body {
+      html {
         box-sizing: border-box;
         width: 100%;
         height: 100%;
         min-height: 100%;
         margin: 0;
         padding: 0;
-        background-color: #101312;
+        background-color: #111613;
       }
 
       body {
+        position: fixed;
+        inset: 0;
+        box-sizing: border-box;
+        width: 100%;
+        height: auto;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
         overflow: hidden;
         overscroll-behavior: none;
         -webkit-overflow-scrolling: touch;
+        background-color: #111613;
       }
 
       #root,
@@ -51,17 +59,18 @@
       }
 
       #root {
+        position: fixed;
+        inset: 0;
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
-        width: 100%;
-        height: 100%;
+        width: auto;
+        height: auto;
         min-height: 0;
         overflow: hidden;
-        background-color: #101312;
+        background-color: #111613;
       }
 
-      /* O conteúdo fica abaixo dos indicadores do iPhone, sem sobrepor os botões de voltar. */
       #app-conteudo {
         box-sizing: border-box !important;
         min-height: 0 !important;
@@ -69,19 +78,17 @@
         overflow: hidden;
       }
 
-      @supports (height: 100dvh) {
-        body,
-        #root {
-          height: 100dvh;
-          min-height: 100dvh;
-        }
-      }
-
+      /* A barra permanece com altura própria de 62 px, sem somar a área segura
+         ao tamanho do componente. A área do indicador do iPhone usa o mesmo
+         fundo da navegação para não parecer uma faixa preta separada. */
       #navegacao-inferior {
         box-sizing: border-box !important;
-        height: calc(58px + env(safe-area-inset-bottom, 0px)) !important;
-        min-height: calc(58px + env(safe-area-inset-bottom, 0px)) !important;
-        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+        height: 62px !important;
+        min-height: 62px !important;
+        padding-bottom: 0 !important;
+        margin-bottom: 0 !important;
+        flex-shrink: 0 !important;
+        background-color: #111613 !important;
       }
     </style>
   </head>
