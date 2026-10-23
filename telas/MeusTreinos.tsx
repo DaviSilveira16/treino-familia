@@ -108,7 +108,9 @@ export default function MeusTreinos({
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [fotoCarregandoId, setFotoCarregandoId] = useState<string | null>(null);
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView> | null>(
+    null,
+  );
 
   useEffect(() => {
     async function carregarTreinos() {

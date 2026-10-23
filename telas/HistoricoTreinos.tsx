@@ -297,7 +297,7 @@ export default function HistoricoTreinos({
   if (carregando) {
     return (
       <View style={estilos.centralizado}>
-        <StatusBar barStyle="light-content" backgroundColor="#101312" />
+        <StatusBar barStyle="light-content" />
         <ActivityIndicator size="large" color={corTema} />
         <Text style={estilos.textoSecundario}>Carregando seu histórico...</Text>
       </View>
@@ -305,7 +305,7 @@ export default function HistoricoTreinos({
   }
   return (
     <View style={estilos.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#101312" />
+      <StatusBar barStyle="light-content" />
       <ScrollView
         style={estiloRolagemWeb}
         contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}

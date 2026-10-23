@@ -71,7 +71,7 @@ export default function EvolucaoTreinos({
   const [exercicioSelecionado, setExercicioSelecionado] = useState("");
   const [buscaExercicio, setBuscaExercicio] = useState("");
   const [larguraSeletor, setLarguraSeletor] = useState(0);
-  const seletorRef = useRef<ScrollView | null>(null);
+  const seletorRef = useRef<React.ComponentRef<typeof ScrollView> | null>(null);
   const posicoesExerciciosRef = useRef<
     Record<string, { x: number; width: number }>
   >({});
@@ -295,7 +295,7 @@ export default function EvolucaoTreinos({
 
   return (
     <View style={estilos.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#101312" />
+      <StatusBar barStyle="light-content" />
       <ScrollView
         contentContainerStyle={estilos.conteudo}
         showsVerticalScrollIndicator={false}

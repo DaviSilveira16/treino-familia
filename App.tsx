@@ -138,6 +138,14 @@ export default function App() {
   const [senha, setSenha] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [corTema, setCorTema] = useState(COR_PADRAO);
+  const [rotaAtual, setRotaAtual] = useState<keyof Rotas>("Inicio");
+
+  function atualizarRotaAtual() {
+    const rota = referenciaNavegacao.getCurrentRoute()?.name;
+    if (rota) {
+      setRotaAtual(rota as keyof Rotas);
+    }
+  }
 
   function atualizarSessao(novaSessao: Session | null) {
     setSessao(novaSessao);
@@ -493,7 +501,7 @@ export default function App() {
   if (carregando) {
     return (
       <View style={estilos.carregando}>
-        <StatusBar barStyle="light-content"/>
+        <StatusBar barStyle="light-content" />
         <ActivityIndicator size="large" color={corTema} />
         <Text style={estilos.textoCarregando}>
           Carregando Treino Família...
@@ -508,7 +516,7 @@ export default function App() {
         style={estilos.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <StatusBar barStyle="light-content"/>
+        <StatusBar barStyle="light-content" />
 
         <ScrollView
           contentContainerStyle={estilos.conteudoAutenticacao}
@@ -703,9 +711,13 @@ export default function App() {
         : null;
 
   return (
-    <NavigationContainer ref={referenciaNavegacao}>
+    <NavigationContainer
+      ref={referenciaNavegacao}
+      onReady={atualizarRotaAtual}
+      onStateChange={atualizarRotaAtual}
+    >
       <View style={{ flex: 1, backgroundColor: "#101312" }}>
-        <StatusBar barStyle="light-content"/>
+        <StatusBar barStyle="light-content" />
 
         <Pilha.Navigator
           initialRouteName="Inicio"
@@ -1003,7 +1015,17 @@ export default function App() {
             )}
           </Pilha.Screen>
         </Pilha.Navigator>
-        {sessao ? <NavegacaoInferior corTema={corTema} /> : null}
+        {sessao ? (
+          <NavegacaoInferior
+            corTema={corTema}
+            rotaAtual={rotaAtual}
+            onNavegar={(rota) => {
+              if (referenciaNavegacao.isReady()) {
+                referenciaNavegacao.navigate(rota);
+              }
+            }}
+          />
+        ) : null}
       </View>
     </NavigationContainer>
   );

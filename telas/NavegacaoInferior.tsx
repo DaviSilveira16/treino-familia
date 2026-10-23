@@ -6,15 +6,20 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { useNavigation, useNavigationState } from "@react-navigation/native";
 
-type Props = { corTema?: string };
+type RotaInferior = "Inicio" | "comunidade";
 
-export default function NavegacaoInferior({ corTema = "#35D07F" }: Props) {
-  const navegacao = useNavigation<any>();
-  const rotaAtual = useNavigationState(
-    (estado) => estado?.routes?.[estado.index]?.name ?? "Inicio",
-  );
+type Props = {
+  corTema?: string;
+  rotaAtual: string;
+  onNavegar: (rota: RotaInferior) => void;
+};
+
+export default function NavegacaoInferior({
+  corTema = "#35D07F",
+  rotaAtual,
+  onNavegar,
+}: Props) {
   const comunidadeAtiva = rotaAtual === "comunidade";
 
   return (
@@ -24,7 +29,7 @@ export default function NavegacaoInferior({ corTema = "#35D07F" }: Props) {
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Ir para treinos"
-        onPress={() => navegacao.navigate("Inicio")}
+        onPress={() => onNavegar("Inicio")}
         style={estilos.item}
         activeOpacity={0.8}
       >
@@ -48,7 +53,7 @@ export default function NavegacaoInferior({ corTema = "#35D07F" }: Props) {
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
         onPress={() => {
-          if (!comunidadeAtiva) navegacao.navigate("comunidade");
+          if (!comunidadeAtiva) onNavegar("comunidade");
         }}
         style={estilos.item}
         activeOpacity={0.8}
