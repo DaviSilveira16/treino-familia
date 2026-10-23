@@ -151,19 +151,31 @@ export default function App() {
       alturaCorpo: document.body.style.height,
       alturaMinimaCorpo: document.body.style.minHeight,
       margemCorpo: document.body.style.margin,
+      overflowCorpo: document.body.style.overflow,
       fundoCorpo: document.body.style.backgroundColor,
       alturaRaiz: raiz.style.height,
       alturaMinimaRaiz: raiz.style.minHeight,
+      larguraRaiz: raiz.style.width,
+      overflowRaiz: raiz.style.overflow,
       fundoRaiz: raiz.style.backgroundColor,
     };
 
+    const estaInstaladoComoAplicativo =
+      window.matchMedia?.("(display-mode: standalone)").matches === true ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone ===
+        true;
+    const alturaAplicativo = estaInstaladoComoAplicativo ? "100lvh" : "100dvh";
+
     document.documentElement.style.height = "100%";
-    document.body.style.height = "100dvh";
-    document.body.style.minHeight = "100dvh";
+    document.body.style.height = alturaAplicativo;
+    document.body.style.minHeight = alturaAplicativo;
     document.body.style.margin = "0";
+    document.body.style.overflow = "hidden";
     document.body.style.backgroundColor = "#101312";
-    raiz.style.height = "100dvh";
-    raiz.style.minHeight = "100dvh";
+    raiz.style.height = alturaAplicativo;
+    raiz.style.minHeight = alturaAplicativo;
+    raiz.style.width = "100%";
+    raiz.style.overflow = "hidden";
     raiz.style.backgroundColor = "#101312";
 
     return () => {
@@ -171,9 +183,12 @@ export default function App() {
       document.body.style.height = estilosOriginais.alturaCorpo;
       document.body.style.minHeight = estilosOriginais.alturaMinimaCorpo;
       document.body.style.margin = estilosOriginais.margemCorpo;
+      document.body.style.overflow = estilosOriginais.overflowCorpo;
       document.body.style.backgroundColor = estilosOriginais.fundoCorpo;
       raiz.style.height = estilosOriginais.alturaRaiz;
       raiz.style.minHeight = estilosOriginais.alturaMinimaRaiz;
+      raiz.style.width = estilosOriginais.larguraRaiz;
+      raiz.style.overflow = estilosOriginais.overflowRaiz;
       raiz.style.backgroundColor = estilosOriginais.fundoRaiz;
     };
   }, []);
@@ -196,11 +211,34 @@ export default function App() {
     }
 
     const assinatura = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (referenciaNavegacao.isReady() && referenciaNavegacao.canGoBack()) {
+      if (!referenciaNavegacao.isReady()) {
+        return true;
+      }
+
+      if (referenciaNavegacao.canGoBack()) {
         referenciaNavegacao.goBack();
         return true;
       }
-      return false;
+
+      const rota = referenciaNavegacao.getCurrentRoute()?.name;
+      if (rota && rota !== "Inicio") {
+        referenciaNavegacao.navigate("Inicio");
+        return true;
+      }
+
+      Alert.alert(
+        "Sair do Treino Família?",
+        "Deseja realmente sair do aplicativo?",
+        [
+          { text: "Continuar no app", style: "cancel" },
+          {
+            text: "Sair",
+            style: "destructive",
+            onPress: () => BackHandler.exitApp(),
+          },
+        ],
+      );
+      return true;
     });
 
     return () => assinatura.remove();

@@ -422,20 +422,27 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
     dataPadraoRelatorio(0),
   );
 
-  function metadadosComPerfil(adicionais: Record<string, unknown> = {}) {
+  async function metadadosComPerfil(
+    adicionais: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) throw error;
+    if (!data.user) throw new Error("Sua sessão expirou. Entre novamente.");
+
+    const metadadosAtuais = data.user.user_metadata ?? {};
     const pesoInformado = pesoKg.trim()
       ? Number(pesoKg.replace(",", "."))
-      : Number(usuario.user_metadata?.peso_kg);
+      : Number(metadadosAtuais.peso_kg);
     const alturaInformada = alturaCm.trim()
       ? Number(alturaCm.replace(",", "."))
-      : Number(usuario.user_metadata?.altura_cm);
+      : Number(metadadosAtuais.altura_cm);
     const idadeInformada = idade.trim()
       ? Number(idade.replace(",", "."))
-      : Number(usuario.user_metadata?.idade);
+      : Number(metadadosAtuais.idade);
 
     return {
-      ...usuario.user_metadata,
-      nome: nome.trim() || nomeAtual,
+      ...metadadosAtuais,
+      nome: nome.trim() || metadadosAtuais.nome || nomeAtual,
       tema_cor: corTema,
       ...(fotoUrl ? { foto_url: fotoUrl } : {}),
       ...(Number.isFinite(pesoInformado) &&
@@ -501,17 +508,26 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
 
     setSalvandoDadosCalorias(true);
     try {
-      const { error } = await supabase.auth.updateUser({
-        data: metadadosComPerfil({
+      const { data, error } = await supabase.auth.updateUser({
+        data: await metadadosComPerfil({
           peso_kg: peso,
           altura_cm: altura,
           idade: idadeNumerica,
           sexo,
         }),
       });
-      if (error) {
-        Alert.alert("Erro", error.message);
-        return;
+      if (error) throw error;
+      const metadadosSalvos = data.user?.user_metadata;
+      if (
+        !data.user ||
+        Number(metadadosSalvos?.peso_kg) !== peso ||
+        Number(metadadosSalvos?.altura_cm) !== altura ||
+        Number(metadadosSalvos?.idade) !== idadeNumerica ||
+        metadadosSalvos?.sexo !== sexo
+      ) {
+        throw new Error(
+          "O servidor não confirmou o salvamento dos dados pessoais.",
+        );
       }
       setPesoKg(String(peso));
       setAlturaCm(String(altura));
@@ -520,10 +536,12 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
         "Dados salvos",
         "Esses dados serão usados para estimar as calorias dos próximos cardios. Os registros anteriores continuarão iguais.",
       );
-    } catch {
+    } catch (erro) {
       Alert.alert(
-        "Erro",
-        "Não foi possível salvar os dados para estimar calorias.",
+        "Erro ao salvar os dados pessoais",
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível salvar os dados para estimar calorias.",
       );
     } finally {
       setSalvandoDadosCalorias(false);
@@ -812,7 +830,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
 
     try {
       const { error } = await supabase.auth.updateUser({
-        data: metadadosComPerfil(),
+        data: await metadadosComPerfil(),
       });
 
       if (error) {
@@ -833,7 +851,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
 
     try {
       const { error } = await supabase.auth.updateUser({
-        data: metadadosComPerfil({ tema_cor: corTema }),
+        data: await metadadosComPerfil({ tema_cor: corTema }),
       });
 
       if (error) {
@@ -911,7 +929,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
       const urlFoto = `${data.publicUrl}?v=${Date.now()}`;
 
       const { error: erroPerfil } = await supabase.auth.updateUser({
-        data: metadadosComPerfil({ foto_url: urlFoto }),
+        data: await metadadosComPerfil({ foto_url: urlFoto }),
       });
 
       if (erroPerfil) {
@@ -1330,13 +1348,15 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
                   "aria-label": "Data inicial do relatório",
                   style: {
                     display: "block",
-                    width: "100%",
+                    width: "calc(100% - 4px)",
                     minWidth: 0,
-                    maxWidth: "100%",
-                    height: 46,
+                    maxWidth: "calc(100% - 4px)",
                     boxSizing: "border-box",
+                    height: 46,
                     margin: 0,
-                    padding: "0 12px",
+                    padding: "0 8px",
+                    overflow: "hidden",
+                    WebkitAppearance: "none",
                     borderRadius: 10,
                     border: "1px solid #354039",
                     backgroundColor: "#101512",
@@ -1376,13 +1396,15 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
                   "aria-label": "Data final do relatório",
                   style: {
                     display: "block",
-                    width: "100%",
+                    width: "calc(100% - 4px)",
                     minWidth: 0,
-                    maxWidth: "100%",
-                    height: 46,
+                    maxWidth: "calc(100% - 4px)",
                     boxSizing: "border-box",
+                    height: 46,
                     margin: 0,
-                    padding: "0 12px",
+                    padding: "0 8px",
+                    overflow: "hidden",
+                    WebkitAppearance: "none",
                     borderRadius: 10,
                     border: "1px solid #354039",
                     backgroundColor: "#101512",
@@ -1678,12 +1700,15 @@ const estilos = StyleSheet.create({
   },
   campoDataRelatorio: {
     width: "100%",
+    maxWidth: "100%",
     minWidth: 0,
     alignSelf: "stretch",
+    overflow: "hidden",
     gap: 6,
   },
   inputDataRelatorio: {
     width: "100%",
+    maxWidth: "100%",
     minWidth: 0,
     minHeight: 46,
     borderWidth: 1,

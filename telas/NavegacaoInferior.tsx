@@ -25,31 +25,8 @@ export default function NavegacaoInferior({
 
   return (
     <View
-      style={[estilos.barra, { paddingBottom: Platform.OS === "ios" ? 5 : 3 }]}
+      style={[estilos.barra, { paddingBottom: Platform.OS === "ios" ? 2 : 0 }]}
     >
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel="Ir para treinos"
-        onPress={() => onNavegar("Inicio")}
-        style={estilos.item}
-        activeOpacity={0.8}
-      >
-        <View
-          style={[
-            estilos.icone,
-            !comunidadeAtiva && {
-              backgroundColor: `${corTema}24`,
-              borderColor: `${corTema}90`,
-            },
-          ]}
-        >
-          <Text style={estilos.emoji}>🏋️</Text>
-        </View>
-        <Text style={[estilos.rotulo, !comunidadeAtiva && { color: corTema }]}>
-          Treinos
-        </Text>
-      </TouchableOpacity>
-      <View style={estilos.divisor} />
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
@@ -118,43 +95,69 @@ export default function NavegacaoInferior({
           Comunidade
         </Text>
       </TouchableOpacity>
+      <View style={estilos.divisor} />
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Ir para treinos"
+        onPress={() => onNavegar("Inicio")}
+        style={estilos.item}
+        activeOpacity={0.8}
+      >
+        <View
+          style={[
+            estilos.icone,
+            !comunidadeAtiva && {
+              backgroundColor: `${corTema}24`,
+              borderColor: `${corTema}90`,
+            },
+          ]}
+        >
+          <Text style={estilos.emoji}>🏋️</Text>
+        </View>
+        <Text style={[estilos.rotulo, !comunidadeAtiva && { color: corTema }]}>
+          Treinos
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 const estilos = StyleSheet.create({
   barra: {
-    minHeight: 54,
-    paddingTop: 4,
-    paddingHorizontal: 16,
+    height: 48,
+    minHeight: 48,
+    paddingTop: 2,
+    paddingHorizontal: 8,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 22,
+    justifyContent: "space-evenly",
+    gap: 0,
     flexShrink: 0,
     backgroundColor: "#111613",
     borderTopWidth: 1,
     borderTopColor: "#303A33",
   },
   item: {
-    minWidth: 92,
+    flex: 1,
+    minWidth: 0,
+    height: 45,
     alignItems: "center",
     justifyContent: "center",
-    gap: 2,
+    gap: 0,
   },
   icone: {
-    minWidth: 38,
-    height: 27,
-    paddingHorizontal: 9,
-    borderRadius: 10,
+    minWidth: 34,
+    height: 24,
+    paddingHorizontal: 7,
+    borderRadius: 9,
     borderWidth: 1,
     borderColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
-  emoji: { fontSize: 18 },
+  emoji: { fontSize: 16 },
   iconeComunidadeFundo: { paddingHorizontal: 9 },
-  desenhoComunidade: { width: 25, height: 22, position: "relative" },
+  desenhoComunidade: { width: 22, height: 19, position: "relative" },
   cabecaComunidade: { position: "absolute", borderRadius: 8 },
   cabecaEsquerda: { width: 6, height: 6, left: 1, top: 4 },
   cabecaCentral: { width: 7, height: 7, left: 9, top: 0 },
@@ -169,6 +172,6 @@ const estilos = StyleSheet.create({
   corpoEsquerdo: { width: 8, height: 8, left: 0, top: 12 },
   corpoCentral: { width: 10, height: 11, left: 7.5, top: 9 },
   corpoDireito: { width: 8, height: 8, right: 0, top: 12 },
-  rotulo: { color: "#9AA69D", fontSize: 10, fontWeight: "700" },
+  rotulo: { color: "#9AA69D", fontSize: 9, fontWeight: "700" },
   divisor: { width: 1, height: 27, backgroundColor: "#303A33" },
 });

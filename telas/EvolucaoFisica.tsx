@@ -250,8 +250,8 @@ export default function EvolucaoFisica({
 
       if (error) {
         Alert.alert(
-          "Erro ao salvar",
-          "Não foi possível salvar a medição. Verifique a tabela e as políticas RLS no Supabase.",
+          "Erro ao salvar medição",
+          `O Supabase recusou o registro: ${error.message}`,
         );
         return;
       }
@@ -262,6 +262,13 @@ export default function EvolucaoFisica({
       await carregarMedicoes(usuarioId);
 
       Alert.alert("Medição salva", "Sua evolução física foi atualizada.");
+    } catch (erro) {
+      Alert.alert(
+        "Erro ao salvar medição",
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível concluir o salvamento. Verifique a conexão e as permissões do Supabase.",
+      );
     } finally {
       setSalvando(false);
     }

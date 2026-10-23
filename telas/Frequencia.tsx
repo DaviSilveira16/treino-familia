@@ -612,7 +612,14 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       );
       return;
     }
+    const distanciaPermitida = [
+      "esteira",
+      "caminhada",
+      "corrida",
+      "bicicleta",
+    ].includes(categoria);
     if (
+      distanciaPermitida &&
       distanciaCardio.trim() &&
       (distancia === null ||
         !Number.isFinite(distancia) ||
@@ -673,7 +680,9 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       sexo: sexoUsuario!,
       duracaoMinutos: duracao,
       distanciaKm:
-        distancia !== null && Number.isFinite(distancia) ? distancia : null,
+        distanciaPermitida && distancia !== null && Number.isFinite(distancia)
+          ? distancia
+          : null,
       inclinacaoPercentual: categoria === "esteira" ? (inclinacao ?? 0) : null,
       andaresSubidos:
         andares !== null && Number.isFinite(andares) ? andares : null,
@@ -703,7 +712,9 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         0,
       ).toISOString();
       const distanciaSalva =
-        distancia !== null && Number.isFinite(distancia) ? distancia : null;
+        distanciaPermitida && distancia !== null && Number.isFinite(distancia)
+          ? distancia
+          : null;
       const inclinacaoSalva =
         categoria === "esteira" ? (inclinacao ?? 0) : null;
       const andaresSalvos =
@@ -1388,7 +1399,13 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                       {cardio.duration_minutes != null
                         ? `${cardio.duration_minutes} min`
                         : ""}
-                      {cardio.distance_km != null
+                      {[
+                        "esteira",
+                        "caminhada",
+                        "corrida",
+                        "bicicleta",
+                      ].includes(categoriaDoCardio(cardio.activity_type)) &&
+                      cardio.distance_km != null
                         ? ` · ${cardio.distance_km} km`
                         : ""}
                       {(cardio.active_calories ?? cardio.calories) != null

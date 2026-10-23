@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { supabase } from "../supabase";
+import { categoriaDoCardio } from "../servicos/caloriasCardio";
 
 type Cardio = {
   id: string;
@@ -31,6 +32,12 @@ const TIPOS = [
   "Pilates",
 ];
 
+function permiteDistancia(tipo: string) {
+  return ["esteira", "caminhada", "corrida", "bicicleta"].includes(
+    categoriaDoCardio(tipo),
+  );
+}
+
 export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
   const [cardios, setCardios] = useState<Cardio[]>([]);
   const [usuarioId, setUsuarioId] = useState("");
@@ -38,7 +45,6 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
   const [tipo, setTipo] = useState("Escadas");
   const [duracao, setDuracao] = useState("");
   const [distancia, setDistancia] = useState("");
-  const [calorias, setCalorias] = useState("");
   const [observacoes, setObservacoes] = useState("");
   const [editando, setEditando] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -54,9 +60,7 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
       setUsuarioId(usuarioData.user.id);
       const { data, error } = await supabase
         .from("cardio_activities")
-        .select(
-          "id, nome, tipo, duracao_min, distancia_km, calorias, observacoes",
-        )
+        .select("id, nome, tipo, duracao_min, distancia_km, observacoes")
         .eq("user_id", usuarioData.user.id)
         .order("created_at", { ascending: true });
       if (error) throw error;
@@ -82,7 +86,6 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
     setTipo("Escadas");
     setDuracao("");
     setDistancia("");
-    setCalorias("");
     setObservacoes("");
     setEditando(null);
   }
@@ -93,9 +96,10 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
     setTipo(cardio.tipo);
     setDuracao(cardio.duracao_min == null ? "" : String(cardio.duracao_min));
     setDistancia(
-      cardio.distancia_km == null ? "" : String(cardio.distancia_km),
+      permiteDistancia(cardio.tipo) && cardio.distancia_km != null
+        ? String(cardio.distancia_km)
+        : "",
     );
-    setCalorias(cardio.calorias == null ? "" : String(cardio.calorias));
     setObservacoes(cardio.observacoes ?? "");
   }
 
@@ -105,16 +109,17 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
       return;
     }
     const minutos = duracao.trim() ? Number(duracao.replace(",", ".")) : null;
-    const km = distancia.trim() ? Number(distancia.replace(",", ".")) : null;
-    const kcal = calorias.trim() ? Number(calorias.replace(",", ".")) : null;
+    const km =
+      permiteDistancia(tipo) && distancia.trim()
+        ? Number(distancia.replace(",", "."))
+        : null;
     if (
       (minutos !== null && (!Number.isFinite(minutos) || minutos < 0)) ||
-      (km !== null && (!Number.isFinite(km) || km < 0)) ||
-      (kcal !== null && (!Number.isFinite(kcal) || kcal < 0))
+      (km !== null && (!Number.isFinite(km) || km < 0))
     ) {
       Alert.alert(
         "Valores inválidos",
-        "Duração, distância e calorias devem ser números iguais ou maiores que zero.",
+        "Duração e distância, quando aplicável, devem ser números iguais ou maiores que zero.",
       );
       return;
     }
@@ -126,7 +131,6 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
         tipo,
         duracao_min: minutos,
         distancia_km: km,
-        calorias: kcal,
         observacoes: observacoes.trim() || null,
         updated_at: new Date().toISOString(),
       };
@@ -217,10 +221,14 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
             {TIPOS.map((item) => (
               <TouchableOpacity
                 key={item}
-                onPress={() => setTipo(item)}
+                onPress={() => {
+                  setTipo(item);
+                  if (!permiteDistancia(item)) setDistancia("");
+                }}
                 style={[
                   estilos.tipo,
-                  (tipo === item || (tipo === "Escada" && item === "Escadas")) && {
+                  (tipo === item ||
+                    (tipo === "Escada" && item === "Escadas")) && {
                     borderColor: corTema,
                     backgroundColor: `${corTema}20`,
                   },
@@ -229,7 +237,10 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
                 <Text
                   style={[
                     estilos.tipoTexto,
-                    (tipo === item || (tipo === "Escada" && item === "Escadas")) && { color: corTema },
+                    (tipo === item ||
+                      (tipo === "Escada" && item === "Escadas")) && {
+                      color: corTema,
+                    },
                   ]}
                 >
                   {item}
@@ -246,26 +257,23 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
             placeholder="Ex.: 20"
             placeholderTextColor="#7D8881"
           />
-          <Text style={estilos.rotulo}>Distância (km, opcional)</Text>
-          <TextInput
-            style={estilos.input}
-            value={distancia}
-            onChangeText={setDistancia}
-            keyboardType="decimal-pad"
-            placeholder="Ex.: 3,5"
-            placeholderTextColor="#7D8881"
-          />
-          <Text style={estilos.rotulo}>Calorias de referência (opcional)</Text>
-          <TextInput
-            style={estilos.input}
-            value={calorias}
-            onChangeText={setCalorias}
-            keyboardType="decimal-pad"
-            placeholder="Não serão usadas no cálculo da sessão"
-            placeholderTextColor="#7D8881"
-          />
+          {permiteDistancia(tipo) ? (
+            <>
+              <Text style={estilos.rotulo}>Distância (km, opcional)</Text>
+              <TextInput
+                style={estilos.input}
+                value={distancia}
+                onChangeText={setDistancia}
+                keyboardType="decimal-pad"
+                placeholder="Ex.: 3,5"
+                placeholderTextColor="#7D8881"
+              />
+            </>
+          ) : null}
           <Text style={estilos.descricaoCalorias}>
-            As calorias de cada sessão serão estimadas ao registrar o cardio na Frequência, usando o peso do perfil e os dados da atividade.
+            As calorias serão estimadas quando você registrar a sessão na
+            Frequência, usando seu peso, altura, idade, sexo, duração e
+            intensidade. Não é necessário informar calorias manualmente.
           </Text>
           <Text style={estilos.rotulo}>Observações (opcional)</Text>
           <TextInput
@@ -319,10 +327,9 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
                   {cardio.duracao_min != null
                     ? ` · ${cardio.duracao_min} min`
                     : ""}
-                  {cardio.distancia_km != null
+                  {permiteDistancia(cardio.tipo) && cardio.distancia_km != null
                     ? ` · ${cardio.distancia_km} km`
                     : ""}
-                  {cardio.calorias != null ? ` · ${cardio.calorias} kcal` : ""}
                 </Text>
                 {cardio.observacoes ? (
                   <Text style={estilos.detalhes}>{cardio.observacoes}</Text>
