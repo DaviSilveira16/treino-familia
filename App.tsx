@@ -656,7 +656,7 @@ export default function App() {
   if (carregando) {
     return (
       <View style={estilos.carregando}>
-        <StatusBar barStyle="light-content" />
+        <StatusBar hidden={true} barStyle="light-content" />
         <ActivityIndicator size="large" color={corTema} />
         <Text style={estilos.textoCarregando}>
           Carregando Treino Família...
@@ -671,7 +671,7 @@ export default function App() {
         style={estilos.container}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <StatusBar barStyle="light-content" />
+        <StatusBar hidden={true} barStyle="light-content" />
 
         <ScrollView
           contentContainerStyle={estilos.conteudoAutenticacao}
@@ -872,7 +872,7 @@ export default function App() {
       onStateChange={atualizarRotaAtual}
     >
       <View style={{ flex: 1, backgroundColor: "#101312" }}>
-        <StatusBar barStyle="light-content" />
+        <StatusBar hidden={true} barStyle="light-content" />
 
         <Pilha.Navigator
           initialRouteName="Inicio"

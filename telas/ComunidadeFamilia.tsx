@@ -779,7 +779,11 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           )}
         </TouchableOpacity>
       </View>
-      <Text style={estilos.tituloSecao}>Progresso da família</Text>
+      <Text style={estilos.tituloSecao}>Progresso semanal da família</Text>
+      <Text style={estilos.secundario}>
+        Contagem da semana atual, de segunda a domingo. Os números são
+        reiniciados a cada nova semana.
+      </Text>
       {membros.map((membro) => (
         <View key={membro.user_id} style={estilos.cartaoMembro}>
           <View

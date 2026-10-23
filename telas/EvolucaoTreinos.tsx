@@ -295,7 +295,7 @@ export default function EvolucaoTreinos({
 
   return (
     <View style={estilos.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar hidden={true} barStyle="light-content" />
       <ScrollView
         contentContainerStyle={estilos.conteudo}
         showsVerticalScrollIndicator={false}
