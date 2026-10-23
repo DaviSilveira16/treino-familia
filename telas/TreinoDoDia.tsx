@@ -66,7 +66,7 @@ export default function TreinoDoDia({
 
       const { data: sessoes, error: erroSessoes } = await supabase
         .from("workout_sessions")
-        .select("id, plan_id, started_at")
+        .select("id, plan_id, started_at, status")
         .eq("user_id", usuarioData.user.id)
         .gte("started_at", inicioDia)
         .lt("started_at", inicioProximoDia)
@@ -77,7 +77,9 @@ export default function TreinoDoDia({
         return;
       }
 
-      const sessaoComPlano = sessoes.find((sessao) => Boolean(sessao.plan_id));
+      const sessaoComPlano = sessoes.find(
+        (sessao) => Boolean(sessao.plan_id) && sessao.status !== "em_andamento",
+      );
 
       if (!sessaoComPlano?.plan_id) {
         setTreino({ nome: "", definido: false });

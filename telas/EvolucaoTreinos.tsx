@@ -1,6 +1,7 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  PanResponder,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -186,6 +187,37 @@ export default function EvolucaoTreinos({
       ),
     [pontosPorExercicio],
   );
+  const nomesRef = useRef(nomes);
+  const selecionadoRef = useRef(exercicioSelecionado);
+  nomesRef.current = nomes;
+  selecionadoRef.current = exercicioSelecionado;
+  const indiceSelecionado = Math.max(0, nomes.indexOf(exercicioSelecionado));
+  const selecionarAnterior = useCallback(() => {
+    if (indiceSelecionado > 0)
+      setExercicioSelecionado(nomes[indiceSelecionado - 1]);
+  }, [indiceSelecionado, nomes]);
+  const selecionarProximo = useCallback(() => {
+    if (indiceSelecionado < nomes.length - 1)
+      setExercicioSelecionado(nomes[indiceSelecionado + 1]);
+  }, [indiceSelecionado, nomes]);
+  const gestoExercicios = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_evento, gesto) =>
+          Math.abs(gesto.dx) >= 35 &&
+          Math.abs(gesto.dx) > Math.abs(gesto.dy) * 1.25,
+        onPanResponderRelease: (_evento, gesto) => {
+          const lista = nomesRef.current;
+          const indice = lista.indexOf(selecionadoRef.current);
+          if (gesto.dx <= -45 && indice >= 0 && indice < lista.length - 1) {
+            setExercicioSelecionado(lista[indice + 1]);
+          } else if (gesto.dx >= 45 && indice > 0) {
+            setExercicioSelecionado(lista[indice - 1]);
+          }
+        },
+      }),
+    [],
+  );
   const pontos = pontosPorExercicio[exercicioSelecionado]?.pontos ?? [];
   const maiorCarga = Math.max(1, ...pontos.map((ponto) => ponto.cargaMaxima));
   const maiorVolume = Math.max(1, ...pontos.map((ponto) => ponto.volume));
@@ -242,10 +274,43 @@ export default function EvolucaoTreinos({
         ) : (
           <>
             <Text style={estilos.tituloSecao}>Selecione um exercício</Text>
+            <View style={estilos.navegacaoExercicios}>
+              <TouchableOpacity
+                accessibilityLabel="Exercício anterior"
+                disabled={indiceSelecionado <= 0}
+                onPress={selecionarAnterior}
+                style={[
+                  estilos.setaExercicio,
+                  indiceSelecionado <= 0 && estilos.setaDesabilitada,
+                ]}
+              >
+                <Text style={estilos.textoSeta}>‹</Text>
+              </TouchableOpacity>
+              <Text style={estilos.contadorExercicio}>
+                {nomes.length
+                  ? `${indiceSelecionado + 1} de ${nomes.length}`
+                  : "0 de 0"}
+              </Text>
+              <TouchableOpacity
+                accessibilityLabel="Próximo exercício"
+                disabled={indiceSelecionado >= nomes.length - 1}
+                onPress={selecionarProximo}
+                style={[
+                  estilos.setaExercicio,
+                  indiceSelecionado >= nomes.length - 1 &&
+                    estilos.setaDesabilitada,
+                ]}
+              >
+                <Text style={estilos.textoSeta}>›</Text>
+              </TouchableOpacity>
+            </View>
             <ScrollView
               horizontal
-              showsHorizontalScrollIndicator={false}
+              nestedScrollEnabled
+              directionalLockEnabled
+              showsHorizontalScrollIndicator
               contentContainerStyle={estilos.seletor}
+              style={estilos.listaSeletor}
             >
               {nomes.map((chave) => (
                 <TouchableOpacity
@@ -270,123 +335,132 @@ export default function EvolucaoTreinos({
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <View style={estilos.gradeIndicadores}>
-              <View style={estilos.indicador}>
-                <Text style={estilos.rotulo}>MAIOR CARGA</Text>
-                <Text style={[estilos.numeroIndicador, { color: corTema }]}>
-                  {formatarNumero(
-                    Math.max(0, ...pontos.map((p) => p.cargaMaxima)),
-                  )}{" "}
-                  kg
-                </Text>
-              </View>
-              <View style={estilos.indicador}>
-                <Text style={estilos.rotulo}>ÚLTIMA SESSÃO</Text>
-                <Text style={estilos.numeroIndicador}>
-                  {ultimo ? formatarData(ultimo.data) : "—"}
-                </Text>
-              </View>
-              <View style={estilos.indicador}>
-                <Text style={estilos.rotulo}>VARIAÇÃO</Text>
-                <Text
-                  style={[
-                    estilos.numeroIndicador,
-                    { color: progressoCarga >= 0 ? corTema : "#F28B82" },
-                  ]}
-                >
-                  {progressoCarga > 0 ? "+" : ""}
-                  {formatarNumero(progressoCarga)} kg
-                </Text>
-              </View>
-            </View>
-            <View style={estilos.cartao}>
-              <Text style={estilos.tituloCartao}>Carga máxima por sessão</Text>
-              {pontos.map((ponto) => (
-                <View key={`c-${ponto.id}`} style={estilos.linhaGrafico}>
-                  <View style={estilos.linhaData}>
-                    <Text style={estilos.textoData}>
-                      {formatarData(ponto.data)}
-                    </Text>
-                    <Text style={estilos.textoValor}>
-                      {formatarNumero(ponto.cargaMaxima)} kg
-                    </Text>
-                  </View>
-                  <View style={estilos.fundoBarra}>
-                    <View
-                      style={[
-                        estilos.barra,
-                        {
-                          width: `${Math.max(2, (ponto.cargaMaxima / maiorCarga) * 100)}%`,
-                          backgroundColor: corTema,
-                        },
-                      ]}
-                    />
-                  </View>
-                  <Text style={estilos.legenda}>
-                    {ponto.repsNaMaiorCarga} reps na maior carga ·{" "}
-                    {ponto.quantidadeSeries} séries
+            <View {...gestoExercicios.panHandlers}>
+              <Text style={estilos.dicaDeslize}>
+                Deslize para a esquerda ou direita para trocar de exercício.
+              </Text>
+              <View style={estilos.gradeIndicadores}>
+                <View style={estilos.indicador}>
+                  <Text style={estilos.rotulo}>MAIOR CARGA</Text>
+                  <Text style={[estilos.numeroIndicador, { color: corTema }]}>
+                    {formatarNumero(
+                      Math.max(0, ...pontos.map((p) => p.cargaMaxima)),
+                    )}{" "}
+                    kg
                   </Text>
                 </View>
-              ))}
-            </View>
-            <View style={estilos.cartao}>
-              <Text style={estilos.tituloCartao}>
-                Volume de carga por sessão
-              </Text>
-              <Text style={estilos.secundario}>
-                Volume = soma da carga multiplicada pelas repetições das séries
-                registradas. Não equivale a calorias gastas.
-              </Text>
-              {pontos.map((ponto) => (
-                <View key={`v-${ponto.id}`} style={estilos.linhaGrafico}>
-                  <View style={estilos.linhaData}>
-                    <Text style={estilos.textoData}>
-                      {formatarData(ponto.data)}
-                    </Text>
-                    <Text style={estilos.textoValor}>
-                      {formatarNumero(ponto.volume)} kg·reps
-                    </Text>
-                  </View>
-                  <View style={estilos.fundoBarra}>
-                    <View
-                      style={[
-                        estilos.barra,
-                        {
-                          width: `${Math.max(2, (ponto.volume / maiorVolume) * 100)}%`,
-                          backgroundColor: corTema,
-                        },
-                      ]}
-                    />
-                  </View>
+                <View style={estilos.indicador}>
+                  <Text style={estilos.rotulo}>ÚLTIMA SESSÃO</Text>
+                  <Text style={estilos.numeroIndicador}>
+                    {ultimo ? formatarData(ultimo.data) : "—"}
+                  </Text>
                 </View>
-              ))}
-            </View>
-            <View style={estilos.cartao}>
-              <Text style={estilos.tituloCartao}>Histórico detalhado</Text>
-              {pontos
-                .slice()
-                .reverse()
-                .map((ponto) => (
-                  <View key={`d-${ponto.id}`} style={estilos.linhaDetalhe}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={estilos.textoDetalhe}>
+                <View style={estilos.indicador}>
+                  <Text style={estilos.rotulo}>VARIAÇÃO</Text>
+                  <Text
+                    style={[
+                      estilos.numeroIndicador,
+                      { color: progressoCarga >= 0 ? corTema : "#F28B82" },
+                    ]}
+                  >
+                    {progressoCarga > 0 ? "+" : ""}
+                    {formatarNumero(progressoCarga)} kg
+                  </Text>
+                </View>
+              </View>
+              <View style={estilos.cartao}>
+                <Text style={estilos.tituloCartao}>
+                  Carga máxima por sessão
+                </Text>
+                {pontos.map((ponto) => (
+                  <View key={`c-${ponto.id}`} style={estilos.linhaGrafico}>
+                    <View style={estilos.linhaData}>
+                      <Text style={estilos.textoData}>
                         {formatarData(ponto.data)}
                       </Text>
-                      <Text style={estilos.secundario}>
-                        {ponto.quantidadeSeries} séries ·{" "}
-                        {ponto.repsNaMaiorCarga} reps na maior carga
-                      </Text>
-                    </View>
-                    <View style={{ alignItems: "flex-end" }}>
-                      <Text style={[estilos.textoDetalhe, { color: corTema }]}>
+                      <Text style={estilos.textoValor}>
                         {formatarNumero(ponto.cargaMaxima)} kg
                       </Text>
-                      <Text style={estilos.secundario}>
+                    </View>
+                    <View style={estilos.fundoBarra}>
+                      <View
+                        style={[
+                          estilos.barra,
+                          {
+                            width: `${Math.max(2, (ponto.cargaMaxima / maiorCarga) * 100)}%`,
+                            backgroundColor: corTema,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={estilos.legenda}>
+                      {ponto.repsNaMaiorCarga} reps na maior carga ·{" "}
+                      {ponto.quantidadeSeries} séries
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              <View style={estilos.cartao}>
+                <Text style={estilos.tituloCartao}>
+                  Volume de carga por sessão
+                </Text>
+                <Text style={estilos.secundario}>
+                  Volume = soma da carga multiplicada pelas repetições das
+                  séries registradas. Não equivale a calorias gastas.
+                </Text>
+                {pontos.map((ponto) => (
+                  <View key={`v-${ponto.id}`} style={estilos.linhaGrafico}>
+                    <View style={estilos.linhaData}>
+                      <Text style={estilos.textoData}>
+                        {formatarData(ponto.data)}
+                      </Text>
+                      <Text style={estilos.textoValor}>
                         {formatarNumero(ponto.volume)} kg·reps
                       </Text>
                     </View>
+                    <View style={estilos.fundoBarra}>
+                      <View
+                        style={[
+                          estilos.barra,
+                          {
+                            width: `${Math.max(2, (ponto.volume / maiorVolume) * 100)}%`,
+                            backgroundColor: corTema,
+                          },
+                        ]}
+                      />
+                    </View>
                   </View>
                 ))}
+              </View>
+              <View style={estilos.cartao}>
+                <Text style={estilos.tituloCartao}>Histórico detalhado</Text>
+                {pontos
+                  .slice()
+                  .reverse()
+                  .map((ponto) => (
+                    <View key={`d-${ponto.id}`} style={estilos.linhaDetalhe}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={estilos.textoDetalhe}>
+                          {formatarData(ponto.data)}
+                        </Text>
+                        <Text style={estilos.secundario}>
+                          {ponto.quantidadeSeries} séries ·{" "}
+                          {ponto.repsNaMaiorCarga} reps na maior carga
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text
+                          style={[estilos.textoDetalhe, { color: corTema }]}
+                        >
+                          {formatarNumero(ponto.cargaMaxima)} kg
+                        </Text>
+                        <Text style={estilos.secundario}>
+                          {formatarNumero(ponto.volume)} kg·reps
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+              </View>
             </View>
           </>
         )}
@@ -441,7 +515,38 @@ const estilos = StyleSheet.create({
     marginTop: 4,
   },
   secundario: { color: "#A4ADA7", fontSize: 13, lineHeight: 19 },
-  seletor: { gap: 8, paddingVertical: 4 },
+  navegacaoExercicios: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  setaExercicio: {
+    minWidth: 48,
+    minHeight: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#354038",
+    backgroundColor: "#191E1B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  setaDesabilitada: { opacity: 0.3 },
+  textoSeta: {
+    color: "#F0F4F1",
+    fontSize: 30,
+    lineHeight: 32,
+    fontWeight: "800",
+  },
+  contadorExercicio: {
+    flex: 1,
+    textAlign: "center",
+    color: "#F0F4F1",
+    fontWeight: "800",
+  },
+  dicaDeslize: { color: "#94A098", fontSize: 11, marginBottom: 8 },
+  listaSeletor: { width: "100%", flexGrow: 0, maxHeight: 52 },
+  seletor: { gap: 8, paddingVertical: 4, paddingRight: 16 },
   botaoExercicio: {
     borderWidth: 1,
     borderColor: "#354038",

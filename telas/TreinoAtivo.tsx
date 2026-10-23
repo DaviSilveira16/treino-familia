@@ -538,6 +538,7 @@ export default function TreinoAtivo({
       `Você concluiu ${totalSeriesConcluidas} série(s). Deseja salvar o encerramento da sessão?`,
     );
     if (!confirmou) return;
+
     setSalvando(true);
     try {
       const final = new Date();
@@ -567,11 +568,33 @@ export default function TreinoAtivo({
             series: seriesCalculo,
           })
         : null;
-      const { error } = await supabase
+
+      // Primeiro marca a sessão como concluída usando apenas colunas básicas.
+      // Assim, a sessão não fica presa como "em_andamento" caso falte alguma
+      // coluna opcional da migração de métricas/calorias.
+      const { data: sessaoConcluida, error: erroConclusao } = await supabase
         .from("workout_sessions")
         .update({
           finished_at: final.toISOString(),
           status: "concluido",
+          notes: "Treino concluído no modo ativo",
+        })
+        .eq("id", sessao.id)
+        .eq("user_id", usuarioId)
+        .select("id, status")
+        .maybeSingle();
+
+      if (erroConclusao) throw erroConclusao;
+      if (!sessaoConcluida) {
+        throw new Error(
+          "O banco não confirmou a conclusão desta sessão. Confira se você está conectado e tente finalizar novamente.",
+        );
+      }
+
+      let erroDetalhes: string | null = null;
+      const { error: erroMetadados } = await supabase
+        .from("workout_sessions")
+        .update({
           duration_minutes: duracaoMinutos,
           intensity: intensidade,
           active_calories: estimativa?.caloriasAtivas ?? null,
@@ -585,24 +608,29 @@ export default function TreinoAtivo({
           exercises_count:
             estimativa?.quantidadeExercicios ?? exerciciosFeitos.size,
           sets_completed: estimativa?.quantidadeSeries ?? totalSeriesConcluidas,
-          reps_completed: estimativa?.repeticoesTotais ?? null,
-          notes: "Treino concluído no modo ativo",
+          reps_completed:
+            estimativa?.repeticoesTotais ??
+            seriesFeitas.reduce(
+              (soma, serie) => soma + (Number(serie.reps) || 0),
+              0,
+            ),
         })
         .eq("id", sessao.id)
-        .eq("user_id", usuarioId)
-        .eq("status", "em_andamento");
-      if (error) throw error;
+        .eq("user_id", usuarioId);
+      if (erroMetadados) erroDetalhes = erroMetadados.message;
+
       pularDescanso();
       setSessao(null);
-      if (!estimativa) {
+      const resumo = `Duração: ${duracaoMinutos.toLocaleString("pt-BR")} min\nExercícios: ${estimativa?.quantidadeExercicios ?? exerciciosFeitos.size}\nSéries concluídas: ${estimativa?.quantidadeSeries ?? totalSeriesConcluidas}\nRepetições: ${estimativa?.repeticoesTotais ?? seriesFeitas.reduce((soma, serie) => soma + (Number(serie.reps) || 0), 0)}\n${estimativa ? `Calorias ativas estimadas: ${estimativa.caloriasAtivas} kcal\nMET: ${estimativa.met}` : "Calorias não calculadas: confira os dados do perfil."}`;
+      if (erroDetalhes) {
         avisar(
-          "Treino salvo",
-          `Duração: ${duracaoMinutos} min. ${totalSeriesConcluidas} séries concluídas. Não foi possível calcular calorias porque faltam dados válidos em Meu Perfil. O treino e as séries foram preservados no histórico.`,
+          "Treino concluído",
+          `${resumo}\n\nO treino foi finalizado e já deve aparecer na Frequência. Alguns detalhes de duração/calorias não foram salvos. Execute a migração SQL atualizada.\n\nDetalhe: ${erroDetalhes}`,
         );
       } else {
         avisar(
           "Treino concluído",
-          `Duração: ${duracaoMinutos.toLocaleString("pt-BR")} min\nExercícios: ${estimativa.quantidadeExercicios}\nSéries concluídas: ${estimativa.quantidadeSeries}\nRepetições: ${estimativa.repeticoesTotais}\nVolume de carga: ${Math.round(estimativa.volumeCargaKg).toLocaleString("pt-BR")} kg·repetições\nCalorias ativas estimadas: ${estimativa.caloriasAtivas} kcal\nMET: ${estimativa.met}\n\nA estimativa não é uma medição exata.`,
+          `${resumo}\n\nO registro foi salvo e deve aparecer na Frequência e na Evolução dos treinos. A estimativa não é uma medição exata.`,
         );
       }
       onVoltar();
