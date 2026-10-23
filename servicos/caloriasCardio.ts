@@ -7,6 +7,7 @@ export type CategoriaCardio =
   | "corrida"
   | "bicicleta"
   | "eliptico"
+  | "pilates"
   | "outro";
 
 export type DadosCalculoCardio = {
@@ -45,6 +46,7 @@ export function categoriaDoCardio(tipo: string): CategoriaCardio {
   if (nome.includes("corrida") || nome.includes("correr")) return "corrida";
   if (nome.includes("bicicleta") || nome.includes("bike")) return "bicicleta";
   if (nome.includes("eliptico")) return "eliptico";
+  if (nome.includes("pilates")) return "pilates";
   return "outro";
 }
 
@@ -59,6 +61,7 @@ function metBase(
     corrida: { leve: 6.5, moderada: 8.5, intensa: 11 },
     bicicleta: { leve: 3.5, moderada: 6, intensa: 9 },
     eliptico: { leve: 3.5, moderada: 5, intensa: 7 },
+    pilates: { leve: 2.3, moderada: 3, intensa: 4 },
     outro: { leve: 2.5, moderada: 4, intensa: 6 },
   };
   return valores[categoria][intensidade];

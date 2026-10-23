@@ -28,6 +28,7 @@ const TIPOS = [
   "Caminhada",
   "Corrida",
   "Elíptico",
+  "Pilates",
 ];
 
 export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
@@ -219,8 +220,7 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
                 onPress={() => setTipo(item)}
                 style={[
                   estilos.tipo,
-                  (tipo === item ||
-                    (tipo === "Escada" && item === "Escadas")) && {
+                  (tipo === item || (tipo === "Escada" && item === "Escadas")) && {
                     borderColor: corTema,
                     backgroundColor: `${corTema}20`,
                   },
@@ -229,10 +229,7 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
                 <Text
                   style={[
                     estilos.tipoTexto,
-                    (tipo === item ||
-                      (tipo === "Escada" && item === "Escadas")) && {
-                      color: corTema,
-                    },
+                    (tipo === item || (tipo === "Escada" && item === "Escadas")) && { color: corTema },
                   ]}
                 >
                   {item}
@@ -268,8 +265,7 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
             placeholderTextColor="#7D8881"
           />
           <Text style={estilos.descricaoCalorias}>
-            As calorias de cada sessão serão estimadas ao registrar o cardio na
-            Frequência, usando o peso do perfil e os dados da atividade.
+            As calorias de cada sessão serão estimadas ao registrar o cardio na Frequência, usando o peso do perfil e os dados da atividade.
           </Text>
           <Text style={estilos.rotulo}>Observações (opcional)</Text>
           <TextInput

@@ -41,6 +41,8 @@ import HistoricoTreinos from "./telas/HistoricoTreinos";
 import TreinoAtivo from "./telas/TreinoAtivo";
 import EvolucaoTreinos from "./telas/EvolucaoTreinos";
 import ResumoSemanal from "./telas/ResumoSemanal";
+import ComunidadeFamilia from "./telas/ComunidadeFamilia";
+import NavegacaoInferior from "./telas/NavegacaoInferior";
 import NavegacaoVoltarGlobal from "./telas/NavegacaoVoltarGlobal";
 
 type ModoAutenticacao = "login" | "cadastro" | "recuperar";
@@ -55,6 +57,7 @@ type Rotas = {
   frequencia: undefined;
   evolucaoTreinos: undefined;
   treinoAtivo: { planId: string; planName: string };
+  comunidade: undefined;
 };
 
 const Pilha = createStackNavigator<Rotas>();
@@ -146,13 +149,19 @@ export default function App() {
       return;
     }
 
-    const assinatura = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (referenciaNavegacao.isReady() && referenciaNavegacao.canGoBack()) {
-        referenciaNavegacao.goBack();
-        return true;
-      }
-      return false;
-    });
+    const assinatura = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        if (
+          referenciaNavegacao.isReady() &&
+          referenciaNavegacao.canGoBack()
+        ) {
+          referenciaNavegacao.goBack();
+          return true;
+        }
+        return false;
+      },
+    );
 
     return () => assinatura.remove();
   }, [sessao]);
@@ -701,6 +710,7 @@ export default function App() {
 
   return (
     <NavigationContainer ref={referenciaNavegacao}>
+      <View style={{ flex: 1, backgroundColor: "#101312" }}>
       <StatusBar barStyle="light-content" backgroundColor="#101312" />
 
       <Pilha.Navigator
@@ -888,12 +898,7 @@ export default function App() {
             >
               <MeusTreinos
                 onVoltar={() => navigation.goBack()}
-                onIniciarTreino={(treino) =>
-                  navigation.navigate("treinoAtivo", {
-                    planId: treino.id,
-                    planName: treino.name,
-                  })
-                }
+                onIniciarTreino={(treino) => navigation.navigate("treinoAtivo", { planId: treino.id, planName: treino.name })}
                 corTema={corTema}
               />
             </NavegacaoVoltarGlobal>
@@ -956,35 +961,32 @@ export default function App() {
           )}
         </Pilha.Screen>
 
+        <Pilha.Screen name="comunidade">
+          {({ navigation }) => (
+            <NavegacaoVoltarGlobal onVoltar={() => navigation.goBack()} ativo={Platform.OS === "web" && navigation.canGoBack()}>
+              <ComunidadeFamilia corTema={corTema} />
+            </NavegacaoVoltarGlobal>
+          )}
+        </Pilha.Screen>
+
         <Pilha.Screen name="evolucaoTreinos">
           {({ navigation }) => (
-            <NavegacaoVoltarGlobal
-              onVoltar={() => navigation.goBack()}
-              ativo={Platform.OS === "web" && navigation.canGoBack()}
-            >
-              <EvolucaoTreinos
-                onVoltar={() => navigation.goBack()}
-                corTema={corTema}
-              />
+            <NavegacaoVoltarGlobal onVoltar={() => navigation.goBack()} ativo={Platform.OS === "web" && navigation.canGoBack()}>
+              <EvolucaoTreinos onVoltar={() => navigation.goBack()} corTema={corTema} />
             </NavegacaoVoltarGlobal>
           )}
         </Pilha.Screen>
 
         <Pilha.Screen name="treinoAtivo">
           {({ navigation, route }) => (
-            <NavegacaoVoltarGlobal
-              onVoltar={() => navigation.goBack()}
-              ativo={Platform.OS === "web" && navigation.canGoBack()}
-            >
-              <TreinoAtivo
-                route={route}
-                onVoltar={() => navigation.goBack()}
-                corTema={corTema}
-              />
+            <NavegacaoVoltarGlobal onVoltar={() => navigation.goBack()} ativo={Platform.OS === "web" && navigation.canGoBack()}>
+              <TreinoAtivo route={route} onVoltar={() => navigation.goBack()} corTema={corTema} />
             </NavegacaoVoltarGlobal>
           )}
         </Pilha.Screen>
       </Pilha.Navigator>
+      {sessao ? <NavegacaoInferior corTema={corTema} /> : null}
+      </View>
     </NavigationContainer>
   );
 }
