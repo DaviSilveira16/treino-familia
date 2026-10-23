@@ -5,7 +5,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
     />
     <meta name="theme-color" content="#111613" />
     <meta
@@ -17,25 +17,26 @@
       sizes="180x180"
       href="/apple-touch-icon-v3.png"
     />
-    <link rel="manifest" href="/manifest.json?v=20261023" />
+    <link rel="manifest" href="/manifest.json" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Treino Família" />
     <title>%WEB_TITLE%</title>
 
     <style id="expo-reset">
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
       html,
       body {
-        box-sizing: border-box;
         width: 100%;
         height: 100%;
         margin: 0;
         padding: 0;
-        background: #101312;
-      }
-
-      html {
-        min-height: 100%;
+        background: #111613;
       }
 
       body {
@@ -43,7 +44,6 @@
         inset: 0;
         overflow: hidden;
         overscroll-behavior: none;
-        -webkit-overflow-scrolling: touch;
       }
 
       #root {
@@ -55,7 +55,7 @@
         height: 100%;
         min-height: 0;
         overflow: hidden;
-        background: #101312;
+        background: #111613;
       }
 
       #root [style*="overflow"] {
@@ -64,13 +64,14 @@
 
       #navegacao-inferior {
         box-sizing: border-box !important;
-        height: calc(40px + env(safe-area-inset-bottom, 0px)) !important;
-        min-height: calc(40px + env(safe-area-inset-bottom, 0px)) !important;
-        padding-top: 0 !important;
-        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+        height: 44px !important;
+        min-height: 44px !important;
+        max-height: 44px !important;
+        padding: 0 !important;
         margin: 0 !important;
-        flex-shrink: 0 !important;
-        background-color: #111613 !important;
+        flex: 0 0 44px !important;
+        overflow: hidden;
+        background: #111613 !important;
         border-bottom: 0 !important;
       }
     </style>
