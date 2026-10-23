@@ -124,8 +124,8 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    height: 54,
-    minHeight: 54,
+    height: 58,
+    minHeight: 58,
     paddingTop: 3,
     paddingHorizontal: 8,
     flexDirection: "row",
@@ -140,7 +140,7 @@ const estilos = StyleSheet.create({
   item: {
     flex: 1,
     minWidth: 0,
-    height: 51,
+    height: 55,
     alignItems: "center",
     justifyContent: "center",
     gap: 0,

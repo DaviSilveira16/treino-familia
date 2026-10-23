@@ -546,7 +546,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         post_type: tipoPublicacao,
         image_path: caminhoFoto,
         workout_plan_name: nomePlano,
-        workout_snapshot: snapshot,
+        workout_snapshot: snapshot ?? [],
       });
       if (error) throw error;
       setTextoPublicacao("");
