@@ -1,5 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type RotaInferior = "Inicio" | "comunidade";
 
@@ -10,15 +11,24 @@ type Props = {
 };
 
 export default function NavegacaoInferior({
-  corTema = "#35D07F",
+  corTema = "#0B84F3",
   rotaAtual,
   onNavegar,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const comunidadeAtiva = rotaAtual === "comunidade";
-  const corIconeComunidade = comunidadeAtiva ? corTema : "#9AA69D";
+  const treinosAtivo = !comunidadeAtiva;
+  const corIconeComunidade = comunidadeAtiva ? corTema : "#A3ACA5";
+  const bottomSpace = Math.max(insets.bottom, 10);
 
   return (
-    <View nativeID="navegacao-inferior" style={estilos.barra}>
+    <View
+      nativeID="navegacao-inferior"
+      style={[
+        estilos.barra,
+        { paddingBottom: bottomSpace, height: 74 + bottomSpace },
+      ]}
+    >
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
@@ -26,61 +36,54 @@ export default function NavegacaoInferior({
           if (!comunidadeAtiva) onNavegar("comunidade");
         }}
         style={estilos.item}
-        activeOpacity={0.8}
+        activeOpacity={0.85}
       >
-        <View
-          style={[
-            estilos.icone,
-            estilos.iconeComunidadeFundo,
-            comunidadeAtiva && {
-              backgroundColor: `${corTema}18`,
-              borderColor: `${corTema}90`,
-            },
-          ]}
-        >
-          <View style={estilos.desenhoComunidade}>
-            <View
-              style={[
-                estilos.cabecaComunidade,
-                estilos.cabecaEsquerda,
-                { backgroundColor: corIconeComunidade },
-              ]}
-            />
-            <View
-              style={[
-                estilos.cabecaComunidade,
-                estilos.cabecaCentral,
-                { backgroundColor: corIconeComunidade },
-              ]}
-            />
-            <View
-              style={[
-                estilos.cabecaComunidade,
-                estilos.cabecaDireita,
-                { backgroundColor: corIconeComunidade },
-              ]}
-            />
-            <View
-              style={[
-                estilos.corpoComunidade,
-                estilos.corpoEsquerdo,
-                { backgroundColor: corIconeComunidade },
-              ]}
-            />
-            <View
-              style={[
-                estilos.corpoComunidade,
-                estilos.corpoCentral,
-                { backgroundColor: corIconeComunidade },
-              ]}
-            />
-            <View
-              style={[
-                estilos.corpoComunidade,
-                estilos.corpoDireito,
-                { backgroundColor: corIconeComunidade },
-              ]}
-            />
+        <View style={estilos.areaIcone}>
+          <View style={estilos.iconeBase}>
+            <View style={estilos.desenhoComunidade}>
+              <View
+                style={[
+                  estilos.cabecaComunidade,
+                  estilos.cabecaEsquerda,
+                  { backgroundColor: corIconeComunidade },
+                ]}
+              />
+              <View
+                style={[
+                  estilos.cabecaComunidade,
+                  estilos.cabecaCentral,
+                  { backgroundColor: corIconeComunidade },
+                ]}
+              />
+              <View
+                style={[
+                  estilos.cabecaComunidade,
+                  estilos.cabecaDireita,
+                  { backgroundColor: corIconeComunidade },
+                ]}
+              />
+              <View
+                style={[
+                  estilos.corpoComunidade,
+                  estilos.corpoEsquerdo,
+                  { backgroundColor: corIconeComunidade },
+                ]}
+              />
+              <View
+                style={[
+                  estilos.corpoComunidade,
+                  estilos.corpoCentral,
+                  { backgroundColor: corIconeComunidade },
+                ]}
+              />
+              <View
+                style={[
+                  estilos.corpoComunidade,
+                  estilos.corpoDireito,
+                  { backgroundColor: corIconeComunidade },
+                ]}
+              />
+            </View>
           </View>
         </View>
         <Text style={[estilos.rotulo, comunidadeAtiva && { color: corTema }]}>
@@ -93,22 +96,27 @@ export default function NavegacaoInferior({
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Ir para treinos"
-        onPress={() => onNavegar("Inicio")}
+        onPress={() => {
+          if (!treinosAtivo) onNavegar("Inicio");
+        }}
         style={estilos.item}
-        activeOpacity={0.8}
+        activeOpacity={0.85}
       >
-        <View
-          style={[
-            estilos.icone,
-            !comunidadeAtiva && {
-              backgroundColor: `${corTema}24`,
-              borderColor: `${corTema}90`,
-            },
-          ]}
-        >
-          <Text style={estilos.emoji}>🏋️</Text>
+        <View style={estilos.areaIcone}>
+          <View
+            style={[
+              estilos.iconeBase,
+              estilos.iconeTreino,
+              treinosAtivo && {
+                backgroundColor: `${corTema}1A`,
+                borderColor: `${corTema}90`,
+              },
+            ]}
+          >
+            <Text style={estilos.emoji}>🏋️</Text>
+          </View>
         </View>
-        <Text style={[estilos.rotulo, !comunidadeAtiva && { color: corTema }]}>
+        <Text style={[estilos.rotulo, treinosAtivo && { color: corTema }]}>
           Treinos
         </Text>
       </TouchableOpacity>
@@ -118,67 +126,77 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    height: 56,
-    minHeight: 56,
-    maxHeight: 56,
-    padding: 0,
-    paddingHorizontal: 6,
-    margin: 0,
+    backgroundColor: "#090C0B",
+    borderTopWidth: 1,
+    borderTopColor: "#1A211E",
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-evenly",
-    gap: 0,
-    flexGrow: 0,
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingTop: 8,
     flexShrink: 0,
-    backgroundColor: "#111613",
-    borderTopWidth: 1,
-    borderTopColor: "#303A33",
   },
   item: {
     flex: 1,
-    minWidth: 0,
-    height: 52,
-    padding: 0,
-    margin: 0,
     alignItems: "center",
     justifyContent: "center",
-    gap: 0,
+    minWidth: 0,
   },
-  icone: {
-    minWidth: 34,
-    height: 24,
-    paddingHorizontal: 4,
-    margin: 0,
-    borderRadius: 6,
+  areaIcone: {
+    minHeight: 34,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconeBase: {
+    minWidth: 44,
+    height: 34,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
     borderColor: "transparent",
-    alignItems: "center",
-    justifyContent: "center",
+    paddingHorizontal: 12,
   },
-  emoji: { fontSize: 17, lineHeight: 20 },
-  iconeComunidadeFundo: { paddingHorizontal: 6 },
-  desenhoComunidade: { width: 20, height: 15, position: "relative" },
-  cabecaComunidade: { position: "absolute", borderRadius: 8 },
-  cabecaEsquerda: { width: 5, height: 5, left: 1, top: 3 },
-  cabecaCentral: { width: 6, height: 6, left: 7, top: 0 },
-  cabecaDireita: { width: 5, height: 5, right: 1, top: 3 },
+  iconeTreino: {
+    minWidth: 54,
+  },
+  emoji: {
+    fontSize: 19,
+    lineHeight: 22,
+  },
+  desenhoComunidade: {
+    width: 24,
+    height: 18,
+    position: "relative",
+  },
+  cabecaComunidade: {
+    position: "absolute",
+    borderRadius: 999,
+  },
+  cabecaEsquerda: { width: 6, height: 6, left: 1, top: 4 },
+  cabecaCentral: { width: 8, height: 8, left: 8, top: 1 },
+  cabecaDireita: { width: 6, height: 6, right: 1, top: 4 },
   corpoComunidade: {
     position: "absolute",
-    borderTopLeftRadius: 5,
-    borderTopRightRadius: 5,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 2,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 6,
+    borderBottomLeftRadius: 3,
+    borderBottomRightRadius: 3,
   },
-  corpoEsquerdo: { width: 7, height: 6, left: 0, top: 9 },
-  corpoCentral: { width: 8, height: 8, left: 6, top: 7 },
-  corpoDireito: { width: 7, height: 6, right: 0, top: 9 },
+  corpoEsquerdo: { width: 8, height: 6, left: 0, top: 11 },
+  corpoCentral: { width: 10, height: 9, left: 7, top: 8 },
+  corpoDireito: { width: 8, height: 6, right: 0, top: 11 },
   rotulo: {
-    color: "#9AA69D",
+    marginTop: 6,
+    color: "#A3ACA5",
     fontSize: 11,
     lineHeight: 13,
     fontWeight: "700",
-    margin: 0,
-    padding: 0,
   },
-  divisor: { width: 1, height: 26, backgroundColor: "#303A33" },
+  divisor: {
+    width: 1,
+    height: 32,
+    backgroundColor: "#2B322E",
+    marginHorizontal: 8,
+  },
 });
