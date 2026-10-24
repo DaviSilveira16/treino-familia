@@ -272,25 +272,47 @@ export default function EvolucaoTreinos({
       }),
     [],
   );
-  const pontos = pontosPorExercicio[exercicioSelecionado]?.pontos ?? [];
-  const esforcoRecente = pontos.length
-    ? extrairEsforco(notasPorSessao[pontos[pontos.length - 1].id])
-    : undefined;
-  const sugestoes = gerarSugestoes(
-    pontosPorExercicio[exercicioSelecionado]?.nome ?? "exercício",
-    pontos,
-    esforcoRecente,
+  const pontos = useMemo(
+    () => pontosPorExercicio[exercicioSelecionado]?.pontos ?? [],
+    [pontosPorExercicio, exercicioSelecionado],
   );
-  const recordesExercicio = (analise?.recordes ?? [])
-    .filter((item) => item.chave === exercicioSelecionado)
-    .slice(-8)
-    .reverse();
-  const recordesRecentes = (analise?.recordes ?? []).slice(-5).reverse();
-  const maiorCarga = Math.max(1, ...pontos.map((ponto) => ponto.cargaMaxima));
-  const maiorVolume = Math.max(1, ...pontos.map((ponto) => ponto.volume));
-  const maiorRepeticoes = Math.max(
-    1,
-    ...pontos.map((ponto) => ponto.repsNaMaiorCarga),
+  // Os gráficos não precisam recalcular máximos e sugestões a cada letra digitada na busca.
+  const { sugestoes, maiorCarga, maiorVolume, maiorRepeticoes } =
+    useMemo(() => {
+      const ultimaSessao = pontos[pontos.length - 1];
+      const esforcoRecente = ultimaSessao
+        ? extrairEsforco(notasPorSessao[ultimaSessao.id])
+        : undefined;
+      let carga = 1;
+      let volume = 1;
+      let repeticoes = 1;
+      for (const ponto of pontos) {
+        carga = Math.max(carga, ponto.cargaMaxima);
+        volume = Math.max(volume, ponto.volume);
+        repeticoes = Math.max(repeticoes, ponto.repsNaMaiorCarga);
+      }
+      return {
+        sugestoes: gerarSugestoes(
+          pontosPorExercicio[exercicioSelecionado]?.nome ?? "exercício",
+          pontos,
+          esforcoRecente,
+        ),
+        maiorCarga: carga,
+        maiorVolume: volume,
+        maiorRepeticoes: repeticoes,
+      };
+    }, [pontos, pontosPorExercicio, exercicioSelecionado, notasPorSessao]);
+  const recordesExercicio = useMemo(
+    () =>
+      (analise?.recordes ?? [])
+        .filter((item) => item.chave === exercicioSelecionado)
+        .slice(-8)
+        .reverse(),
+    [analise, exercicioSelecionado],
+  );
+  const recordesRecentes = useMemo(
+    () => (analise?.recordes ?? []).slice(-5).reverse(),
+    [analise],
   );
   const primeiro = pontos[0];
   const ultimo = pontos[pontos.length - 1];

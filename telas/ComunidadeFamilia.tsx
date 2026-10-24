@@ -15,6 +15,7 @@ import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../supabase";
+import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import { obterRevisaoDeDados } from "../servicos/revisaoDados";
 
 type Familia = { id: string; name: string; invite_code: string };
@@ -299,15 +300,19 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       if (listaPlanos.error) throw listaPlanos.error;
       setMembros((resumo.data ?? []) as MembroResumo[]);
       setPlanos((listaPlanos.data ?? []) as Plano[]);
-      const postsComFotos = await Promise.all(
-        ((feed.data ?? []) as Publicacao[]).map(async (post) => {
-          if (!post.image_path) return { ...post, image_url: null };
-          const { data: assinatura } = await supabase.storage
-            .from("community-photos")
-            .createSignedUrl(post.image_path, 3600);
-          return { ...post, image_url: assinatura?.signedUrl ?? null };
-        }),
+      const listaPosts = (feed.data ?? []) as Publicacao[];
+      const urlsFotos = await obterFotosAssinadas(
+        "community-photos",
+        listaPosts.map((post) => post.image_path),
+        3600,
+        usuario.id,
       );
+      const postsComFotos = listaPosts.map((post) => ({
+        ...post,
+        image_url: post.image_path
+          ? (urlsFotos.get(post.image_path) ?? null)
+          : null,
+      }));
       setPublicacoes(postsComFotos);
       ultimaConsultaRef.current = Date.now();
       ultimaRevisaoRef.current = obterRevisaoDeDados();

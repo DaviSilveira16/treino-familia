@@ -143,13 +143,25 @@ export default function HistoricoTreinos({
         return;
       }
       const usuarioId = usuarioData.user.id;
-      const { data: cardios, error: erroCardios } = await supabase
-        .from("cardio_sessions")
-        .select(
-          "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
-        )
-        .eq("user_id", usuarioId)
-        .order("started_at", { ascending: false });
+      // Treinos e cardio independem entre si: iniciar ambos na mesma rodada.
+      const [resultadoCardios, resultadoSessoes] = await Promise.all([
+        supabase
+          .from("cardio_sessions")
+          .select(
+            "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
+          )
+          .eq("user_id", usuarioId)
+          .order("started_at", { ascending: false }),
+        supabase
+          .from("workout_sessions")
+          .select(
+            "id, plan_id, started_at, finished_at, notes, status, duration_minutes, intensity, active_calories, volume_kg, exercises_count, sets_completed, reps_completed, met_value",
+          )
+          .eq("user_id", usuarioId)
+          .order("started_at", { ascending: false }),
+      ]);
+      const { data: cardios, error: erroCardios } = resultadoCardios;
+      const { data: sessoes, error: erroSessoes } = resultadoSessoes;
       if (erroCardios) {
         Alert.alert(
           "Erro",
@@ -158,13 +170,6 @@ export default function HistoricoTreinos({
         return;
       }
       setHistoricoCardio((cardios ?? []) as SessaoCardioHistorico[]);
-      const { data: sessoes, error: erroSessoes } = await supabase
-        .from("workout_sessions")
-        .select(
-          "id, plan_id, started_at, finished_at, notes, status, duration_minutes, intensity, active_calories, volume_kg, exercises_count, sets_completed, reps_completed, met_value",
-        )
-        .eq("user_id", usuarioId)
-        .order("started_at", { ascending: false });
       if (erroSessoes) {
         Alert.alert(
           "Erro",

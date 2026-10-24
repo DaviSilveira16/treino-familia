@@ -13,6 +13,7 @@ import {
 import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../supabase";
+import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import { registrarMudancaDeDados } from "../servicos/revisaoDados";
 
 type Treino = {
@@ -172,32 +173,37 @@ export default function MeusTreinos({
         }
 
         const listaBase = (data ?? []) as Exercicio[];
-        const lista = await Promise.all(
-          listaBase.map(async (exercicio) => {
-            if (!exercicio.photo_path) {
-              return { ...exercicio, photo_url: null };
-            }
-            const { data: fotoAssinada } = await supabase.storage
-              .from("exercise-photos")
-              .createSignedUrl(exercicio.photo_path, 604800);
-            return {
-              ...exercicio,
-              photo_url: fotoAssinada?.signedUrl ?? null,
-            };
-          }),
-        );
+        // Fotos e referências de carga são independentes: consultar em paralelo.
+        const [urlsFotos, resultadoReferencias] = await Promise.all([
+          obterFotosAssinadas(
+            "exercise-photos",
+            listaBase.map((exercicio) => exercicio.photo_path),
+            604800,
+            usuarioId,
+          ),
+          listaBase.length > 0
+            ? supabase
+                .from("exercise_load_defaults")
+                .select("exercise_id, set_number, reps, weight_kg")
+                .eq("user_id", usuarioId)
+                .in(
+                  "exercise_id",
+                  listaBase.map((exercicio) => exercicio.id),
+                )
+                .order("set_number", { ascending: true })
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+        const lista = listaBase.map((exercicio) => ({
+          ...exercicio,
+          photo_url: exercicio.photo_path
+            ? (urlsFotos.get(exercicio.photo_path) ?? null)
+            : null,
+        }));
         setExercicios(lista);
         const cargas: Record<string, number> = {};
         if (lista.length > 0) {
-          const { data: referencias, error: erroReferencias } = await supabase
-            .from("exercise_load_defaults")
-            .select("exercise_id, set_number, reps, weight_kg")
-            .eq("user_id", usuarioId)
-            .in(
-              "exercise_id",
-              lista.map((exercicio) => exercicio.id),
-            )
-            .order("set_number", { ascending: true });
+          const { data: referencias, error: erroReferencias } =
+            resultadoReferencias;
           if (erroReferencias) {
             mostrarMensagem("Erro ao carregar cargas", erroReferencias.message);
             return;

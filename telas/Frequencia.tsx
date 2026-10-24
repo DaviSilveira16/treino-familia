@@ -151,9 +151,28 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const ultimaConsultaRef = useRef(0);
   const ultimaRevisaoRef = useRef(-1);
   const dadosCarregadosRef = useRef(false);
+  // Cada navegação mensal consulta apenas as sessões daquele mês.
+  const chaveMes = `${mesAtual.getFullYear()}-${mesAtual.getMonth()}`;
+  const mesCarregadoRef = useRef("");
+  const consultaAtivaRef = useRef(0);
   const carregarDados = useCallback(async () => {
-    // Na volta para o calendário, o conteúdo existente fica utilizável.
-    if (!dadosCarregadosRef.current) setCarregando(true);
+    const consulta = ++consultaAtivaRef.current;
+    const inicioMes = new Date(
+      mesAtual.getFullYear(),
+      mesAtual.getMonth(),
+      1,
+    ).toISOString();
+    const fimMes = new Date(
+      mesAtual.getFullYear(),
+      mesAtual.getMonth() + 1,
+      1,
+    ).toISOString();
+    // Na mudança de mês, não exibir as sessões de outro mês enquanto carrega.
+    if (!dadosCarregadosRef.current || mesCarregadoRef.current !== chaveMes) {
+      setCarregando(true);
+      setSessoes([]);
+      setSessoesCardio([]);
+    }
     try {
       const { data: usuario, error: erroUsuario } =
         await supabase.auth.getUser();
@@ -204,6 +223,8 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           .from("workout_sessions")
           .select("id, plan_id, started_at, notes, status")
           .eq("user_id", usuario.user.id)
+          .gte("started_at", inicioMes)
+          .lt("started_at", fimMes)
           .order("started_at", { ascending: false }),
         supabase
           .from("cardio_activities")
@@ -218,6 +239,8 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
             "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
           )
           .eq("user_id", usuario.user.id)
+          .gte("started_at", inicioMes)
+          .lt("started_at", fimMes)
           .order("started_at", { ascending: false }),
       ]);
       if (resultadoTreinos.error) {
@@ -242,23 +265,27 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         );
         return;
       }
+      // Uma consulta anterior (de outro mês) não pode sobrescrever a atual.
+      if (consulta !== consultaAtivaRef.current) return;
       setTreinos((resultadoTreinos.data ?? []) as Treino[]);
       setSessoes((resultadoSessoes.data ?? []) as Sessao[]);
       setModelosCardio((resultadoModelosCardio.data ?? []) as CardioModelo[]);
       setSessoesCardio((resultadoSessoesCardio.data ?? []) as SessaoCardio[]);
       dadosCarregadosRef.current = true;
+      mesCarregadoRef.current = chaveMes;
       ultimaConsultaRef.current = Date.now();
       ultimaRevisaoRef.current = obterRevisaoDeDados();
     } catch {
       Alert.alert("Erro", "Não foi possível carregar o calendário.");
     } finally {
-      setCarregando(false);
+      if (consulta === consultaAtivaRef.current) setCarregando(false);
     }
-  }, []);
+  }, [chaveMes]);
   useFocusEffect(
     useCallback(() => {
       // Evita quatro novas consultas quando se entra e sai da tela rapidamente.
       if (
+        mesCarregadoRef.current === chaveMes &&
         Date.now() - ultimaConsultaRef.current < 12000 &&
         ultimaRevisaoRef.current === obterRevisaoDeDados()
       )
@@ -266,8 +293,12 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       const espera = setTimeout(() => {
         void carregarDados();
       }, 80);
-      return () => clearTimeout(espera);
-    }, [carregarDados]),
+      return () => {
+        clearTimeout(espera);
+        // Ignorar resposta de um mês que deixou de estar em foco.
+        consultaAtivaRef.current++;
+      };
+    }, [carregarDados, chaveMes]),
   );
   const ano = mesAtual.getFullYear();
   const mes = mesAtual.getMonth();
@@ -363,7 +394,10 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     return quantidade;
   }, [diasTreinados, ano, mes]);
   function mudarMes(direcao: number) {
-    setMesAtual(new Date(ano, mes + direcao, 1));
+    const novoMes = new Date(ano, mes + direcao, 1);
+    setMesAtual(novoMes);
+    // O dia selecionado deve sempre corresponder ao mês apresentado.
+    setDataSelecionada(dataLocal(novoMes));
   }
   async function registrarTreino() {
     if (!usuarioId || !treinoSelecionado || !dataSelecionada) {
