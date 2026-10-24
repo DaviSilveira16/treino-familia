@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   ActivityIndicator,
@@ -13,6 +13,10 @@ import {
 
 import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
+import {
+  obterRevisaoDeDados,
+  registrarMudancaDeDados,
+} from "../servicos/revisaoDados";
 import {
   categoriaDoCardio,
   estimarCaloriasAtivas,
@@ -144,8 +148,12 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     nome: string;
   } | null>(null);
   const [mensagemStatus, setMensagemStatus] = useState("");
+  const ultimaConsultaRef = useRef(0);
+  const ultimaRevisaoRef = useRef(-1);
+  const dadosCarregadosRef = useRef(false);
   const carregarDados = useCallback(async () => {
-    setCarregando(true);
+    // Na volta para o calendário, o conteúdo existente fica utilizável.
+    if (!dadosCarregadosRef.current) setCarregando(true);
     try {
       const { data: usuario, error: erroUsuario } =
         await supabase.auth.getUser();
@@ -238,6 +246,9 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setSessoes((resultadoSessoes.data ?? []) as Sessao[]);
       setModelosCardio((resultadoModelosCardio.data ?? []) as CardioModelo[]);
       setSessoesCardio((resultadoSessoesCardio.data ?? []) as SessaoCardio[]);
+      dadosCarregadosRef.current = true;
+      ultimaConsultaRef.current = Date.now();
+      ultimaRevisaoRef.current = obterRevisaoDeDados();
     } catch {
       Alert.alert("Erro", "Não foi possível carregar o calendário.");
     } finally {
@@ -246,7 +257,16 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   }, []);
   useFocusEffect(
     useCallback(() => {
-      carregarDados();
+      // Evita quatro novas consultas quando se entra e sai da tela rapidamente.
+      if (
+        Date.now() - ultimaConsultaRef.current < 12000 &&
+        ultimaRevisaoRef.current === obterRevisaoDeDados()
+      )
+        return;
+      const espera = setTimeout(() => {
+        void carregarDados();
+      }, 80);
+      return () => clearTimeout(espera);
     }, [carregarDados]),
   );
   const ano = mesAtual.getFullYear();
@@ -257,14 +277,31 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     ...Array.from({ length: primeiroDia }, () => null),
     ...Array.from({ length: quantidadeDias }, (_, indice) => indice + 1),
   ];
-  const sessoesDoDia = sessoes.filter(
-    (sessao) =>
-      sessao.status !== "em_andamento" &&
-      dataDaSessao(sessao.started_at) === dataSelecionada,
-  );
-  const cardiosDoDia = sessoesCardio.filter(
-    (sessao) => dataDaSessao(sessao.started_at) === dataSelecionada,
-  );
+  // Uma única indexação por atualização do histórico. Digitar em um campo ou
+  // mudar o dia não precisa converter todas as datas nem percorrer todas as sessões.
+  const indicePorDia = useMemo(() => {
+    const treinosPorDia = new Map<string, Sessao[]>();
+    const cardiosPorDia = new Map<string, SessaoCardio[]>();
+    const diasTreinados = new Set<string>();
+    for (const sessao of sessoes) {
+      if (sessao.status === "em_andamento") continue;
+      const data = dataDaSessao(sessao.started_at);
+      const lista = treinosPorDia.get(data) ?? [];
+      lista.push(sessao);
+      treinosPorDia.set(data, lista);
+      if (sessao.plan_id !== null) diasTreinados.add(data);
+    }
+    for (const sessao of sessoesCardio) {
+      const data = dataDaSessao(sessao.started_at);
+      const lista = cardiosPorDia.get(data) ?? [];
+      lista.push(sessao);
+      cardiosPorDia.set(data, lista);
+      diasTreinados.add(data);
+    }
+    return { treinosPorDia, cardiosPorDia, diasTreinados };
+  }, [sessoes, sessoesCardio]);
+  const sessoesDoDia = indicePorDia.treinosPorDia.get(dataSelecionada) ?? [];
+  const cardiosDoDia = indicePorDia.cardiosPorDia.get(dataSelecionada) ?? [];
   const modeloCardioSelecionado = modelosCardio.find(
     (item) => item.id === cardioSelecionado,
   );
@@ -316,34 +353,15 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
               : null,
         })
       : null;
-  const diasTreinados = new Set([
-    ...sessoes
-      .filter(
-        (sessao) => sessao.plan_id !== null && sessao.status !== "em_andamento",
-      )
-      .map((sessao) => dataDaSessao(sessao.started_at)),
-    ...sessoesCardio.map((sessao) => dataDaSessao(sessao.started_at)),
-  ]);
-  const datasDoMes = [
-    ...sessoes
-      .filter((sessao) => {
-        const data = new Date(sessao.started_at);
-        return (
-          sessao.status !== "em_andamento" &&
-          sessao.plan_id !== null &&
-          data.getFullYear() === ano &&
-          data.getMonth() === mes
-        );
-      })
-      .map((sessao) => dataDaSessao(sessao.started_at)),
-    ...sessoesCardio
-      .filter((sessao) => {
-        const data = new Date(sessao.started_at);
-        return data.getFullYear() === ano && data.getMonth() === mes;
-      })
-      .map((sessao) => dataDaSessao(sessao.started_at)),
-  ];
-  const frequenciaMensal = new Set(datasDoMes).size;
+  const diasTreinados = indicePorDia.diasTreinados;
+  const frequenciaMensal = useMemo(() => {
+    const prefixo = `${ano}-${String(mes + 1).padStart(2, "0")}-`;
+    let quantidade = 0;
+    for (const dia of diasTreinados) {
+      if (dia.startsWith(prefixo)) quantidade++;
+    }
+    return quantidade;
+  }, [diasTreinados, ano, mes]);
   function mudarMes(direcao: number) {
     setMesAtual(new Date(ano, mes + direcao, 1));
   }
@@ -526,6 +544,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         }
       }
 
+      registrarMudancaDeDados();
       await carregarDados();
       setTreinoSelecionado("");
       Alert.alert(
@@ -784,6 +803,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setDistanciaCardio("");
       setInclinacaoCardio("0");
       setAndaresSubidos("");
+      registrarMudancaDeDados();
       await carregarDados();
       Alert.alert(
         "Cardio registrado",
@@ -828,6 +848,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         return;
       }
 
+      registrarMudancaDeDados();
       setRegistroParaExcluir(null);
       if (registro.tipo === "treino") setTreinoSelecionado("");
       if (registro.tipo === "cardio") setCardioSelecionado("");

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   StyleSheet,
@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabase";
+import { obterRevisaoDeDados } from "../servicos/revisaoDados";
 
 type Props = {
   onAbrirProgramacao: () => void;
@@ -48,9 +49,12 @@ export default function TreinoDoDia({
 }: Props) {
   const [treino, setTreino] = useState<TreinoHoje | null>(null);
   const [carregando, setCarregando] = useState(true);
+  const ultimaConsultaRef = useRef(0);
+  const ultimaRevisaoRef = useRef(-1);
+  const dadosCarregadosRef = useRef(false);
 
   const carregarTreinoHoje = useCallback(async () => {
-    setCarregando(true);
+    if (!dadosCarregadosRef.current) setCarregando(true);
 
     try {
       const { data: usuarioData, error: erroUsuario } =
@@ -83,6 +87,9 @@ export default function TreinoDoDia({
 
       if (!sessaoComPlano?.plan_id) {
         setTreino({ nome: "", definido: false });
+        dadosCarregadosRef.current = true;
+        ultimaConsultaRef.current = Date.now();
+        ultimaRevisaoRef.current = obterRevisaoDeDados();
         return;
       }
 
@@ -95,6 +102,9 @@ export default function TreinoDoDia({
 
       if (erroPlano || !plano?.name) {
         setTreino({ nome: "", definido: false });
+        dadosCarregadosRef.current = true;
+        ultimaConsultaRef.current = Date.now();
+        ultimaRevisaoRef.current = obterRevisaoDeDados();
         return;
       }
 
@@ -102,6 +112,9 @@ export default function TreinoDoDia({
         nome: plano.name,
         definido: true,
       });
+      dadosCarregadosRef.current = true;
+      ultimaConsultaRef.current = Date.now();
+      ultimaRevisaoRef.current = obterRevisaoDeDados();
     } catch {
       setTreino(null);
     } finally {
@@ -111,7 +124,15 @@ export default function TreinoDoDia({
 
   useFocusEffect(
     useCallback(() => {
-      carregarTreinoHoje();
+      if (
+        Date.now() - ultimaConsultaRef.current < 12000 &&
+        ultimaRevisaoRef.current === obterRevisaoDeDados()
+      )
+        return;
+      const espera = setTimeout(() => {
+        void carregarTreinoHoje();
+      }, 80);
+      return () => clearTimeout(espera);
     }, [carregarTreinoHoje]),
   );
 

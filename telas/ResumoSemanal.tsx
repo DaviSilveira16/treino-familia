@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   StyleSheet,
@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabase";
+import { obterRevisaoDeDados } from "../servicos/revisaoDados";
 
 type Props = { corTema?: string };
 type DadosSemana = {
@@ -41,10 +42,13 @@ export default function ResumoSemanal({ corTema = "#35D07F" }: Props) {
     caloriasDisponiveis: 0,
   });
   const [carregando, setCarregando] = useState(true);
+  const ultimaConsultaRef = useRef(0);
+  const ultimaRevisaoRef = useRef(-1);
+  const dadosCarregadosRef = useRef(false);
   const [erro, setErro] = useState("");
 
   const carregar = useCallback(async () => {
-    setCarregando(true);
+    if (!dadosCarregadosRef.current) setCarregando(true);
     setErro("");
     try {
       const { data: usuario, error: erroUsuario } =
@@ -95,6 +99,9 @@ export default function ResumoSemanal({ corTema = "#35D07F" }: Props) {
       const caloriasDisponiveis = [...treinos, ...cardios].filter(
         (item) => item.active_calories != null,
       ).length;
+      dadosCarregadosRef.current = true;
+      ultimaConsultaRef.current = Date.now();
+      ultimaRevisaoRef.current = obterRevisaoDeDados();
       setDados({
         treinos: treinos.length,
         cardios: cardios.length,
@@ -115,7 +122,15 @@ export default function ResumoSemanal({ corTema = "#35D07F" }: Props) {
 
   useFocusEffect(
     useCallback(() => {
-      carregar();
+      if (
+        Date.now() - ultimaConsultaRef.current < 12000 &&
+        ultimaRevisaoRef.current === obterRevisaoDeDados()
+      )
+        return;
+      const espera = setTimeout(() => {
+        void carregar();
+      }, 80);
+      return () => clearTimeout(espera);
     }, [carregar]),
   );
 

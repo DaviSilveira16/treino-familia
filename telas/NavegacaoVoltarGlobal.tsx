@@ -121,12 +121,14 @@ export default function NavegacaoVoltarGlobal({
 
   return (
     <Animated.View
-      {...(Platform.OS === "web" ? gestoDeVoltar.panHandlers : {})}
+      // O gesto na web já é tratado em App.tsx. Evita dois listeners de arraste
+      // disputando a rolagem de telas longas no Safari.
+      {...(Platform.OS === "android" ? gestoDeVoltar.panHandlers : {})}
       style={[
         estilos.container,
         {
           transform: [{ translateX: deslocamento }],
-          shadowOpacity: Platform.OS === "web" ? 0.18 : 0,
+          shadowOpacity: 0,
         },
       ]}
     >

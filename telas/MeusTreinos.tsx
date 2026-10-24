@@ -13,6 +13,7 @@ import {
 import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../supabase";
+import { registrarMudancaDeDados } from "../servicos/revisaoDados";
 
 type Treino = {
   id: string;
@@ -254,6 +255,7 @@ export default function MeusTreinos({
       }
 
       const novoTreino = data as Treino;
+      registrarMudancaDeDados();
       setTreinos((atuais) =>
         [...atuais, novoTreino].sort((a, b) => a.name.localeCompare(b.name)),
       );
@@ -352,6 +354,7 @@ export default function MeusTreinos({
         return;
       }
 
+      registrarMudancaDeDados();
       setTreinos((atuais) => atuais.filter((item) => item.id !== treino.id));
 
       if (treinoSelecionado?.id === treino.id) {

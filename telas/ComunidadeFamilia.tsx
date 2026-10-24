@@ -15,6 +15,7 @@ import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../supabase";
+import { obterRevisaoDeDados } from "../servicos/revisaoDados";
 
 type Familia = { id: string; name: string; invite_code: string };
 type MembroResumo = {
@@ -195,8 +196,11 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [planoSelecionado, setPlanoSelecionado] = useState("");
   const [publicando, setPublicando] = useState(false);
 
+  const ultimaConsultaRef = useRef(0);
+  const ultimaRevisaoRef = useRef(-1);
+  const dadosCarregadosRef = useRef(false);
   const carregar = useCallback(async (idFamiliaSolicitada?: string) => {
-    setCarregando(true);
+    if (!dadosCarregadosRef.current) setCarregando(true);
     setErro("");
     try {
       const { data: respostaUsuario, error: erroUsuario } =
@@ -305,6 +309,9 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         }),
       );
       setPublicacoes(postsComFotos);
+      ultimaConsultaRef.current = Date.now();
+      ultimaRevisaoRef.current = obterRevisaoDeDados();
+      dadosCarregadosRef.current = true;
     } catch (problema) {
       setErro(
         problema instanceof Error
@@ -319,7 +326,15 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
 
   useFocusEffect(
     useCallback(() => {
-      void carregar();
+      if (
+        Date.now() - ultimaConsultaRef.current < 12000 &&
+        ultimaRevisaoRef.current === obterRevisaoDeDados()
+      )
+        return;
+      const espera = setTimeout(() => {
+        void carregar();
+      }, 80);
+      return () => clearTimeout(espera);
     }, [carregar]),
   );
 

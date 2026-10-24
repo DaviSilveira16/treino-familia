@@ -128,6 +128,9 @@ export default function HistoricoTreinos({
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
   const [sessaoExpandida, setSessaoExpandida] = useState<string | null>(null);
+  // ScrollView não virtualiza: evita montar centenas de cartões de uma vez.
+  const [limiteTreinosVisiveis, setLimiteTreinosVisiveis] = useState(15);
+  const [limiteCardiosVisiveis, setLimiteCardiosVisiveis] = useState(15);
   const carregarHistorico = useCallback(async (atualizacao = false) => {
     if (atualizacao) setAtualizando(true);
     else setCarregando(true);
@@ -223,14 +226,21 @@ export default function HistoricoTreinos({
       const nomesPlanos = new Map(
         planos.map((plano) => [plano.id, plano.name]),
       );
+      // Agrupar uma vez evita percorrer todo o histórico para cada sessão.
+      const seriesPorSessao = new Map<string, SerieTreino[]>();
+      for (const serie of series) {
+        const lista = seriesPorSessao.get(serie.session_id) ?? [];
+        lista.push(serie);
+        seriesPorSessao.set(serie.session_id, lista);
+      }
       const resultado: TreinoHistorico[] = listaSessoes.map((sessao) => ({
         ...sessao,
         nomeTreino: sessao.plan_id
           ? (nomesPlanos.get(sessao.plan_id) ?? "Treino removido")
           : "Treino removido",
-        series: series
-          .filter((serie) => serie.session_id === sessao.id)
-          .map((serie) => ({ ...serie })),
+        series: (seriesPorSessao.get(sessao.id) ?? []).map((serie) => ({
+          ...serie,
+        })),
       }));
       const ordemCronologica = [...resultado].sort(
         (a, b) =>
@@ -383,7 +393,7 @@ export default function HistoricoTreinos({
           </View>
         ) : (
           <View style={estilos.lista}>
-            {historico.map((sessao) => {
+            {historico.slice(0, limiteTreinosVisiveis).map((sessao) => {
               const expandida = sessaoExpandida === sessao.id;
               const todosExercicios = Array.from(
                 new Set(
@@ -778,6 +788,20 @@ export default function HistoricoTreinos({
                 </View>
               );
             })}
+            {historico.length > limiteTreinosVisiveis && (
+              <TouchableOpacity
+                accessibilityRole="button"
+                style={{ padding: 18, alignItems: "center" }}
+                onPress={() => setLimiteTreinosVisiveis((total) => total + 15)}
+              >
+                <Text
+                  style={{ color: corTema, fontWeight: "700", fontSize: 15 }}
+                >
+                  Ver mais treinos ({historico.length - limiteTreinosVisiveis}{" "}
+                  restantes)
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
         <View style={{ marginTop: 28 }}>
@@ -796,7 +820,7 @@ export default function HistoricoTreinos({
               </Text>
             </View>
           ) : (
-            historicoCardio.map((cardio) => (
+            historicoCardio.slice(0, limiteCardiosVisiveis).map((cardio) => (
               <View
                 key={cardio.id}
                 style={[estilos.cartao, { padding: 18, marginBottom: 12 }]}
@@ -964,6 +988,18 @@ export default function HistoricoTreinos({
                 ) : null}
               </View>
             ))
+          )}
+          {historicoCardio.length > limiteCardiosVisiveis && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={{ padding: 18, alignItems: "center" }}
+              onPress={() => setLimiteCardiosVisiveis((total) => total + 15)}
+            >
+              <Text style={{ color: corTema, fontWeight: "700", fontSize: 15 }}>
+                Ver mais cardios (
+                {historicoCardio.length - limiteCardiosVisiveis} restantes)
+              </Text>
+            </TouchableOpacity>
           )}
         </View>
       </ScrollView>

@@ -372,7 +372,13 @@ function AppConteudo() {
     let conectadoAoWifi = false;
 
     async function consultarAtualizacao() {
-      if (!componenteAtivo || verificacaoEmAndamento.current) {
+      // O site no Safari já recebe a nova versão no próximo carregamento;
+      // verificar links de instalação nativa em cada retorno não ajuda na web.
+      if (
+        Platform.OS === "web" ||
+        !componenteAtivo ||
+        verificacaoEmAndamento.current
+      ) {
         return;
       }
 
@@ -836,16 +842,23 @@ function AppConteudo() {
 
         <Pilha.Navigator
           initialRouteName="Inicio"
+          detachInactiveScreens={true}
           screenOptions={{
             headerShown: false,
             gestureEnabled: Platform.OS !== "web",
             gestureDirection: "horizontal",
             gestureResponseDistance: 40,
             gestureVelocityImpact: 0.3,
-            cardOverlayEnabled: true,
-            cardShadowEnabled: true,
-            detachPreviousScreen: Platform.OS === "web" ? false : undefined,
-            cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
+            // No Safari, animações de cartões custam toques perdidos durante a transição.
+            // Mantemos a animação nativa fora da web e destacamos páginas ocultas.
+            animation: Platform.OS === "web" ? "none" : "default",
+            cardOverlayEnabled: Platform.OS !== "web",
+            cardShadowEnabled: Platform.OS !== "web",
+            detachPreviousScreen: true,
+            cardStyleInterpolator:
+              Platform.OS === "web"
+                ? CardStyleInterpolators.forNoAnimation
+                : CardStyleInterpolators.forHorizontalIOS,
             transitionSpec: {
               open: {
                 animation: "timing",
@@ -862,8 +875,7 @@ function AppConteudo() {
             },
             cardStyle: {
               flex: 1,
-              backgroundColor:
-                Platform.OS === "web" ? "transparent" : "#101312",
+              backgroundColor: "#101312",
             },
           }}
         >

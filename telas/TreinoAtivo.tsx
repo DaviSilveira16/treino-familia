@@ -5,6 +5,8 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { useIsFocused } from "@react-navigation/native";
+import { registrarMudancaDeDados } from "../servicos/revisaoDados";
 import {
   ActivityIndicator,
   Platform,
@@ -133,6 +135,7 @@ export default function TreinoAtivo({
   corTema = "#35D07F",
 }: Props) {
   const { planId, planName } = route.params;
+  const estaEmFoco = useIsFocused();
   const [usuarioId, setUsuarioId] = useState("");
   const [perfil, setPerfil] = useState<PerfilTreino | null>(null);
   const [exercicios, setExercicios] = useState<ExercicioBase[]>([]);
@@ -657,12 +660,14 @@ export default function TreinoAtivo({
     };
   }, []);
   useEffect(() => {
-    if (!sessao) return;
+    // A tela inativa não precisa redesenhar centenas de controles a cada segundo.
+    if (!sessao || !estaEmFoco) return;
+    setAgora(Date.now());
     const intervalo = setInterval(() => setAgora(Date.now()), 1000);
     return () => clearInterval(intervalo);
-  }, [sessao]);
+  }, [sessao, estaEmFoco]);
   useEffect(() => {
-    if (fimDescanso === null || descansoPausado) return;
+    if (!estaEmFoco || fimDescanso === null || descansoPausado) return;
     const atualizar = () => {
       const faltam = Math.max(0, Math.ceil((fimDescanso - Date.now()) / 1000));
       setSegundosRestantes(faltam);
@@ -676,7 +681,7 @@ export default function TreinoAtivo({
     atualizar();
     const intervalo = setInterval(atualizar, 1000);
     return () => clearInterval(intervalo);
-  }, [fimDescanso, descansoPausado]);
+  }, [fimDescanso, descansoPausado, estaEmFoco]);
 
   const proximaSerie = useMemo(
     () => series.find((item) => !item.concluida) ?? null,
@@ -1007,6 +1012,8 @@ export default function TreinoAtivo({
           "O banco não confirmou a conclusão desta sessão. Confira se você está conectado e tente finalizar novamente.",
         );
       }
+      // Uma gravação confirmada invalida o pequeno cache de navegação.
+      registrarMudancaDeDados();
 
       let erroDetalhes: string | null = null;
       const { error: erroMetadados } = await supabase

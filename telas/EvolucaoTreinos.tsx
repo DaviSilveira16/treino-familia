@@ -19,6 +19,7 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabase";
+import { obterRevisaoDeDados } from "../servicos/revisaoDados";
 import {
   analisarHistorico,
   gerarSugestoes,
@@ -105,9 +106,12 @@ export default function EvolucaoTreinos({
   const selecionadoRef = useRef(exercicioSelecionado);
   selecionadoRef.current = exercicioSelecionado;
 
+  const ultimaConsultaRef = useRef(0);
+  const ultimaRevisaoRef = useRef(-1);
+  const dadosCarregadosRef = useRef(false);
   const carregar = useCallback(async (atualizacao = false) => {
     if (atualizacao) setAtualizando(true);
-    else setCarregando(true);
+    else if (!dadosCarregadosRef.current) setCarregando(true);
     setErro("");
     try {
       const { data: usuarioData, error: erroUsuario } =
@@ -150,6 +154,9 @@ export default function EvolucaoTreinos({
             )[0] ?? "");
       setPontosPorExercicio(porNome);
       setExercicioSelecionado(atual);
+      ultimaConsultaRef.current = Date.now();
+      ultimaRevisaoRef.current = obterRevisaoDeDados();
+      dadosCarregadosRef.current = true;
     } catch (e) {
       setErro(
         e instanceof Error
@@ -164,7 +171,15 @@ export default function EvolucaoTreinos({
 
   useFocusEffect(
     useCallback(() => {
-      carregar();
+      if (
+        Date.now() - ultimaConsultaRef.current < 12000 &&
+        ultimaRevisaoRef.current === obterRevisaoDeDados()
+      )
+        return;
+      const espera = setTimeout(() => {
+        void carregar();
+      }, 80);
+      return () => clearTimeout(espera);
     }, [carregar]),
   );
 
