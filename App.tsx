@@ -44,6 +44,7 @@ import ResumoSemanal from "./telas/ResumoSemanal";
 import ComunidadeFamilia from "./telas/ComunidadeFamilia";
 import NavegacaoInferior from "./telas/NavegacaoInferior";
 import NavegacaoVoltarGlobal from "./telas/NavegacaoVoltarGlobal";
+import LimiteDeErro from "./telas/LimiteDeErro";
 
 type ModoAutenticacao = "login" | "cadastro" | "recuperar";
 
@@ -125,7 +126,7 @@ const telas = [
   },
 ] as const;
 
-export default function App() {
+function AppConteudo() {
   const versaoAvisada = useRef<string | null>(null);
   const verificacaoEmAndamento = useRef(false);
   const toqueInicialWeb = useRef<{ x: number; y: number } | null>(null);
@@ -139,6 +140,7 @@ export default function App() {
   const [enviando, setEnviando] = useState(false);
   const [corTema, setCorTema] = useState(COR_PADRAO);
   const [rotaAtual, setRotaAtual] = useState<keyof Rotas>("Inicio");
+  const [semInternet, setSemInternet] = useState(false);
   const assinaturaHistoricoWeb = useRef("");
   const ignorarProximoHistoricoWeb = useRef(false);
 
@@ -399,6 +401,11 @@ export default function App() {
     }
 
     const cancelarMonitoramento = NetInfo.addEventListener((estado) => {
+      if (componenteAtivo) {
+        setSemInternet(
+          estado.isConnected === false || estado.isInternetReachable === false,
+        );
+      }
       const estaNoWifi = estado.type === "wifi" && estado.isConnected === true;
 
       if (estaNoWifi && !conectadoAoWifi) {
@@ -423,6 +430,12 @@ export default function App() {
 
     NetInfo.fetch()
       .then((estado) => {
+        if (componenteAtivo) {
+          setSemInternet(
+            estado.isConnected === false ||
+              estado.isInternetReachable === false,
+          );
+        }
         if (estado.type === "wifi" && estado.isConnected === true) {
           conectadoAoWifi = true;
           consultarAtualizacao();
@@ -1117,6 +1130,13 @@ export default function App() {
             )}
           </Pilha.Screen>
         </Pilha.Navigator>
+        {semInternet ? (
+          <View style={estilos.avisoSemInternet} accessibilityRole="alert">
+            <Text style={estilos.textoSemInternet}>
+              Sem internet · os registros precisam de conexão para serem salvos.
+            </Text>
+          </View>
+        ) : null}
         {sessao ? (
           <NavegacaoInferior
             corTema={corTema}
@@ -1133,7 +1153,27 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <LimiteDeErro>
+      <AppConteudo />
+    </LimiteDeErro>
+  );
+}
+
 const estilos = StyleSheet.create({
+  avisoSemInternet: {
+    backgroundColor: "#49391D",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  textoSemInternet: {
+    color: "#FFE3A8",
+    textAlign: "center",
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "700",
+  },
   container: {
     flex: 1,
     minHeight: 0,

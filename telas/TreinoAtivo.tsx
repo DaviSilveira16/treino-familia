@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { Alert } from "../servicos/alerta";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabase";
 import {
   estimarCaloriasAtivasTreino,
@@ -19,6 +20,9 @@ import {
   type SerieCalculoTreino,
   type SexoTreino,
 } from "../servicos/caloriasTreino";
+
+const CHAVE_PREFERENCIA_DESCANSO = "@treino-familia:descanso-segundos:v1";
+const OPCOES_DESCANSO = [30, 60, 90, 120, 180] as const;
 
 type PerfilTreino = Pick<
   DadosCalculoTreino,
@@ -128,6 +132,7 @@ export default function TreinoAtivo({
   const [fimDescanso, setFimDescanso] = useState<number | null>(null);
   const [descansoPausado, setDescansoPausado] = useState(false);
   const [segundosRestantes, setSegundosRestantes] = useState(0);
+  const [descansoConcluido, setDescansoConcluido] = useState(false);
   const [agora, setAgora] = useState(Date.now());
   const [mensagem, setMensagem] = useState("");
   const [outroTreinoAtivo, setOutroTreinoAtivo] = useState(false);
@@ -272,6 +277,20 @@ export default function TreinoAtivo({
     carregar();
   }, [carregar]);
   useEffect(() => {
+    let ativo = true;
+    AsyncStorage.getItem(CHAVE_PREFERENCIA_DESCANSO)
+      .then((valor) => {
+        const tempo = Number(valor);
+        if (ativo && OPCOES_DESCANSO.some((opcao) => opcao === tempo)) {
+          setDuracaoDescanso(tempo);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      ativo = false;
+    };
+  }, []);
+  useEffect(() => {
     if (!sessao) return;
     const intervalo = setInterval(() => setAgora(Date.now()), 1000);
     return () => clearInterval(intervalo);
@@ -284,12 +303,8 @@ export default function TreinoAtivo({
       if (faltam === 0) {
         setFimDescanso(null);
         setDescansoPausado(false);
-        setMensagem("Descanso concluído. Pode continuar o treino.");
-        if (Platform.OS === "web" && typeof window !== "undefined") {
-          window.alert("Descanso concluído\n\nPode continuar o treino.");
-        } else {
-          Alert.alert("Descanso concluído", "Pode continuar o treino.");
-        }
+        setDescansoConcluido(true);
+        setMensagem("✓ Descanso concluído. Pode continuar o treino.");
       }
     };
     atualizar();
@@ -297,10 +312,17 @@ export default function TreinoAtivo({
     return () => clearInterval(intervalo);
   }, [fimDescanso, descansoPausado]);
 
+  const proximaSerie = useMemo(
+    () => series.find((item) => !item.concluida) ?? null,
+    [series],
+  );
   const totalSeriesConcluidas = useMemo(
     () => series.filter((item) => item.concluida).length,
     [series],
   );
+  const progressoPercentual = series.length
+    ? Math.round((totalSeriesConcluidas / series.length) * 100)
+    : 0;
   const volumeTotal = useMemo(
     () =>
       series
@@ -414,6 +436,7 @@ export default function TreinoAtivo({
   }
 
   function iniciarDescanso() {
+    setDescansoConcluido(false);
     setSegundosRestantes(duracaoDescanso);
     setDescansoPausado(false);
     setFimDescanso(Date.now() + duracaoDescanso * 1000);
@@ -432,9 +455,39 @@ export default function TreinoAtivo({
     setDescansoPausado(false);
   }
   function pularDescanso() {
+    setDescansoConcluido(false);
     setFimDescanso(null);
     setSegundosRestantes(0);
     setDescansoPausado(false);
+  }
+
+  function mudarPreferenciaDescanso(valor: number) {
+    setDuracaoDescanso(valor);
+    setDescansoConcluido(false);
+    if (fimDescanso !== null) {
+      setFimDescanso(Date.now() + valor * 1000);
+    }
+    setSegundosRestantes(valor);
+    AsyncStorage.setItem(CHAVE_PREFERENCIA_DESCANSO, String(valor)).catch(
+      () => {},
+    );
+  }
+
+  function ajustarNumero(
+    serie: SerieAtiva,
+    campo: "reps" | "weight_kg",
+    delta: number,
+  ) {
+    if (serie.concluida || chaveEmSalvamento !== null || salvando) return;
+    const valorAtual = Number(serie[campo].replace(",", "."));
+    const base = Number.isFinite(valorAtual) ? valorAtual : 0;
+    const minimo = campo === "reps" ? 1 : 0;
+    const maximo = campo === "reps" ? 1000 : 2000;
+    const proximo = Math.max(
+      minimo,
+      Math.min(maximo, Math.round((base + delta) * 10) / 10),
+    );
+    atualizarCampo(serie.chave, campo, String(proximo));
   }
 
   async function alternarSerie(serie: SerieAtiva) {
@@ -660,6 +713,8 @@ export default function TreinoAtivo({
       <ScrollView
         contentContainerStyle={estilos.conteudo}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         <TouchableOpacity onPress={onVoltar} style={estilos.voltar}>
           <Text style={[estilos.textoVoltar, { color: corTema }]}>
@@ -710,6 +765,39 @@ export default function TreinoAtivo({
                       60),
                 )}
               </Text>
+              <Text style={estilos.progressoTexto}>
+                {totalSeriesConcluidas} de {series.length} séries ·{" "}
+                {progressoPercentual}% concluído
+              </Text>
+              <View
+                style={estilos.trilhaProgresso}
+                accessibilityRole="progressbar"
+                accessibilityValue={{
+                  min: 0,
+                  max: 100,
+                  now: progressoPercentual,
+                }}
+              >
+                <View
+                  style={[
+                    estilos.preenchimentoProgresso,
+                    {
+                      width: `${progressoPercentual}%`,
+                      backgroundColor: corTema,
+                    },
+                  ]}
+                />
+              </View>
+              {proximaSerie ? (
+                <Text style={estilos.proximaSerie}>
+                  Próxima: {proximaSerie.exercise_name} · série{" "}
+                  {proximaSerie.set_number}
+                </Text>
+              ) : (
+                <Text style={estilos.proximaSerie}>
+                  Todas as séries foram concluídas! 🎉
+                </Text>
+              )}
               <View style={estilos.linhaIndicadores}>
                 <View style={estilos.indicador}>
                   <Text style={estilos.indicadorNumero}>
@@ -730,16 +818,19 @@ export default function TreinoAtivo({
               <Text style={[estilos.cronometroDescanso, { color: corTema }]}>
                 {formatarTempo(segundosRestantes)}
               </Text>
+              {descansoConcluido ? (
+                <Text style={[estilos.descansoPronto, { color: corTema }]}>
+                  ✓ Descanso concluído · pode continuar
+                </Text>
+              ) : null}
               <View style={estilos.opcoesDescanso}>
-                {[30, 60, 90, 120, 180].map((valor) => (
+                {OPCOES_DESCANSO.map((valor) => (
                   <TouchableOpacity
                     key={valor}
-                    onPress={() => {
-                      setDuracaoDescanso(valor);
-                      if (fimDescanso !== null)
-                        setFimDescanso(Date.now() + valor * 1000);
-                      setSegundosRestantes(valor);
-                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Descanso de ${valor} segundos`}
+                    accessibilityState={{ selected: duracaoDescanso === valor }}
+                    onPress={() => mudarPreferenciaDescanso(valor)}
                     style={[
                       estilos.opcaoDescanso,
                       duracaoDescanso === valor && {
@@ -783,13 +874,28 @@ export default function TreinoAtivo({
                 </TouchableOpacity>
               </View>
               <Text style={estilos.secundario}>
-                Ao concluir uma série, o descanso começa automaticamente.
+                Ao concluir uma série, o descanso começa automaticamente. Seu
+                tempo preferido fica salvo neste aparelho.
               </Text>
             </View>
             <Text style={estilos.tituloSecao}>Séries do treino</Text>
             {exercicios.map((exercicio) => (
               <View key={exercicio.id} style={estilos.cartaoExercicio}>
                 <Text style={estilos.tituloCartao}>{exercicio.name}</Text>
+                <Text style={estilos.secundario}>
+                  {
+                    series.filter(
+                      (item) =>
+                        item.exercise_id === exercicio.id && item.concluida,
+                    ).length
+                  }
+                  /
+                  {
+                    series.filter((item) => item.exercise_id === exercicio.id)
+                      .length
+                  }{" "}
+                  séries concluídas
+                </Text>
                 <Text style={estilos.secundario}>
                   {exercicio.sets_goal} séries previstas · {exercicio.reps_goal}{" "}
                   repetições
@@ -805,6 +911,10 @@ export default function TreinoAtivo({
                           borderColor: corTema,
                           backgroundColor: `${corTema}12`,
                         },
+                        !serie.concluida &&
+                          proximaSerie?.chave === serie.chave && {
+                            borderColor: `${corTema}80`,
+                          },
                       ]}
                     >
                       <Text style={estilos.rotulo}>
@@ -824,6 +934,34 @@ export default function TreinoAtivo({
                             keyboardType="number-pad"
                             editable={!serie.concluida && !chaveEmSalvamento}
                           />
+                          <View style={estilos.controlesRapidos}>
+                            <TouchableOpacity
+                              accessibilityRole="button"
+                              accessibilityLabel={`Diminuir repetições da série ${serie.set_number}`}
+                              disabled={
+                                serie.concluida ||
+                                chaveEmSalvamento !== null ||
+                                salvando
+                              }
+                              onPress={() => ajustarNumero(serie, "reps", -1)}
+                              style={estilos.botaoAjuste}
+                            >
+                              <Text style={estilos.textoAjuste}>−1</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              accessibilityRole="button"
+                              accessibilityLabel={`Aumentar repetições da série ${serie.set_number}`}
+                              disabled={
+                                serie.concluida ||
+                                chaveEmSalvamento !== null ||
+                                salvando
+                              }
+                              onPress={() => ajustarNumero(serie, "reps", 1)}
+                              style={estilos.botaoAjuste}
+                            >
+                              <Text style={estilos.textoAjuste}>+1</Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
                         <View style={estilos.campo}>
                           <Text style={estilos.rotuloCampo}>Carga (kg)</Text>
@@ -836,6 +974,38 @@ export default function TreinoAtivo({
                             keyboardType="decimal-pad"
                             editable={!serie.concluida && !chaveEmSalvamento}
                           />
+                          <View style={estilos.controlesRapidos}>
+                            <TouchableOpacity
+                              accessibilityRole="button"
+                              accessibilityLabel={`Diminuir carga da série ${serie.set_number} em 2,5 kg`}
+                              disabled={
+                                serie.concluida ||
+                                chaveEmSalvamento !== null ||
+                                salvando
+                              }
+                              onPress={() =>
+                                ajustarNumero(serie, "weight_kg", -2.5)
+                              }
+                              style={estilos.botaoAjuste}
+                            >
+                              <Text style={estilos.textoAjuste}>−2,5</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              accessibilityRole="button"
+                              accessibilityLabel={`Aumentar carga da série ${serie.set_number} em 2,5 kg`}
+                              disabled={
+                                serie.concluida ||
+                                chaveEmSalvamento !== null ||
+                                salvando
+                              }
+                              onPress={() =>
+                                ajustarNumero(serie, "weight_kg", 2.5)
+                              }
+                              style={estilos.botaoAjuste}
+                            >
+                              <Text style={estilos.textoAjuste}>+2,5</Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
                       </View>
                       <TouchableOpacity
@@ -1008,6 +1178,17 @@ const estilos = StyleSheet.create({
     fontWeight: "900",
     fontVariant: ["tabular-nums"],
   },
+  trilhaProgresso: {
+    width: "100%",
+    height: 9,
+    borderRadius: 10,
+    backgroundColor: "#303832",
+    overflow: "hidden",
+  },
+  preenchimentoProgresso: { height: "100%", borderRadius: 10 },
+  progressoTexto: { color: "#E8F0EA", fontSize: 13, fontWeight: "800" },
+  proximaSerie: { color: "#C0CFC4", fontSize: 12, textAlign: "center" },
+  descansoPronto: { fontSize: 13, textAlign: "center", fontWeight: "800" },
   cronometroDescanso: {
     fontSize: 38,
     fontWeight: "900",
@@ -1037,7 +1218,19 @@ const estilos = StyleSheet.create({
   },
   textoBotaoSecundario: { color: "#E3EAE5", fontWeight: "700" },
   linhaCampos: { flexDirection: "row", gap: 10 },
-  campo: { flex: 1, gap: 6 },
+  campo: { flex: 1, minWidth: 0, gap: 6 },
+  controlesRapidos: { flexDirection: "row", gap: 6 },
+  botaoAjuste: {
+    flex: 1,
+    minHeight: 36,
+    borderWidth: 1,
+    borderColor: "#45544A",
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#202922",
+  },
+  textoAjuste: { color: "#E8EFE9", fontSize: 13, fontWeight: "800" },
   rotuloCampo: { color: "#9CA69F", fontSize: 12 },
   input: {
     color: "#F0F4F1",
