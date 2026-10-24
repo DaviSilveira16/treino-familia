@@ -883,9 +883,9 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
 
     const resultado = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
-      allowsEditing: true,
+      allowsEditing: false,
       aspect: [1, 1],
-      quality: 0.8,
+      quality: 1,
     });
 
     if (resultado.canceled || !resultado.assets[0]) {

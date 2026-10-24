@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   RefreshControl,
@@ -131,180 +131,203 @@ export default function HistoricoTreinos({
   // ScrollView não virtualiza: evita montar centenas de cartões de uma vez.
   const [limiteTreinosVisiveis, setLimiteTreinosVisiveis] = useState(15);
   const [limiteCardiosVisiveis, setLimiteCardiosVisiveis] = useState(15);
-  const carregarHistorico = useCallback(async (atualizacao = false) => {
-    if (atualizacao) setAtualizando(true);
-    else setCarregando(true);
-    try {
-      const { data: usuarioData, error: erroUsuario } =
-        await supabase.auth.getUser();
-      if (erroUsuario || !usuarioData.user) {
-        Alert.alert("Sessão inválida", "Entre novamente na sua conta.");
-        setHistorico([]);
-        return;
-      }
-      const usuarioId = usuarioData.user.id;
-      // Treinos e cardio independem entre si: iniciar ambos na mesma rodada.
-      const [resultadoCardios, resultadoSessoes] = await Promise.all([
-        supabase
-          .from("cardio_sessions")
-          .select(
-            "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
-          )
-          .eq("user_id", usuarioId)
-          .order("started_at", { ascending: false }),
-        supabase
-          .from("workout_sessions")
-          .select(
-            "id, plan_id, started_at, finished_at, notes, status, duration_minutes, intensity, active_calories, volume_kg, exercises_count, sets_completed, reps_completed, met_value",
-          )
-          .eq("user_id", usuarioId)
-          .order("started_at", { ascending: false }),
-      ]);
-      const { data: cardios, error: erroCardios } = resultadoCardios;
-      const { data: sessoes, error: erroSessoes } = resultadoSessoes;
-      if (erroCardios) {
-        Alert.alert(
-          "Erro",
-          `Não foi possível carregar o histórico de cardio: ${erroCardios.message}`,
-        );
-        return;
-      }
-      setHistoricoCardio((cardios ?? []) as SessaoCardioHistorico[]);
-      if (erroSessoes) {
-        Alert.alert(
-          "Erro",
-          `Não foi possível carregar o histórico: ${erroSessoes.message}`,
-        );
-        return;
-      }
-      const listaSessoes = ((sessoes ?? []) as SessaoTreino[]).filter(
-        (sessao) => sessao.status !== "em_andamento",
-      );
-      if (listaSessoes.length === 0) {
-        setHistorico([]);
-        return;
-      }
-      const idsSessoes = listaSessoes.map((sessao) => sessao.id);
-      const idsPlanos = Array.from(
-        new Set(
-          listaSessoes
-            .map((sessao) => sessao.plan_id)
-            .filter((id): id is string => Boolean(id)),
-        ),
-      );
-      const [resultadoSeries, resultadoPlanos] = await Promise.all([
-        supabase
-          .from("workout_sets")
-          .select(
-            "id, session_id, exercise_id, exercise_name, set_number, reps, weight_kg",
-          )
-          .eq("user_id", usuarioId)
-          .in("session_id", idsSessoes)
-          .order("set_number", { ascending: true }),
-        idsPlanos.length > 0
-          ? supabase
-              .from("workout_plans")
-              .select("id, name")
-              .eq("user_id", usuarioId)
-              .in("id", idsPlanos)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-      if (resultadoSeries.error) {
-        Alert.alert(
-          "Erro",
-          `Não foi possível carregar as séries: ${resultadoSeries.error.message}`,
-        );
-        return;
-      }
-      if (resultadoPlanos.error) {
-        Alert.alert(
-          "Erro",
-          `Não foi possível carregar os nomes dos treinos: ${resultadoPlanos.error.message}`,
-        );
-        return;
-      }
-      const series = (resultadoSeries.data ?? []) as SerieTreino[];
-      const planos = (resultadoPlanos.data ?? []) as {
-        id: string;
-        name: string;
-      }[];
-      const nomesPlanos = new Map(
-        planos.map((plano) => [plano.id, plano.name]),
-      );
-      // Agrupar uma vez evita percorrer todo o histórico para cada sessão.
-      const seriesPorSessao = new Map<string, SerieTreino[]>();
-      for (const serie of series) {
-        const lista = seriesPorSessao.get(serie.session_id) ?? [];
-        lista.push(serie);
-        seriesPorSessao.set(serie.session_id, lista);
-      }
-      const resultado: TreinoHistorico[] = listaSessoes.map((sessao) => ({
-        ...sessao,
-        nomeTreino: sessao.plan_id
-          ? (nomesPlanos.get(sessao.plan_id) ?? "Treino removido")
-          : "Treino removido",
-        series: (seriesPorSessao.get(sessao.id) ?? []).map((serie) => ({
-          ...serie,
-        })),
-      }));
-      const ordemCronologica = [...resultado].sort(
-        (a, b) =>
-          new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-      );
-      const ultimasSeriesPorExercicio = new Map<string, SerieTreino[]>();
-      for (const sessao of ordemCronologica) {
-        const gruposExercicios = new Map<string, SerieTreino[]>();
-        for (const serie of sessao.series) {
-          const chave = `${sessao.plan_id ?? "sem-plano"}::${chaveExercicio(serie)}`;
-          const grupo = gruposExercicios.get(chave) ?? [];
-          grupo.push(serie);
-          gruposExercicios.set(chave, grupo);
+  const [haMaisTreinos, setHaMaisTreinos] = useState(false);
+  const [haMaisCardios, setHaMaisCardios] = useState(false);
+  const [carregandoMais, setCarregandoMais] = useState(false);
+  const dadosCarregadosRef = useRef(false);
+  const carregarHistorico = useCallback(
+    async (atualizacao = false) => {
+      if (atualizacao) setAtualizando(true);
+      else if (dadosCarregadosRef.current) setCarregandoMais(true);
+      else setCarregando(true);
+      try {
+        const { data: usuarioData, error: erroUsuario } =
+          await supabase.auth.getUser();
+        if (erroUsuario || !usuarioData.user) {
+          Alert.alert("Sessão inválida", "Entre novamente na sua conta.");
+          setHistorico([]);
+          return;
         }
-        for (const [chave, seriesAtuais] of gruposExercicios) {
-          const seriesAnteriores = ultimasSeriesPorExercicio.get(chave) ?? [];
-          for (const serieAtual of seriesAtuais) {
-            const serieAnterior = seriesAnteriores.find(
-              (serie) =>
-                Number(serie.set_number) === Number(serieAtual.set_number),
-            );
-            if (!serieAnterior) {
-              serieAtual.serieNova = true;
-              serieAtual.mudou = true;
-              continue;
-            }
-            const diferencaCarga =
-              Number(serieAtual.weight_kg) - Number(serieAnterior.weight_kg);
-            const diferencaReps =
-              Number(serieAtual.reps) - Number(serieAnterior.reps);
-            serieAtual.diferencaCarga = diferencaCarga;
-            serieAtual.diferencaReps = diferencaReps;
-            serieAtual.mudou = diferencaCarga !== 0 || diferencaReps !== 0;
-            if (diferencaCarga > 0) {
-              serieAtual.progressoCarga = diferencaCarga;
-            }
-            if (diferencaReps > 0) {
-              serieAtual.progressoReps = diferencaReps;
-            }
-          }
-          ultimasSeriesPorExercicio.set(
-            chave,
-            seriesAtuais.map((serie) => ({ ...serie })),
+        const usuarioId = usuarioData.user.id;
+        // Treinos e cardio independem entre si: iniciar ambos na mesma rodada.
+        const [resultadoCardios, resultadoSessoes] = await Promise.all([
+          supabase
+            .from("cardio_sessions")
+            .select(
+              "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
+            )
+            .eq("user_id", usuarioId)
+            .order("started_at", { ascending: false })
+            // Busca um registro extra para descobrir se há outra página.
+            .range(0, limiteCardiosVisiveis),
+          supabase
+            .from("workout_sessions")
+            .select(
+              "id, plan_id, started_at, finished_at, notes, status, duration_minutes, intensity, active_calories, volume_kg, exercises_count, sets_completed, reps_completed, met_value",
+            )
+            .eq("user_id", usuarioId)
+            .order("started_at", { ascending: false })
+            .range(0, limiteTreinosVisiveis),
+        ]);
+        const { data: cardios, error: erroCardios } = resultadoCardios;
+        const { data: sessoes, error: erroSessoes } = resultadoSessoes;
+        if (erroCardios) {
+          Alert.alert(
+            "Erro",
+            `Não foi possível carregar o histórico de cardio: ${erroCardios.message}`,
           );
+          return;
         }
+        setHaMaisCardios((cardios?.length ?? 0) > limiteCardiosVisiveis);
+        setHistoricoCardio(
+          (cardios ?? []).slice(
+            0,
+            limiteCardiosVisiveis,
+          ) as SessaoCardioHistorico[],
+        );
+        if (erroSessoes) {
+          Alert.alert(
+            "Erro",
+            `Não foi possível carregar o histórico: ${erroSessoes.message}`,
+          );
+          return;
+        }
+        setHaMaisTreinos((sessoes?.length ?? 0) > limiteTreinosVisiveis);
+        const listaSessoes = (
+          (sessoes ?? []).slice(0, limiteTreinosVisiveis) as SessaoTreino[]
+        ).filter((sessao) => sessao.status !== "em_andamento");
+        if (listaSessoes.length === 0) {
+          setHistorico([]);
+          dadosCarregadosRef.current = true;
+          return;
+        }
+        const idsSessoes = listaSessoes.map((sessao) => sessao.id);
+        const idsPlanos = Array.from(
+          new Set(
+            listaSessoes
+              .map((sessao) => sessao.plan_id)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        );
+        const [resultadoSeries, resultadoPlanos] = await Promise.all([
+          supabase
+            .from("workout_sets")
+            .select(
+              "id, session_id, exercise_id, exercise_name, set_number, reps, weight_kg",
+            )
+            .eq("user_id", usuarioId)
+            .in("session_id", idsSessoes)
+            .order("set_number", { ascending: true }),
+          idsPlanos.length > 0
+            ? supabase
+                .from("workout_plans")
+                .select("id, name")
+                .eq("user_id", usuarioId)
+                .in("id", idsPlanos)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+        if (resultadoSeries.error) {
+          Alert.alert(
+            "Erro",
+            `Não foi possível carregar as séries: ${resultadoSeries.error.message}`,
+          );
+          return;
+        }
+        if (resultadoPlanos.error) {
+          Alert.alert(
+            "Erro",
+            `Não foi possível carregar os nomes dos treinos: ${resultadoPlanos.error.message}`,
+          );
+          return;
+        }
+        const series = (resultadoSeries.data ?? []) as SerieTreino[];
+        const planos = (resultadoPlanos.data ?? []) as {
+          id: string;
+          name: string;
+        }[];
+        const nomesPlanos = new Map(
+          planos.map((plano) => [plano.id, plano.name]),
+        );
+        // Agrupar uma vez evita percorrer todo o histórico para cada sessão.
+        const seriesPorSessao = new Map<string, SerieTreino[]>();
+        for (const serie of series) {
+          const lista = seriesPorSessao.get(serie.session_id) ?? [];
+          lista.push(serie);
+          seriesPorSessao.set(serie.session_id, lista);
+        }
+        const resultado: TreinoHistorico[] = listaSessoes.map((sessao) => ({
+          ...sessao,
+          nomeTreino: sessao.plan_id
+            ? (nomesPlanos.get(sessao.plan_id) ?? "Treino removido")
+            : "Treino removido",
+          series: (seriesPorSessao.get(sessao.id) ?? []).map((serie) => ({
+            ...serie,
+          })),
+        }));
+        const ordemCronologica = [...resultado].sort(
+          (a, b) =>
+            new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+        );
+        const ultimasSeriesPorExercicio = new Map<string, SerieTreino[]>();
+        for (const sessao of ordemCronologica) {
+          const gruposExercicios = new Map<string, SerieTreino[]>();
+          for (const serie of sessao.series) {
+            const chave = `${sessao.plan_id ?? "sem-plano"}::${chaveExercicio(serie)}`;
+            const grupo = gruposExercicios.get(chave) ?? [];
+            grupo.push(serie);
+            gruposExercicios.set(chave, grupo);
+          }
+          for (const [chave, seriesAtuais] of gruposExercicios) {
+            const seriesAnteriores = ultimasSeriesPorExercicio.get(chave) ?? [];
+            for (const serieAtual of seriesAtuais) {
+              const serieAnterior = seriesAnteriores.find(
+                (serie) =>
+                  Number(serie.set_number) === Number(serieAtual.set_number),
+              );
+              if (!serieAnterior) {
+                // Histórico anterior pode estar em outra página.
+                // Não afirmar "série nova" sem informação suficiente.
+                serieAtual.serieNova = false;
+                serieAtual.mudou = false;
+                continue;
+              }
+              const diferencaCarga =
+                Number(serieAtual.weight_kg) - Number(serieAnterior.weight_kg);
+              const diferencaReps =
+                Number(serieAtual.reps) - Number(serieAnterior.reps);
+              serieAtual.diferencaCarga = diferencaCarga;
+              serieAtual.diferencaReps = diferencaReps;
+              serieAtual.mudou = diferencaCarga !== 0 || diferencaReps !== 0;
+              if (diferencaCarga > 0) {
+                serieAtual.progressoCarga = diferencaCarga;
+              }
+              if (diferencaReps > 0) {
+                serieAtual.progressoReps = diferencaReps;
+              }
+            }
+            ultimasSeriesPorExercicio.set(
+              chave,
+              seriesAtuais.map((serie) => ({ ...serie })),
+            );
+          }
+        }
+        setHistorico(resultado);
+        dadosCarregadosRef.current = true;
+      } catch {
+        Alert.alert(
+          "Erro",
+          "Não foi possível conectar ao Supabase para carregar o histórico.",
+        );
+      } finally {
+        setCarregando(false);
+        setAtualizando(false);
+        setCarregandoMais(false);
       }
-      setHistorico(resultado);
-    } catch {
-      Alert.alert(
-        "Erro",
-        "Não foi possível conectar ao Supabase para carregar o histórico.",
-      );
-    } finally {
-      setCarregando(false);
-      setAtualizando(false);
-    }
-  }, []);
+    },
+    [limiteTreinosVisiveis, limiteCardiosVisiveis],
+  );
   useEffect(() => {
-    carregarHistorico();
+    void carregarHistorico();
   }, [carregarHistorico]);
   function alternarDetalhes(id: string) {
     setSessaoExpandida((atual) => (atual === id ? null : id));
@@ -793,17 +816,19 @@ export default function HistoricoTreinos({
                 </View>
               );
             })}
-            {historico.length > limiteTreinosVisiveis && (
+            {haMaisTreinos && (
               <TouchableOpacity
                 accessibilityRole="button"
                 style={{ padding: 18, alignItems: "center" }}
                 onPress={() => setLimiteTreinosVisiveis((total) => total + 15)}
+                disabled={carregandoMais}
               >
                 <Text
                   style={{ color: corTema, fontWeight: "700", fontSize: 15 }}
                 >
-                  Ver mais treinos ({historico.length - limiteTreinosVisiveis}{" "}
-                  restantes)
+                  {carregandoMais
+                    ? "Carregando treinos..."
+                    : "Ver mais treinos"}
                 </Text>
               </TouchableOpacity>
             )}
@@ -994,15 +1019,15 @@ export default function HistoricoTreinos({
               </View>
             ))
           )}
-          {historicoCardio.length > limiteCardiosVisiveis && (
+          {haMaisCardios && (
             <TouchableOpacity
               accessibilityRole="button"
               style={{ padding: 18, alignItems: "center" }}
               onPress={() => setLimiteCardiosVisiveis((total) => total + 15)}
+              disabled={carregandoMais}
             >
               <Text style={{ color: corTema, fontWeight: "700", fontSize: 15 }}>
-                Ver mais cardios (
-                {historicoCardio.length - limiteCardiosVisiveis} restantes)
+                {carregandoMais ? "Carregando cardios..." : "Ver mais cardios"}
               </Text>
             </TouchableOpacity>
           )}

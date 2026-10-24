@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { Suspense, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -32,17 +32,26 @@ import {
 } from "@react-navigation/stack";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-import Perfil from "./telas/Perfil";
-import Frequencia from "./telas/Frequencia";
+// Importado apenas quando o usuário abre a respectiva tela.
+const Perfil = React.lazy(() => import("./telas/Perfil"));
+// Importado apenas quando o usuário abre a respectiva tela.
+const Frequencia = React.lazy(() => import("./telas/Frequencia"));
 import TreinoDoDia from "./telas/TreinoDoDia";
-import MeusTreinos from "./telas/MeusTreinos";
-import MeusCardios from "./telas/MeusCardios";
-import EvolucaoFisica from "./telas/EvolucaoFisica";
-import HistoricoTreinos from "./telas/HistoricoTreinos";
-import TreinoAtivo from "./telas/TreinoAtivo";
-import EvolucaoTreinos from "./telas/EvolucaoTreinos";
+// Importado apenas quando o usuário abre a respectiva tela.
+const MeusTreinos = React.lazy(() => import("./telas/MeusTreinos"));
+// Importado apenas quando o usuário abre a respectiva tela.
+const MeusCardios = React.lazy(() => import("./telas/MeusCardios"));
+// Importado apenas quando o usuário abre a respectiva tela.
+const EvolucaoFisica = React.lazy(() => import("./telas/EvolucaoFisica"));
+// Importado apenas quando o usuário abre a respectiva tela.
+const HistoricoTreinos = React.lazy(() => import("./telas/HistoricoTreinos"));
+// Importado apenas quando o usuário abre a respectiva tela.
+const TreinoAtivo = React.lazy(() => import("./telas/TreinoAtivo"));
+// Importado apenas quando o usuário abre a respectiva tela.
+const EvolucaoTreinos = React.lazy(() => import("./telas/EvolucaoTreinos"));
 import ResumoSemanal from "./telas/ResumoSemanal";
-import ComunidadeFamilia from "./telas/ComunidadeFamilia";
+// Importado apenas quando o usuário abre a respectiva tela.
+const ComunidadeFamilia = React.lazy(() => import("./telas/ComunidadeFamilia"));
 import NavegacaoInferior from "./telas/NavegacaoInferior";
 import NavegacaoVoltarGlobal from "./telas/NavegacaoVoltarGlobal";
 import LimiteDeErro from "./telas/LimiteDeErro";
@@ -146,6 +155,21 @@ const telas = [
     emoji: "📅",
   },
 ] as const;
+
+function TelaCarregando({ cor }: { cor: string }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: "#101312",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <ActivityIndicator color={cor} size="small" />
+    </View>
+  );
+}
 
 function AppConteudo() {
   const versaoAvisada = useRef<string | null>(null);
@@ -1001,11 +1025,13 @@ function AppConteudo() {
                 onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <Perfil
-                  usuario={sessao.user}
-                  onVoltar={voltarComSeguranca}
-                  onTemaAlterado={setCorTema}
-                />
+                <Suspense fallback={<TelaCarregando cor={corTema} />}>
+                  <Perfil
+                    usuario={sessao.user}
+                    onVoltar={voltarComSeguranca}
+                    onTemaAlterado={setCorTema}
+                  />
+                </Suspense>
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>
@@ -1016,16 +1042,18 @@ function AppConteudo() {
                 onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <MeusTreinos
-                  onVoltar={voltarComSeguranca}
-                  onIniciarTreino={(treino) =>
-                    navigation.navigate("treinoAtivo", {
-                      planId: treino.id,
-                      planName: treino.name,
-                    })
-                  }
-                  corTema={corTema}
-                />
+                <Suspense fallback={<TelaCarregando cor={corTema} />}>
+                  <MeusTreinos
+                    onVoltar={voltarComSeguranca}
+                    onIniciarTreino={(treino) =>
+                      navigation.navigate("treinoAtivo", {
+                        planId: treino.id,
+                        planName: treino.name,
+                      })
+                    }
+                    corTema={corTema}
+                  />
+                </Suspense>
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>
@@ -1036,7 +1064,12 @@ function AppConteudo() {
                 onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <MeusCardios onVoltar={voltarComSeguranca} corTema={corTema} />
+                <Suspense fallback={<TelaCarregando cor={corTema} />}>
+                  <MeusCardios
+                    onVoltar={voltarComSeguranca}
+                    corTema={corTema}
+                  />
+                </Suspense>
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>
@@ -1047,10 +1080,12 @@ function AppConteudo() {
                 onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <EvolucaoFisica
-                  onVoltar={voltarComSeguranca}
-                  corTema={corTema}
-                />
+                <Suspense fallback={<TelaCarregando cor={corTema} />}>
+                  <EvolucaoFisica
+                    onVoltar={voltarComSeguranca}
+                    corTema={corTema}
+                  />
+                </Suspense>
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>
@@ -1061,10 +1096,12 @@ function AppConteudo() {
                 onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <HistoricoTreinos
-                  onVoltar={voltarComSeguranca}
-                  corTema={corTema}
-                />
+                <Suspense fallback={<TelaCarregando cor={corTema} />}>
+                  <HistoricoTreinos
+                    onVoltar={voltarComSeguranca}
+                    corTema={corTema}
+                  />
+                </Suspense>
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>
@@ -1075,7 +1112,9 @@ function AppConteudo() {
                 onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <Frequencia onVoltar={voltarComSeguranca} corTema={corTema} />
+                <Suspense fallback={<TelaCarregando cor={corTema} />}>
+                  <Frequencia onVoltar={voltarComSeguranca} corTema={corTema} />
+                </Suspense>
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>
@@ -1086,7 +1125,9 @@ function AppConteudo() {
                 onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <ComunidadeFamilia corTema={corTema} />
+                <Suspense fallback={<TelaCarregando cor={corTema} />}>
+                  <ComunidadeFamilia corTema={corTema} />
+                </Suspense>
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>
@@ -1097,10 +1138,12 @@ function AppConteudo() {
                 onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <EvolucaoTreinos
-                  onVoltar={voltarComSeguranca}
-                  corTema={corTema}
-                />
+                <Suspense fallback={<TelaCarregando cor={corTema} />}>
+                  <EvolucaoTreinos
+                    onVoltar={voltarComSeguranca}
+                    corTema={corTema}
+                  />
+                </Suspense>
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>
@@ -1111,11 +1154,13 @@ function AppConteudo() {
                 onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <TreinoAtivo
-                  route={route}
-                  onVoltar={voltarComSeguranca}
-                  corTema={corTema}
-                />
+                <Suspense fallback={<TelaCarregando cor={corTema} />}>
+                  <TreinoAtivo
+                    route={route}
+                    onVoltar={voltarComSeguranca}
+                    corTema={corTema}
+                  />
+                </Suspense>
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>

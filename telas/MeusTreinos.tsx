@@ -14,6 +14,7 @@ import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../supabase";
 import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
+import ImagemLeve from "./ImagemLeve";
 import { registrarMudancaDeDados } from "../servicos/revisaoDados";
 
 type Treino = {
@@ -575,9 +576,9 @@ export default function MeusTreinos({
     try {
       const resultado = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
-        allowsEditing: true,
+        allowsEditing: false,
         aspect: [1, 1],
-        quality: 0.75,
+        quality: 1,
       });
 
       if (resultado.canceled || !resultado.assets[0]) return;
@@ -1098,8 +1099,8 @@ export default function MeusTreinos({
                         activeOpacity={0.8}
                       >
                         {exercicio.photo_url ? (
-                          <Image
-                            source={{ uri: exercicio.photo_url }}
+                          <ImagemLeve
+                            uri={exercicio.photo_url}
                             style={estilos.fotoExercicio}
                             resizeMode="cover"
                           />

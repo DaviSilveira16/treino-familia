@@ -13,6 +13,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
+import ImagemLeve from "./ImagemLeve";
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../supabase";
 import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
@@ -189,6 +190,9 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [erro, setErro] = useState("");
   const [membros, setMembros] = useState<MembroResumo[]>([]);
   const [publicacoes, setPublicacoes] = useState<Publicacao[]>([]);
+  const [limitePostsVisiveis, setLimitePostsVisiveis] = useState(10);
+  const [haMaisPosts, setHaMaisPosts] = useState(false);
+  const [carregandoMaisPosts, setCarregandoMaisPosts] = useState(false);
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [tipoPublicacao, setTipoPublicacao] = useState<TipoPublicacao>("texto");
   const [textoPublicacao, setTextoPublicacao] = useState("");
@@ -246,6 +250,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         setFamilia(null);
         setMembros([]);
         setPublicacoes([]);
+        setHaMaisPosts(false);
+        setLimitePostsVisiveis(10);
         setPlanos([]);
         return;
       }
@@ -264,6 +270,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         setFamilia(null);
         setMembros([]);
         setPublicacoes([]);
+        setHaMaisPosts(false);
+        setLimitePostsVisiveis(10);
         setPlanos([]);
         return;
       }
@@ -288,7 +296,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           )
           .eq("family_id", familiaAtual.id)
           .order("created_at", { ascending: false })
-          .limit(50),
+          .order("id", { ascending: false })
+          .range(0, 10),
         supabase
           .from("workout_plans")
           .select("id, name")
@@ -301,6 +310,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       setMembros((resumo.data ?? []) as MembroResumo[]);
       setPlanos((listaPlanos.data ?? []) as Plano[]);
       const listaPosts = (feed.data ?? []) as Publicacao[];
+      setHaMaisPosts(listaPosts.length > 10);
+      setLimitePostsVisiveis(10);
       const urlsFotos = await obterFotosAssinadas(
         "community-photos",
         listaPosts.map((post) => post.image_path),
@@ -313,7 +324,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           ? (urlsFotos.get(post.image_path) ?? null)
           : null,
       }));
-      setPublicacoes(postsComFotos);
+      setPublicacoes(postsComFotos.slice(0, 10));
       ultimaConsultaRef.current = Date.now();
       ultimaRevisaoRef.current = obterRevisaoDeDados();
       dadosCarregadosRef.current = true;
@@ -328,6 +339,52 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       setAtualizando(false);
     }
   }, []);
+
+  // Somente o feed é paginado: não recarrega membros, famílias e planos.
+  async function carregarMaisPublicacoes() {
+    const idFamilia = familiaAtivaIdRef.current;
+    if (!idFamilia || !usuarioId || carregandoMaisPosts || !haMaisPosts) return;
+    setCarregandoMaisPosts(true);
+    try {
+      const novoLimite = limitePostsVisiveis + 10;
+      const { data, error } = await supabase
+        .from("community_posts")
+        .select(
+          "id, family_id, user_id, author_name, author_avatar_url, content, post_type, image_path, workout_plan_name, workout_snapshot, created_at",
+        )
+        .eq("family_id", idFamilia)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(0, novoLimite);
+      if (error) throw error;
+      if (familiaAtivaIdRef.current !== idFamilia) return;
+      const listaPosts = (data ?? []) as Publicacao[];
+      const urlsFotos = await obterFotosAssinadas(
+        "community-photos",
+        listaPosts.map((post) => post.image_path),
+        3600,
+        usuarioId,
+      );
+      if (familiaAtivaIdRef.current !== idFamilia) return;
+      setPublicacoes(
+        listaPosts.slice(0, novoLimite).map((post) => ({
+          ...post,
+          image_url: post.image_path
+            ? (urlsFotos.get(post.image_path) ?? null)
+            : null,
+        })),
+      );
+      setLimitePostsVisiveis(novoLimite);
+      setHaMaisPosts(listaPosts.length > novoLimite);
+    } catch (erro) {
+      avisar(
+        "Não foi possível carregar mais publicações",
+        erro instanceof Error ? erro.message : "Tente novamente.",
+      );
+    } finally {
+      setCarregandoMaisPosts(false);
+    }
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -419,8 +476,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   async function escolherFoto() {
     const resultado = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
-      allowsEditing: true,
-      quality: 0.82,
+      allowsEditing: false,
+      quality: 1,
       aspect: [4, 5],
     });
     if (!resultado.canceled && resultado.assets[0])
@@ -971,7 +1028,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           )}
         </TouchableOpacity>
       </View>
-      {publicacoes.map((post) => (
+      {publicacoes.slice(0, limitePostsVisiveis).map((post) => (
         <View key={post.id} style={estilos.cartaoPost}>
           <View style={estilos.cabecalhoPost}>
             <View
@@ -981,8 +1038,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
               ]}
             >
               {post.author_avatar_url ? (
-                <Image
-                  source={{ uri: post.author_avatar_url }}
+                <ImagemLeve
+                  uri={post.author_avatar_url}
                   style={estilos.avatarImagem}
                 />
               ) : (
@@ -1012,8 +1069,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
             <Text style={estilos.textoPost}>{post.content}</Text>
           ) : null}
           {post.image_url ? (
-            <Image
-              source={{ uri: post.image_url }}
+            <ImagemLeve
+              uri={post.image_url}
               style={estilos.imagemPost}
               resizeMode="cover"
             />
@@ -1044,6 +1101,20 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
                   ) : null}
                 </View>
               ))}
+              {haMaisPosts && (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  style={{ alignItems: "center", padding: 16 }}
+                  onPress={() => void carregarMaisPublicacoes()}
+                  disabled={carregandoMaisPosts}
+                >
+                  <Text style={{ color: corTema, fontWeight: "700" }}>
+                    {carregandoMaisPosts
+                      ? "Carregando publicações..."
+                      : "Ver mais publicações"}
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : null}
         </View>
