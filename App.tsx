@@ -163,15 +163,14 @@ function AppConteudo() {
   const [rotaAtual, setRotaAtual] = useState<keyof Rotas>("Inicio");
   const [semInternet, setSemInternet] = useState(false);
   const ultimaVoltaWeb = useRef(0);
-  const ignorarPopstateAte = useRef(0);
 
   function atualizarRotaAtual() {
     const rota = referenciaNavegacao.getCurrentRoute();
     if (rota) setRotaAtual(rota.name as keyof Rotas);
   }
 
-  // Um único comando de voltar para toque, gesto e histórico do Safari.
-  // O intervalo curto protege contra eventos duplicados do mesmo arrasto.
+  // Volta pela pilha do app, sem acionar o histórico do Safari.
+  // Uma proteção breve impede apenas dois eventos do MESMO gesto.
   function voltarComSeguranca() {
     const rota = referenciaNavegacao.getCurrentRoute()?.name;
     if (
@@ -184,7 +183,7 @@ function AppConteudo() {
     }
     if (Platform.OS === "web") {
       const agora = Date.now();
-      if (agora - ultimaVoltaWeb.current < 850) return;
+      if (agora - ultimaVoltaWeb.current < 180) return;
       ultimaVoltaWeb.current = agora;
     }
     referenciaNavegacao.goBack();
@@ -195,40 +194,10 @@ function AppConteudo() {
     setCorTema(obterCorTema(novaSessao?.user.user_metadata?.tema_cor));
   }
 
-  // Na web, o histórico existe apenas para conter o gesto nativo do Safari.
-  // NÃO espelhamos cada tela em pushState: isso empilhava telas antigas e
-  // disparava um segundo retorno (às vezes para a Comunidade).
-  useEffect(() => {
-    if (!sessao || !modoTelaInicialSafari()) return;
-
-    const url = window.location.href;
-    const chave = "treinoFamiliaProtecao";
-    try {
-      if (!window.history.state?.[chave]) {
-        window.history.pushState({ [chave]: true }, "", url);
-      }
-    } catch {
-      // Alguns navegadores bloqueiam History API; o botão de voltar continua.
-    }
-
-    function tratarVoltaDoNavegador() {
-      // O mesmo gesto pode disparar touchend e popstate no iPhone.
-      // Nunca executamos o segundo retorno para um único arrasto.
-      if (Date.now() >= ignorarPopstateAte.current) {
-        voltarComSeguranca();
-      }
-      ignorarPopstateAte.current = 0;
-      // Recria o único degrau de proteção, sem armazenar rotas passadas.
-      try {
-        window.history.pushState({ [chave]: true }, "", url);
-      } catch {
-        // Falhas na API de histórico não devem travar a navegação.
-      }
-    }
-
-    window.addEventListener("popstate", tratarVoltaDoNavegador);
-    return () => window.removeEventListener("popstate", tratarVoltaDoNavegador);
-  }, [Boolean(sessao)]);
+  // IMPORTANTE: não usar pushState/popstate para simular o botão Voltar
+  // no iPhone. Ao arrastar, o Safari pode mostrar uma transição da página do
+  // histórico (a tela preta de vários segundos no vídeo) antes de devolver
+  // o controle ao React. As telas internas usam somente a pilha do app.
 
   useEffect(() => {
     if (Platform.OS !== "android" || !sessao) {
@@ -270,28 +239,35 @@ function AppConteudo() {
   }, [sessao]);
 
   useEffect(() => {
-    if (typeof document === "undefined" || !modoTelaInicialSafari()) {
-      return;
-    }
+    if (typeof document === "undefined" || !modoTelaInicialSafari()) return;
 
-    function podeVoltar() {
-      return (
-        referenciaNavegacao.isReady() &&
-        referenciaNavegacao.canGoBack() &&
-        // Apenas telas com botão de voltar; não nas abas Início/Comunidade.
-        ROTAS_COM_BOTAO_VOLTAR.has(
-          referenciaNavegacao.getCurrentRoute()?.name as keyof Rotas,
-        )
-      );
-    }
+    const podeVoltar = () => {
+      if (!referenciaNavegacao.isReady() || !referenciaNavegacao.canGoBack()) {
+        return false;
+      }
+      const nome = referenciaNavegacao.getCurrentRoute()?.name;
+      return Boolean(nome && ROTAS_COM_BOTAO_VOLTAR.has(nome));
+    };
 
     function iniciarToque(evento: TouchEvent) {
       toqueInicialWeb.current = null;
       if (evento.touches.length !== 1 || !podeVoltar()) return;
       const toque = evento.touches[0];
-      if (toque.clientX <= 28) {
-        toqueInicialWeb.current = { x: toque.clientX, y: toque.clientY };
-      }
+      // Zona curta para não confundir o gesto com o deslize de exercícios.
+      if (toque.clientX > 65) return;
+
+      const alvo = evento.target;
+      const elemento = alvo instanceof Element ? alvo : null;
+      const controle = elemento?.closest(
+        'button, a, input, textarea, select, [role="button"], [role="link"]',
+      );
+      // Tocar em «Voltar» ou outro botão deve continuar funcionando.
+      if (controle) return;
+
+      toqueInicialWeb.current = { x: toque.clientX, y: toque.clientY };
+      // Bloqueia o gesto NATIVO de histórico somente na borda do iPhone.
+      // Começar fora dessa faixa continua permitindo rolagem vertical.
+      if (toque.clientX <= 30 && evento.cancelable) evento.preventDefault();
     }
 
     function moverToque(evento: TouchEvent) {
@@ -300,9 +276,7 @@ function AppConteudo() {
       const toque = evento.touches[0];
       const dx = toque.clientX - inicio.x;
       const dy = toque.clientY - inicio.y;
-      // Consome somente arrastos horizontais da borda: a rolagem vertical
-      // permanece nativa, e o Safari não inicia outro retorno em paralelo.
-      if (dx > 14 && dx > Math.abs(dy) * 1.3 && evento.cancelable) {
+      if (dx > 12 && dx > Math.abs(dy) * 1.2 && evento.cancelable) {
         evento.preventDefault();
       }
     }
@@ -310,23 +284,23 @@ function AppConteudo() {
     function finalizarToque(evento: TouchEvent) {
       const inicio = toqueInicialWeb.current;
       toqueInicialWeb.current = null;
-      if (!inicio || evento.changedTouches.length !== 1 || !podeVoltar()) {
+      if (!inicio || evento.changedTouches.length !== 1 || !podeVoltar())
         return;
-      }
       const toque = evento.changedTouches[0];
       const dx = toque.clientX - inicio.x;
       const dy = toque.clientY - inicio.y;
-      if (dx >= 75 && dx > Math.abs(dy) * 1.3) {
-        ignorarPopstateAte.current = Date.now() + 1800;
+      if (dx >= 65 && dx > Math.abs(dy) * 1.3) {
+        // Sincrônico: troca de tela diretamente no React Navigation, sem
+        // histórico, transição do Safari nem espera programada.
         voltarComSeguranca();
       }
     }
 
-    function cancelarToque() {
+    const cancelarToque = () => {
       toqueInicialWeb.current = null;
-    }
+    };
 
-    document.addEventListener("touchstart", iniciarToque, { passive: true });
+    document.addEventListener("touchstart", iniciarToque, { passive: false });
     document.addEventListener("touchmove", moverToque, { passive: false });
     document.addEventListener("touchend", finalizarToque, { passive: true });
     document.addEventListener("touchcancel", cancelarToque, { passive: true });
