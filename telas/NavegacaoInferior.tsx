@@ -1,6 +1,5 @@
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type RotaInferior = "Inicio" | "comunidade";
 
@@ -11,24 +10,16 @@ type Props = {
 };
 
 export default function NavegacaoInferior({
-  corTema = "#0B84F3",
+  corTema = "#35D07F",
   rotaAtual,
   onNavegar,
 }: Props) {
-  const insets = useSafeAreaInsets();
   const comunidadeAtiva = rotaAtual === "comunidade";
   const treinosAtivo = !comunidadeAtiva;
   const corIconeComunidade = comunidadeAtiva ? corTema : "#A3ACA5";
-  const bottomSpace = Math.max(insets.bottom, 10);
 
   return (
-    <View
-      nativeID="navegacao-inferior"
-      style={[
-        estilos.barra,
-        { paddingBottom: bottomSpace, height: 74 + bottomSpace },
-      ]}
-    >
+    <View nativeID="navegacao-inferior" style={estilos.barra}>
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
@@ -126,14 +117,16 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    backgroundColor: "#090C0B",
+    height: 60,
+    minHeight: 60,
+    backgroundColor: "#111612",
     borderTopWidth: 1,
-    borderTopColor: "#1A211E",
+    borderTopColor: "#2A2F2B",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 3,
     flexShrink: 0,
   },
   item: {
@@ -143,13 +136,13 @@ const estilos = StyleSheet.create({
     minWidth: 0,
   },
   areaIcone: {
-    minHeight: 34,
+    minHeight: 30,
     alignItems: "center",
     justifyContent: "center",
   },
   iconeBase: {
     minWidth: 44,
-    height: 34,
+    height: 30,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
@@ -158,11 +151,11 @@ const estilos = StyleSheet.create({
     paddingHorizontal: 12,
   },
   iconeTreino: {
-    minWidth: 54,
+    minWidth: 50,
   },
   emoji: {
-    fontSize: 19,
-    lineHeight: 22,
+    fontSize: 18,
+    lineHeight: 21,
   },
   desenhoComunidade: {
     width: 24,
@@ -187,7 +180,7 @@ const estilos = StyleSheet.create({
   corpoCentral: { width: 10, height: 9, left: 7, top: 8 },
   corpoDireito: { width: 8, height: 6, right: 0, top: 11 },
   rotulo: {
-    marginTop: 6,
+    marginTop: 2,
     color: "#A3ACA5",
     fontSize: 11,
     lineHeight: 13,
@@ -195,8 +188,8 @@ const estilos = StyleSheet.create({
   },
   divisor: {
     width: 1,
-    height: 32,
-    backgroundColor: "#2B322E",
+    height: 28,
+    backgroundColor: "#353C37",
     marginHorizontal: 8,
   },
 });
