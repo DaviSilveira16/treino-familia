@@ -14,8 +14,16 @@ import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
 import { supabase } from "../supabase";
 import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
-import ImagemLeve from "./ImagemLeve";
-import { registrarMudancaDeDados } from "../servicos/revisaoDados";
+import {
+  registrarMudancaDeDados,
+  obterRevisaoDeDados,
+} from "../servicos/revisaoDados";
+import {
+  lerCache,
+  lerCacheParaExibicao,
+  salvarCache,
+} from "../servicos/cacheConsultas";
+import { medir } from "../servicos/performance";
 
 type Treino = {
   id: string;
@@ -116,118 +124,186 @@ export default function MeusTreinos({
   );
 
   useEffect(() => {
+    let ativo = true;
+    const controlador = new AbortController();
     async function carregarTreinos() {
-      setCarregando(true);
       try {
+        // Apenas o usuário autenticado pode ler o cache de sua própria conta.
         const { data: usuarioData, error: usuarioErro } =
           await supabase.auth.getUser();
+        if (!ativo) return;
         if (usuarioErro || !usuarioData.user) {
           Alert.alert("Sessão inválida", "Entre novamente na sua conta.");
           return;
         }
-
-        setUsuarioId(usuarioData.user.id);
-        const { data, error } = await supabase
-          .from("workout_plans")
-          .select("id, name")
-          .eq("user_id", usuarioData.user.id)
-          .order("created_at", { ascending: true });
-
+        const id = usuarioData.user.id;
+        setUsuarioId(id);
+        const ch = "meus-treinos-planos";
+        const exibicao = lerCacheParaExibicao<Treino[]>(id, ch);
+        if (exibicao) {
+          setTreinos(exibicao);
+          setCarregando(false);
+        }
+        const armazenados = lerCache<Treino[]>(id, ch);
+        if (armazenados) {
+          setTreinos(armazenados);
+          setCarregando(false);
+          return;
+        }
+        const revisaoInicial = obterRevisaoDeDados();
+        const { data, error } = await medir("meusTreinos.planos", () =>
+          supabase
+            .from("workout_plans")
+            .select("id, name")
+            .eq("user_id", id)
+            .order("created_at", { ascending: true })
+            .abortSignal(controlador.signal),
+        );
+        if (!ativo || controlador.signal.aborted) return;
         if (error) {
           Alert.alert("Erro", "Não foi possível carregar seus treinos.");
           return;
         }
-
-        setTreinos((data ?? []) as Treino[]);
+        if (revisaoInicial !== obterRevisaoDeDados()) return;
+        const planos = (data ?? []) as Treino[];
+        salvarCache(id, "meus-treinos-planos", planos, 20000);
+        setTreinos(planos);
       } catch {
-        Alert.alert("Erro", "Não foi possível conectar ao Supabase.");
+        if (ativo && !controlador.signal.aborted)
+          Alert.alert("Erro", "Não foi possível conectar ao Supabase.");
       } finally {
-        setCarregando(false);
+        if (ativo) setCarregando(false);
       }
     }
-
-    carregarTreinos();
+    void carregarTreinos();
+    return () => {
+      ativo = false;
+      controlador.abort();
+    };
   }, []);
 
   useEffect(() => {
+    let ativo = true;
+    const controlador = new AbortController();
+    const treino = treinoSelecionado;
+    if (!treino) {
+      setExercicios([]);
+      setExercicioParaCarga(null);
+      return () => {
+        ativo = false;
+        controlador.abort();
+      };
+    }
+    if (!usuarioId)
+      return () => {
+        ativo = false;
+        controlador.abort();
+      };
+    const treinoId = treino.id;
+    const chave = `meus-treinos-exercicios:${treinoId}`;
+    type CacheExercicios = {
+      lista: Exercicio[];
+      cargas: Record<string, number>;
+    };
+    const exibicao = lerCacheParaExibicao<CacheExercicios>(usuarioId, chave);
+    if (exibicao) {
+      setExercicios(exibicao.lista);
+      setMaioresCargas((atuais) => ({ ...atuais, ...exibicao.cargas }));
+      setCarregandoExercicios(false);
+    }
+    const anterior = lerCache<CacheExercicios>(usuarioId, chave);
+    if (anterior) {
+      setExercicios(anterior.lista);
+      setMaioresCargas((atuais) => ({ ...atuais, ...anterior.cargas }));
+      setCarregandoExercicios(false);
+      return () => {
+        ativo = false;
+        controlador.abort();
+      };
+    }
     async function carregarExercicios() {
-      if (!treinoSelecionado) {
-        setExercicios([]);
-        setExercicioParaCarga(null);
-        return;
-      }
-
-      setCarregandoExercicios(true);
+      if (!exibicao) setCarregandoExercicios(true);
+      const revisaoInicial = obterRevisaoDeDados();
       try {
-        const { data, error } = await supabase
-          .from("exercises")
-          .select(
-            "id, plan_id, name, sets_goal, reps_goal, position, photo_path",
-          )
-          .eq("plan_id", treinoSelecionado.id)
-          .eq("user_id", usuarioId)
-          .order("position");
-
+        const { data, error } = await medir("meusTreinos.exercicios", () =>
+          supabase
+            .from("exercises")
+            .select(
+              "id, plan_id, name, sets_goal, reps_goal, position, photo_path",
+            )
+            .eq("plan_id", treinoId)
+            .eq("user_id", usuarioId)
+            .order("position")
+            .abortSignal(controlador.signal),
+        );
+        if (!ativo || controlador.signal.aborted) return;
         if (error) {
           Alert.alert("Erro", "Não foi possível carregar os exercícios.");
           return;
         }
-
         const listaBase = (data ?? []) as Exercicio[];
-        // Fotos e referências de carga são independentes: consultar em paralelo.
-        const [urlsFotos, resultadoReferencias] = await Promise.all([
-          obterFotosAssinadas(
-            "exercise-photos",
-            listaBase.map((exercicio) => exercicio.photo_path),
-            604800,
-            usuarioId,
-          ),
-          listaBase.length > 0
-            ? supabase
-                .from("exercise_load_defaults")
-                .select("exercise_id, set_number, reps, weight_kg")
-                .eq("user_id", usuarioId)
-                .in(
-                  "exercise_id",
-                  listaBase.map((exercicio) => exercicio.id),
-                )
-                .order("set_number", { ascending: true })
-            : Promise.resolve({ data: [], error: null }),
-        ]);
-        const lista = listaBase.map((exercicio) => ({
-          ...exercicio,
-          photo_url: exercicio.photo_path
-            ? (urlsFotos.get(exercicio.photo_path) ?? null)
+        const [urlsFotos, resultadoReferencias] = await medir(
+          "meusTreinos.fotosECargas",
+          () =>
+            Promise.all([
+              obterFotosAssinadas(
+                "exercise-photos",
+                listaBase.map((e) => e.photo_path),
+                604800,
+                usuarioId,
+              ),
+              listaBase.length > 0
+                ? supabase
+                    .from("exercise_load_defaults")
+                    .select("exercise_id, set_number, reps, weight_kg")
+                    .eq("user_id", usuarioId)
+                    .in(
+                      "exercise_id",
+                      listaBase.map((e) => e.id),
+                    )
+                    .order("set_number", { ascending: true })
+                    .abortSignal(controlador.signal)
+                : Promise.resolve({ data: [], error: null }),
+            ]),
+        );
+        if (!ativo || controlador.signal.aborted) return;
+        const { data: referencias, error: erroReferencias } =
+          resultadoReferencias;
+        if (erroReferencias) {
+          mostrarMensagem("Erro ao carregar cargas", erroReferencias.message);
+          return;
+        }
+        const cargas: Record<string, number> = {};
+        for (const referencia of referencias ?? []) {
+          const carga = Number(referencia.weight_kg);
+          if (Number.isFinite(carga))
+            cargas[referencia.exercise_id] = Math.max(
+              cargas[referencia.exercise_id] ?? 0,
+              carga,
+            );
+        }
+        if (revisaoInicial !== obterRevisaoDeDados()) return;
+        const lista = listaBase.map((e) => ({
+          ...e,
+          photo_url: e.photo_path
+            ? (urlsFotos.get(e.photo_path) ?? null)
             : null,
         }));
+        salvarCache(usuarioId, chave, { lista, cargas }, 20000);
         setExercicios(lista);
-        const cargas: Record<string, number> = {};
-        if (lista.length > 0) {
-          const { data: referencias, error: erroReferencias } =
-            resultadoReferencias;
-          if (erroReferencias) {
-            mostrarMensagem("Erro ao carregar cargas", erroReferencias.message);
-            return;
-          }
-          for (const referencia of referencias ?? []) {
-            const carga = Number(referencia.weight_kg);
-            if (Number.isFinite(carga)) {
-              cargas[referencia.exercise_id] = Math.max(
-                cargas[referencia.exercise_id] ?? 0,
-                carga,
-              );
-            }
-          }
-        }
         setMaioresCargas((atuais) => ({ ...atuais, ...cargas }));
       } catch {
-        Alert.alert("Erro", "Não foi possível conectar ao Supabase.");
+        if (ativo && !controlador.signal.aborted)
+          Alert.alert("Erro", "Não foi possível conectar ao Supabase.");
       } finally {
-        setCarregandoExercicios(false);
+        if (ativo) setCarregandoExercicios(false);
       }
     }
-
-    if (usuarioId) carregarExercicios();
+    void carregarExercicios();
+    return () => {
+      ativo = false;
+      controlador.abort();
+    };
   }, [treinoSelecionado, usuarioId]);
 
   async function criarTreino() {
@@ -430,6 +506,7 @@ export default function MeusTreinos({
         return;
       }
 
+      registrarMudancaDeDados();
       setExercicios((atuais) =>
         [...atuais, data as Exercicio].sort((a, b) => a.position - b.position),
       );
@@ -487,6 +564,7 @@ export default function MeusTreinos({
         return;
       }
 
+      registrarMudancaDeDados();
       setExercicios((atuais) =>
         atuais.map((item) =>
           item.id === exercicioEditando.id
@@ -540,6 +618,7 @@ export default function MeusTreinos({
         return;
       }
 
+      registrarMudancaDeDados();
       setExercicios((atuais) =>
         atuais.filter((item) => item.id !== exercicio.id),
       );
@@ -576,9 +655,9 @@ export default function MeusTreinos({
     try {
       const resultado = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
-        allowsEditing: false,
+        allowsEditing: true,
         aspect: [1, 1],
-        quality: 1,
+        quality: 0.75,
       });
 
       if (resultado.canceled || !resultado.assets[0]) return;
@@ -640,6 +719,7 @@ export default function MeusTreinos({
         .from("exercise-photos")
         .createSignedUrl(novoCaminho, 604800);
 
+      registrarMudancaDeDados();
       setExercicios((atuais) =>
         atuais.map((item) =>
           item.id === exercicio.id
@@ -793,6 +873,7 @@ export default function MeusTreinos({
         return;
       }
 
+      registrarMudancaDeDados();
       const { error: erroLimparSeriesAntigas } = await supabase
         .from("exercise_load_defaults")
         .delete()
@@ -1099,8 +1180,8 @@ export default function MeusTreinos({
                         activeOpacity={0.8}
                       >
                         {exercicio.photo_url ? (
-                          <ImagemLeve
-                            uri={exercicio.photo_url}
+                          <Image
+                            source={{ uri: exercicio.photo_url }}
                             style={estilos.fotoExercicio}
                             resizeMode="cover"
                           />

@@ -9,6 +9,12 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabase";
 import { obterRevisaoDeDados } from "../servicos/revisaoDados";
+import {
+  lerCache,
+  lerCacheParaExibicao,
+  salvarCache,
+} from "../servicos/cacheConsultas";
+import { medir, registrarTempo } from "../servicos/performance";
 
 type Props = { corTema?: string };
 type DadosSemana = {
@@ -19,6 +25,10 @@ type DadosSemana = {
   caloriasDisponiveis: number;
 };
 
+let rpcIndisponivel = false;
+function registrarResumoTotal(inicio: number) {
+  registrarTempo("resumo.total", inicio);
+}
 function inicioSemana(date: Date) {
   const inicio = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const diferenca = (inicio.getDay() + 6) % 7;
@@ -47,90 +57,179 @@ export default function ResumoSemanal({ corTema = "#35D07F" }: Props) {
   const dadosCarregadosRef = useRef(false);
   const [erro, setErro] = useState("");
 
-  const carregar = useCallback(async () => {
+  const emFocoRef = useRef(false);
+  const pedidoRef = useRef<AbortController | null>(null);
+  const versaoPedidoRef = useRef(0);
+  const carregar = useCallback(async (atualizacaoManual = false) => {
+    pedidoRef.current?.abort();
+    const controlador = new AbortController();
+    pedidoRef.current = controlador;
+    const versao = ++versaoPedidoRef.current;
+    const valido = () =>
+      !controlador.signal.aborted &&
+      versao === versaoPedidoRef.current &&
+      emFocoRef.current;
     if (!dadosCarregadosRef.current) setCarregando(true);
-    setErro("");
+    if (valido()) setErro("");
+    const inicioMedicao = Date.now();
     try {
       const { data: usuario, error: erroUsuario } =
         await supabase.auth.getUser();
+      if (!valido()) return;
       if (erroUsuario || !usuario.user)
         throw new Error("Não foi possível carregar o resumo da semana.");
+      const revisaoAntes = obterRevisaoDeDados();
       const inicio = inicioSemana(new Date());
       const fim = new Date(inicio);
       fim.setDate(fim.getDate() + 7);
-      const [resultadoTreinos, resultadoCardios] = await Promise.all([
-        supabase
-          .from("workout_sessions")
-          .select(
-            "id, started_at, finished_at, status, duration_minutes, active_calories",
-          )
-          .eq("user_id", usuario.user.id)
-          .gte("started_at", inicio.toISOString())
-          .lt("started_at", fim.toISOString()),
-        supabase
-          .from("cardio_sessions")
-          .select("id, started_at, duration_minutes, active_calories")
-          .eq("user_id", usuario.user.id)
-          .gte("started_at", inicio.toISOString())
-          .lt("started_at", fim.toISOString()),
-      ]);
-      if (resultadoTreinos.error) throw resultadoTreinos.error;
-      if (resultadoCardios.error) throw resultadoCardios.error;
-      const treinos = (resultadoTreinos.data ?? []).filter(
-        (item) => item.status !== "em_andamento",
-      );
-      const cardios = resultadoCardios.data ?? [];
-      const minutosTreinos = treinos.reduce(
-        (total, item) => total + (Number(item.duration_minutes) || 0),
-        0,
-      );
-      const minutosCardios = cardios.reduce(
-        (total, item) => total + (Number(item.duration_minutes) || 0),
-        0,
-      );
-      const caloriasTreinos = treinos.reduce(
-        (total, item) => total + (Number(item.active_calories) || 0),
-        0,
-      );
-      const caloriasCardios = cardios.reduce(
-        (total, item) => total + (Number(item.active_calories) || 0),
-        0,
-      );
-      const caloriasDisponiveis = [...treinos, ...cardios].filter(
-        (item) => item.active_calories != null,
-      ).length;
+      const chave = `resumo-semanal:${inicio.toISOString()}`;
+      const anterior = !atualizacaoManual
+        ? lerCacheParaExibicao<DadosSemana>(usuario.user.id, chave)
+        : undefined;
+      if (anterior && valido()) {
+        setDados(anterior);
+        setCarregando(false);
+        dadosCarregadosRef.current = true;
+      }
+      const cache = !atualizacaoManual
+        ? lerCache<DadosSemana>(usuario.user.id, chave)
+        : undefined;
+      if (cache) {
+        if (valido()) {
+          setDados(cache);
+          setCarregando(false);
+          dadosCarregadosRef.current = true;
+          ultimaConsultaRef.current = Date.now();
+          ultimaRevisaoRef.current = obterRevisaoDeDados();
+        }
+        return;
+      }
+
+      // RPC agrega no PostgreSQL e respeita RLS (SECURITY INVOKER).
+      // Se a migração opcional não existir, mantém o cálculo original.
+      let novosDados: DadosSemana | null = null;
+      if (!rpcIndisponivel) {
+        const resultado = await medir("resumo.rpc", async () =>
+          supabase
+            .rpc("tf_resumo_semanal", {
+              p_inicio: inicio.toISOString(),
+              p_fim: fim.toISOString(),
+            })
+            .abortSignal(controlador.signal),
+        );
+        if (!valido()) return;
+        if (!resultado.error && resultado.data) {
+          const r = resultado.data as DadosSemana;
+          if (
+            [
+              r.treinos,
+              r.cardios,
+              r.minutos,
+              r.calorias,
+              r.caloriasDisponiveis,
+            ].every(
+              (valor) => typeof valor === "number" && Number.isFinite(valor),
+            )
+          ) {
+            novosDados = r;
+          }
+        } else if (
+          resultado.error?.code === "PGRST202" ||
+          resultado.error?.code === "42883"
+        ) {
+          rpcIndisponivel = true;
+        } else if (resultado.error) {
+          throw resultado.error;
+        }
+      }
+      if (!novosDados) {
+        const [resultadoTreinos, resultadoCardios] = await medir(
+          "resumo.fallback",
+          () =>
+            Promise.all([
+              supabase
+                .from("workout_sessions")
+                .select("status, duration_minutes, active_calories")
+                .eq("user_id", usuario.user!.id)
+                .gte("started_at", inicio.toISOString())
+                .lt("started_at", fim.toISOString())
+                .abortSignal(controlador.signal),
+              supabase
+                .from("cardio_sessions")
+                .select("duration_minutes, active_calories")
+                .eq("user_id", usuario.user!.id)
+                .gte("started_at", inicio.toISOString())
+                .lt("started_at", fim.toISOString())
+                .abortSignal(controlador.signal),
+            ]),
+        );
+        if (!valido()) return;
+        if (resultadoTreinos.error) throw resultadoTreinos.error;
+        if (resultadoCardios.error) throw resultadoCardios.error;
+        const treinos = (resultadoTreinos.data ?? []).filter(
+          (item) => item.status !== "em_andamento",
+        );
+        const cardios = resultadoCardios.data ?? [];
+        const todas = [...treinos, ...cardios];
+        novosDados = {
+          treinos: treinos.length,
+          cardios: cardios.length,
+          minutos: todas.reduce(
+            (soma, item) => soma + (Number(item.duration_minutes) || 0),
+            0,
+          ),
+          calorias: Math.round(
+            todas.reduce(
+              (soma, item) => soma + (Number(item.active_calories) || 0),
+              0,
+            ),
+          ),
+          caloriasDisponiveis: todas.filter(
+            (item) => item.active_calories != null,
+          ).length,
+        };
+      }
+      if (!valido()) return;
+      // Uma gravação confirmada durante a requisição invalida o resultado.
+      if (revisaoAntes !== obterRevisaoDeDados()) return;
+      const revisaoNoFim = obterRevisaoDeDados();
+      salvarCache(usuario.user.id, chave, novosDados, 20000);
+      setDados(novosDados);
       dadosCarregadosRef.current = true;
       ultimaConsultaRef.current = Date.now();
-      ultimaRevisaoRef.current = obterRevisaoDeDados();
-      setDados({
-        treinos: treinos.length,
-        cardios: cardios.length,
-        minutos: minutosTreinos + minutosCardios,
-        calorias: Math.round(caloriasTreinos + caloriasCardios),
-        caloriasDisponiveis,
-      });
+      ultimaRevisaoRef.current = revisaoNoFim;
     } catch (e) {
-      setErro(
-        e instanceof Error
-          ? e.message
-          : "Não foi possível carregar o resumo semanal.",
-      );
+      if (!valido()) return;
+      // Em falha de rede, preservar os últimos números em vez de apagar a tela.
+      if (!dadosCarregadosRef.current)
+        setErro(
+          e instanceof Error
+            ? e.message
+            : "Não foi possível carregar o resumo semanal.",
+        );
     } finally {
-      setCarregando(false);
+      if (valido()) setCarregando(false);
+      if (valido()) {
+        // O tempo completo inclui autenticação e tempo de agregação.
+        registrarResumoTotal(inicioMedicao);
+      }
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
+      emFocoRef.current = true;
       if (
-        Date.now() - ultimaConsultaRef.current < 12000 &&
-        ultimaRevisaoRef.current === obterRevisaoDeDados()
-      )
-        return;
-      const espera = setTimeout(() => {
+        Date.now() - ultimaConsultaRef.current >= 12000 ||
+        ultimaRevisaoRef.current !== obterRevisaoDeDados()
+      ) {
         void carregar();
-      }, 80);
-      return () => clearTimeout(espera);
+      }
+      return () => {
+        emFocoRef.current = false;
+        pedidoRef.current?.abort();
+        versaoPedidoRef.current++;
+      };
     }, [carregar]),
   );
 
@@ -143,7 +242,12 @@ export default function ResumoSemanal({ corTema = "#35D07F" }: Props) {
             Segunda a domingo · semana atual
           </Text>
         </View>
-        <TouchableOpacity onPress={carregar} style={estilos.atualizar}>
+        <TouchableOpacity
+          onPress={() => {
+            void carregar(true);
+          }}
+          style={estilos.atualizar}
+        >
           <Text style={[estilos.textoAtualizar, { color: corTema }]}>↻</Text>
         </TouchableOpacity>
       </View>

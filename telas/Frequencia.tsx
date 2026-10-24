@@ -17,6 +17,8 @@ import {
   obterRevisaoDeDados,
   registrarMudancaDeDados,
 } from "../servicos/revisaoDados";
+import { lerCache, salvarCache } from "../servicos/cacheConsultas";
+import { medir } from "../servicos/performance";
 import {
   categoriaDoCardio,
   estimarCaloriasAtivas,
@@ -155,8 +157,13 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const chaveMes = `${mesAtual.getFullYear()}-${mesAtual.getMonth()}`;
   const mesCarregadoRef = useRef("");
   const consultaAtivaRef = useRef(0);
+  const controladorConsultaRef = useRef<AbortController | null>(null);
   const carregarDados = useCallback(async () => {
+    controladorConsultaRef.current?.abort();
+    const controlador = new AbortController();
+    controladorConsultaRef.current = controlador;
     const consulta = ++consultaAtivaRef.current;
+    const revisaoInicial = obterRevisaoDeDados();
     const inicioMes = new Date(
       mesAtual.getFullYear(),
       mesAtual.getMonth(),
@@ -180,7 +187,26 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         Alert.alert("Sessão inválida", "Entre novamente na sua conta.");
         return;
       }
+      if (controlador.signal.aborted || consulta !== consultaAtivaRef.current)
+        return;
       setUsuarioId(usuario.user.id);
+      const dadosCache = lerCache<{
+        treinos: Treino[];
+        sessoes: Sessao[];
+        modelosCardio: CardioModelo[];
+        sessoesCardio: SessaoCardio[];
+      }>(usuario.user.id, `frequencia:${chaveMes}`);
+      if (dadosCache) {
+        setTreinos(dadosCache.treinos);
+        setSessoes(dadosCache.sessoes);
+        setModelosCardio(dadosCache.modelosCardio);
+        setSessoesCardio(dadosCache.sessoesCardio);
+        dadosCarregadosRef.current = true;
+        mesCarregadoRef.current = chaveMes;
+        ultimaConsultaRef.current = Date.now();
+        ultimaRevisaoRef.current = obterRevisaoDeDados();
+        return;
+      }
       const metadados = usuario.user.user_metadata ?? {};
       const pesoPerfil = Number(metadados.peso_kg);
       const alturaPerfil = Number(metadados.altura_cm);
@@ -213,36 +239,44 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         resultadoSessoes,
         resultadoModelosCardio,
         resultadoSessoesCardio,
-      ] = await Promise.all([
-        supabase
-          .from("workout_plans")
-          .select("id, name")
-          .eq("user_id", usuario.user.id)
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("workout_sessions")
-          .select("id, plan_id, started_at, notes, status")
-          .eq("user_id", usuario.user.id)
-          .gte("started_at", inicioMes)
-          .lt("started_at", fimMes)
-          .order("started_at", { ascending: false }),
-        supabase
-          .from("cardio_activities")
-          .select(
-            "id, nome, tipo, duracao_min, distancia_km, calorias, observacoes",
-          )
-          .eq("user_id", usuario.user.id)
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("cardio_sessions")
-          .select(
-            "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
-          )
-          .eq("user_id", usuario.user.id)
-          .gte("started_at", inicioMes)
-          .lt("started_at", fimMes)
-          .order("started_at", { ascending: false }),
-      ]);
+      ] = await medir("frequencia.mes", () =>
+        Promise.all([
+          supabase
+            .from("workout_plans")
+            .select("id, name")
+            .eq("user_id", usuario.user.id)
+            .order("created_at", { ascending: true })
+            .abortSignal(controlador.signal),
+          supabase
+            .from("workout_sessions")
+            .select("id, plan_id, started_at, notes, status")
+            .eq("user_id", usuario.user.id)
+            .gte("started_at", inicioMes)
+            .lt("started_at", fimMes)
+            .order("started_at", { ascending: false })
+            .abortSignal(controlador.signal),
+          supabase
+            .from("cardio_activities")
+            .select(
+              "id, nome, tipo, duracao_min, distancia_km, calorias, observacoes",
+            )
+            .eq("user_id", usuario.user.id)
+            .order("created_at", { ascending: true })
+            .abortSignal(controlador.signal),
+          supabase
+            .from("cardio_sessions")
+            .select(
+              "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
+            )
+            .eq("user_id", usuario.user.id)
+            .gte("started_at", inicioMes)
+            .lt("started_at", fimMes)
+            .order("started_at", { ascending: false })
+            .abortSignal(controlador.signal),
+        ]),
+      );
+      if (controlador.signal.aborted || consulta !== consultaAtivaRef.current)
+        return;
       if (resultadoTreinos.error) {
         Alert.alert("Erro", resultadoTreinos.error.message);
         return;
@@ -266,7 +300,20 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         return;
       }
       // Uma consulta anterior (de outro mês) não pode sobrescrever a atual.
-      if (consulta !== consultaAtivaRef.current) return;
+      if (consulta !== consultaAtivaRef.current || controlador.signal.aborted)
+        return;
+      if (revisaoInicial !== obterRevisaoDeDados()) return;
+      salvarCache(
+        usuario.user.id,
+        `frequencia:${chaveMes}`,
+        {
+          treinos: (resultadoTreinos.data ?? []) as Treino[],
+          sessoes: (resultadoSessoes.data ?? []) as Sessao[],
+          modelosCardio: (resultadoModelosCardio.data ?? []) as CardioModelo[],
+          sessoesCardio: (resultadoSessoesCardio.data ?? []) as SessaoCardio[],
+        },
+        20000,
+      );
       setTreinos((resultadoTreinos.data ?? []) as Treino[]);
       setSessoes((resultadoSessoes.data ?? []) as Sessao[]);
       setModelosCardio((resultadoModelosCardio.data ?? []) as CardioModelo[]);
@@ -276,9 +323,11 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       ultimaConsultaRef.current = Date.now();
       ultimaRevisaoRef.current = obterRevisaoDeDados();
     } catch {
-      Alert.alert("Erro", "Não foi possível carregar o calendário.");
+      if (!controlador.signal.aborted && consulta === consultaAtivaRef.current)
+        Alert.alert("Erro", "Não foi possível carregar o calendário.");
     } finally {
-      if (consulta === consultaAtivaRef.current) setCarregando(false);
+      if (consulta === consultaAtivaRef.current && !controlador.signal.aborted)
+        setCarregando(false);
     }
   }, [chaveMes]);
   useFocusEffect(
@@ -296,6 +345,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       return () => {
         clearTimeout(espera);
         // Ignorar resposta de um mês que deixou de estar em foco.
+        controladorConsultaRef.current?.abort();
         consultaAtivaRef.current++;
       };
     }, [carregarDados, chaveMes]),
