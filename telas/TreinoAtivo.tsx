@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -13,6 +19,15 @@ import {
 import { Alert } from "../servicos/alerta";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabase";
+import {
+  apagarRascunho,
+  gravarRascunho,
+  lerRascunho,
+  mesclarSeries,
+  novoIdSerie,
+  type EsforcoPercebido,
+  type TreinoRascunho,
+} from "../servicos/treinoLocal";
 import {
   estimarCaloriasAtivasTreino,
   type DadosCalculoTreino,
@@ -49,6 +64,7 @@ type SerieAtiva = {
   weight_kg: string;
   concluida: boolean;
   registroId?: string;
+  pendente?: "salvar" | "remover";
 };
 type SessaoAtiva = { id: string; plan_id: string; started_at: string };
 type RegistroSalvo = {
@@ -136,16 +152,283 @@ export default function TreinoAtivo({
   const [agora, setAgora] = useState(Date.now());
   const [mensagem, setMensagem] = useState("");
   const [outroTreinoAtivo, setOutroTreinoAtivo] = useState(false);
+  const [esforco, setEsforco] = useState<EsforcoPercebido>("nao_informado");
+  const [restaurado, setRestaurado] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
+  const [erroSincronizacao, setErroSincronizacao] = useState("");
+  const [conflitoRemoto, setConflitoRemoto] = useState(false);
+  const [bloqueioSessao, setBloqueioSessao] = useState(false);
+  const [online, setOnline] = useState(true);
+  const prontoRef = useRef(false);
+  const sincronizandoRef = useRef(false);
+  const seriesRef = useRef(series);
+  const sessaoRef = useRef(sessao);
+  const exerciciosRef = useRef(exercicios);
+  const usuarioRef = useRef(usuarioId);
+  const intensidadeRef = useRef(intensidade);
+  const esforcoRef = useRef(esforco);
+  seriesRef.current = series;
+  sessaoRef.current = sessao;
+  exerciciosRef.current = exercicios;
+  usuarioRef.current = usuarioId;
+  intensidadeRef.current = intensidade;
+  esforcoRef.current = esforco;
+
+  const montarRascunho = useCallback(
+    (novasSeries?: SerieAtiva[]): TreinoRascunho | null => {
+      const sessaoAtual = sessaoRef.current;
+      if (
+        !prontoRef.current ||
+        !sessaoAtual ||
+        sessaoAtual.plan_id !== planId ||
+        !usuarioRef.current
+      )
+        return null;
+      return {
+        versao: 1,
+        usuarioId: usuarioRef.current,
+        planId,
+        planName,
+        sessao: sessaoAtual,
+        exercicios: exerciciosRef.current,
+        series: novasSeries ?? seriesRef.current,
+        intensidade: intensidadeRef.current,
+        esforco: esforcoRef.current,
+        salvoEm: new Date().toISOString(),
+      };
+    },
+    [planId, planName],
+  );
+
+  const salvarLocal = useCallback(
+    async (novasSeries?: SerieAtiva[]) => {
+      const rascunho = montarRascunho(novasSeries);
+      if (rascunho) await gravarRascunho(rascunho);
+    },
+    [montarRascunho],
+  );
+
+  /** A operação é gravada no aparelho antes de qualquer envio ao servidor. */
+  const sincronizar = useCallback(
+    async (permitirSobrescrever = false) => {
+      if (sincronizandoRef.current || bloqueioSessao || !prontoRef.current)
+        return;
+      if (
+        Platform.OS === "web" &&
+        typeof navigator !== "undefined" &&
+        navigator.onLine === false
+      ) {
+        setOnline(false);
+        return;
+      }
+      const sessaoAtual = sessaoRef.current;
+      const idUsuario = usuarioRef.current;
+      if (
+        !sessaoAtual ||
+        sessaoAtual.plan_id !== planId ||
+        !idUsuario ||
+        !seriesRef.current.some((serie) => serie.pendente)
+      )
+        return;
+      sincronizandoRef.current = true;
+      setSincronizando(true);
+      setErroSincronizacao("");
+      if (!permitirSobrescrever) setConflitoRemoto(false);
+      try {
+        const { data: autenticado, error: erroAuth } =
+          await supabase.auth.getUser();
+        if (erroAuth || autenticado.user?.id !== idUsuario)
+          throw new Error("Faça login novamente para sincronizar este treino.");
+        const { data: situacao, error: erroSituacao } = await supabase
+          .from("workout_sessions")
+          .select("id, status, plan_id")
+          .eq("id", sessaoAtual.id)
+          .eq("user_id", idUsuario)
+          .maybeSingle();
+        if (erroSituacao) throw erroSituacao;
+        if (
+          !situacao ||
+          situacao.status !== "em_andamento" ||
+          situacao.plan_id !== planId
+        ) {
+          setBloqueioSessao(true);
+          throw new Error(
+            "Esta sessão foi encerrada ou alterada em outro aparelho. O rascunho local foi preservado; nenhuma série será sobrescrita automaticamente.",
+          );
+        }
+        for (const item of seriesRef.current.filter(
+          (serie) => serie.pendente,
+        )) {
+          const { data: existentes, error: erroBusca } = await supabase
+            .from("workout_sets")
+            .select("id, reps, weight_kg")
+            .eq("user_id", idUsuario)
+            .eq("session_id", sessaoAtual.id)
+            .eq("exercise_id", item.exercise_id)
+            .eq("set_number", item.set_number)
+            .limit(2);
+          if (erroBusca) throw erroBusca;
+          if ((existentes ?? []).length > 1)
+            throw new Error(
+              "Existem séries duplicadas no servidor. A sincronização foi interrompida para preservar os dados.",
+            );
+          const existente = existentes?.[0];
+          let registroId: string | undefined;
+          if (item.pendente === "remover") {
+            if (existente) {
+              const { error } = await supabase
+                .from("workout_sets")
+                .delete()
+                .eq("id", existente.id)
+                .eq("session_id", sessaoAtual.id)
+                .eq("user_id", idUsuario);
+              if (error) throw error;
+            }
+          } else {
+            const reps = Number(item.reps);
+            const peso = Number(item.weight_kg.replace(",", "."));
+            if (
+              !Number.isInteger(reps) ||
+              reps < 1 ||
+              reps > 1000 ||
+              !Number.isFinite(peso) ||
+              peso < 0 ||
+              peso > 2000
+            ) {
+              throw new Error(
+                `Valores inválidos na série ${item.set_number} de ${item.exercise_name}.`,
+              );
+            }
+            const dados = {
+              user_id: idUsuario,
+              session_id: sessaoAtual.id,
+              exercise_id: item.exercise_id,
+              exercise_name: item.exercise_name,
+              set_number: item.set_number,
+              reps,
+              weight_kg: peso,
+            };
+            if (existente) {
+              const iguais =
+                Number(existente.reps) === reps &&
+                Number(existente.weight_kg) === peso;
+              if (!iguais && !permitirSobrescrever) {
+                setConflitoRemoto(true);
+                throw new Error(
+                  `${item.exercise_name}, série ${item.set_number}: existem valores diferentes no Supabase. Escolha explicitamente se deseja enviar sua versão local.`,
+                );
+              }
+              if (iguais) {
+                // Uma resposta de sucesso pode ter se perdido: confirmar sem regravar.
+                registroId = existente.id;
+              } else {
+                const { data, error } = await supabase
+                  .from("workout_sets")
+                  .update(dados)
+                  .eq("id", existente.id)
+                  .eq("user_id", idUsuario)
+                  .select("id")
+                  .single();
+                if (error) throw error;
+                registroId = data.id;
+              }
+            } else {
+              // O UUID é persistido antes da tentativa: repetir o envio é idempotente por PK.
+              const { data, error } = await supabase
+                .from("workout_sets")
+                .upsert({ id: item.registroId, ...dados }, { onConflict: "id" })
+                .select("id")
+                .single();
+              if (error) throw error;
+              registroId = data.id;
+            }
+          }
+          // Não confirma uma operação se o usuário alterou a série durante o envio.
+          const atuais = seriesRef.current.map((serie) =>
+            serie.chave === item.chave &&
+            serie.pendente === item.pendente &&
+            serie.reps === item.reps &&
+            serie.weight_kg === item.weight_kg
+              ? {
+                  ...serie,
+                  registroId:
+                    item.pendente === "remover" ? undefined : registroId,
+                  pendente: undefined,
+                }
+              : serie,
+          );
+          seriesRef.current = atuais;
+          setSeries(atuais);
+          await salvarLocal(atuais);
+        }
+        setOnline(true);
+        setConflitoRemoto(false);
+        setMensagem("✓ Séries sincronizadas com o Supabase.");
+      } catch (erro) {
+        setErroSincronizacao(
+          erro instanceof Error
+            ? erro.message
+            : "Falha ao sincronizar. Os dados locais foram preservados.",
+        );
+      } finally {
+        sincronizandoRef.current = false;
+        setSincronizando(false);
+      }
+    },
+    [bloqueioSessao, planId, salvarLocal],
+  );
+
+  // Grava também mudanças de carga/repetições ainda não concluídas.
+  useEffect(() => {
+    if (!prontoRef.current || !sessao) return;
+    salvarLocal().catch(() =>
+      setErroSincronizacao(
+        "Não foi possível salvar o rascunho no aparelho. Verifique o armazenamento.",
+      ),
+    );
+  }, [series, sessao, exercicios, intensidade, esforco, salvarLocal]);
+
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+    const aoVoltar = () => {
+      setOnline(navigator.onLine !== false);
+      if (navigator.onLine !== false) void sincronizar();
+    };
+    setOnline(navigator.onLine !== false);
+    window.addEventListener("online", aoVoltar);
+    window.addEventListener("offline", aoVoltar);
+    window.addEventListener("focus", aoVoltar);
+    return () => {
+      window.removeEventListener("online", aoVoltar);
+      window.removeEventListener("offline", aoVoltar);
+      window.removeEventListener("focus", aoVoltar);
+    };
+  }, [sincronizar]);
+  useEffect(() => {
+    if (sessao && series.some((serie) => serie.pendente)) void sincronizar();
+  }, [sessao, series, sincronizar]);
+  useEffect(() => {
+    if (!sessao || !series.some((serie) => serie.pendente)) return;
+    const intervalo = setInterval(() => {
+      void sincronizar();
+    }, 12000);
+    return () => clearInterval(intervalo);
+  }, [sessao, series, sincronizar]);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
     setMensagem("");
     try {
-      const { data: sessaoUsuario, error: erroUsuario } =
-        await supabase.auth.getUser();
-      if (erroUsuario || !sessaoUsuario.user)
-        throw new Error("Entre novamente na sua conta.");
-      const idUsuario = sessaoUsuario.user.id;
+      // A sessão autenticada em cache permite recuperar o rascunho mesmo offline.
+      const { data: sessaoCache } = await supabase.auth.getSession();
+      const usuarioEmCache = sessaoCache.session?.user;
+      if (!usuarioEmCache)
+        throw new Error(
+          "Entre novamente na sua conta para recuperar seu treino.",
+        );
+      const idUsuario = usuarioEmCache.id;
+      const local = await lerRascunho(idUsuario, planId);
+      const sessaoUsuario = { user: usuarioEmCache };
       setUsuarioId(idUsuario);
       setPerfil(
         lerPerfil(
@@ -162,11 +445,25 @@ export default function TreinoAtivo({
       if (erroExercicios) throw erroExercicios;
       const base = (listaExercicios ?? []) as ExercicioBase[];
       if (base.length === 0) {
-        setExercicios([]);
-        setSeries([]);
-        setMensagem(
-          "Este treino ainda não tem exercícios. Adicione exercícios em Meus treinos.",
-        );
+        if (local) {
+          // Exercícios removidos remotamente: preservar o rascunho para conferência.
+          setExercicios(local.exercicios);
+          setSeries(local.series);
+          setSessao(local.sessao);
+          setIntensidade(local.intensidade);
+          setEsforco(local.esforco ?? "nao_informado");
+          setRestaurado(true);
+          setBloqueioSessao(true);
+          setMensagem(
+            "Os exercícios deste plano não estão mais disponíveis no servidor. Seu rascunho local foi preservado sem enviar alterações.",
+          );
+        } else {
+          setExercicios([]);
+          setSeries([]);
+          setMensagem(
+            "Este treino ainda não tem exercícios. Adicione exercícios em Meus treinos.",
+          );
+        }
         return;
       }
 
@@ -227,12 +524,53 @@ export default function TreinoAtivo({
 
       setOutroTreinoAtivo(false);
       if (!ativa) {
+        if (local && !local.series.some((item) => item.pendente)) {
+          // Tudo já foi transmitido. A sessão remota terminou; limpar só o cache.
+          await apagarRascunho(idUsuario, planId);
+        } else if (local) {
+          // Não reabre uma sessão encerrada no servidor. O rascunho fica intacto.
+          setExercicios(local.exercicios);
+          exerciciosRef.current = local.exercicios;
+          setSeries(local.series);
+          seriesRef.current = local.series;
+          setSessao(local.sessao);
+          sessaoRef.current = local.sessao;
+          setIntensidade(local.intensidade);
+          setEsforco(local.esforco ?? "nao_informado");
+          setRestaurado(true);
+          setBloqueioSessao(true);
+          setMensagem(
+            "O servidor não mostra esta sessão como ativa. Seu rascunho está preservado, mas foi bloqueado para evitar misturar treinos. Confira o histórico.",
+          );
+          prontoRef.current = true;
+          return;
+        }
         setSessao(null);
         setSeries(listas);
+        prontoRef.current = true;
         return;
       }
 
+      if (
+        local &&
+        local.sessao.id !== ativa.id &&
+        local.series.some((item) => item.pendente)
+      ) {
+        // Não trocar o cache da sessão antiga enquanto houver dados não enviados.
+        setExercicios(local.exercicios);
+        setSeries(local.series);
+        setSessao(local.sessao);
+        setIntensidade(local.intensidade);
+        setEsforco(local.esforco ?? "nao_informado");
+        setRestaurado(true);
+        setBloqueioSessao(true);
+        setMensagem(
+          "Outra sessão está ativa no Supabase e este aparelho possui alterações pendentes de uma sessão antiga. Os dados foram preservados para revisão.",
+        );
+        return;
+      }
       setSessao(ativa);
+      sessaoRef.current = ativa;
       const { data: salvas, error: erroSalvas } = await supabase
         .from("workout_sets")
         .select("id, exercise_id, exercise_name, set_number, reps, weight_kg")
@@ -241,33 +579,61 @@ export default function TreinoAtivo({
         .order("set_number", { ascending: true });
       if (erroSalvas) throw erroSalvas;
       const registros = (salvas ?? []) as RegistroSalvo[];
-      setSeries(
-        listas.map((serie) => {
-          const salva = registros.find(
-            (item) =>
-              item.exercise_id === serie.exercise_id &&
-              Number(item.set_number) === serie.set_number,
-          );
-          return salva
-            ? {
-                ...serie,
-                reps: String(salva.reps),
-                weight_kg: String(salva.weight_kg),
-                concluida: true,
-                registroId: salva.id,
-              }
-            : serie;
-        }),
+      const mescladas = mesclarSeries(
+        listas,
+        registros,
+        local?.sessao.id === ativa.id ? local : null,
       );
-      setMensagem(
-        "Treino em andamento recuperado. Suas séries concluídas foram carregadas.",
-      );
+      setSeries(mescladas);
+      seriesRef.current = mescladas;
+      if (local?.sessao.id === ativa.id) {
+        setIntensidade(local.intensidade);
+        setEsforco(local.esforco ?? "nao_informado");
+        setRestaurado(true);
+        setMensagem(
+          "Treino recuperado. Seus ajustes e séries pendentes estão protegidos no aparelho.",
+        );
+      } else {
+        setMensagem("Treino em andamento recuperado do Supabase.");
+      }
+      prontoRef.current = true;
     } catch (erro) {
-      setMensagem(
-        erro instanceof Error
-          ? erro.message
-          : "Não foi possível carregar o treino.",
-      );
+      // Fallback offline: não substitui o servidor, apenas restaura a última cópia.
+      try {
+        const { data } = await supabase.auth.getSession();
+        const id = data.session?.user.id;
+        const local = id ? await lerRascunho(id, planId) : null;
+        if (id && local) {
+          setUsuarioId(id);
+          usuarioRef.current = id;
+          setExercicios(local.exercicios);
+          exerciciosRef.current = local.exercicios;
+          setSeries(local.series);
+          seriesRef.current = local.series;
+          setSessao(local.sessao);
+          sessaoRef.current = local.sessao;
+          setIntensidade(local.intensidade);
+          setEsforco(local.esforco ?? "nao_informado");
+          setRestaurado(true);
+          prontoRef.current = true;
+          setMensagem(
+            "Treino recuperado do aparelho. Sem conexão, as séries ficarão pendentes até sincronizar.",
+          );
+        } else {
+          prontoRef.current = false;
+          setSessao(null);
+          setSeries([]);
+          setMensagem(
+            erro instanceof Error
+              ? erro.message
+              : "Não foi possível carregar o treino.",
+          );
+        }
+      } catch {
+        setMensagem(
+          "Não foi possível recuperar o treino. Verifique sua conexão e entre novamente.",
+        );
+      }
     } finally {
       setCarregando(false);
     }
@@ -407,6 +773,10 @@ export default function TreinoAtivo({
       if (error || !data)
         throw error ?? new Error("Não foi possível iniciar o treino.");
       setSessao(data as SessaoAtiva);
+      sessaoRef.current = data as SessaoAtiva;
+      prontoRef.current = true;
+      // Persistir a sessão antes de permitir qualquer registro.
+      await salvarLocal();
       setAgora(Date.now());
       setMensagem(
         "Treino iniciado. Marque cada série ao terminá-la; as cargas e repetições serão salvas como registro desta sessão.",
@@ -491,94 +861,88 @@ export default function TreinoAtivo({
   }
 
   async function alternarSerie(serie: SerieAtiva) {
-    if (!sessao || !usuarioId) {
+    if (!sessao || !usuarioId || bloqueioSessao) {
       avisar(
-        "Inicie o treino",
-        "Toque em Iniciar treino antes de marcar séries concluídas.",
+        "Treino indisponível",
+        "Inicie o treino ou confira a situação da sessão antes de registrar séries.",
       );
       return;
     }
-    setChaveEmSalvamento(serie.chave);
-    try {
-      if (serie.concluida && serie.registroId) {
-        const { error } = await supabase
-          .from("workout_sets")
-          .delete()
-          .eq("id", serie.registroId)
-          .eq("session_id", sessao.id)
-          .eq("user_id", usuarioId);
-        if (error) throw error;
-        setSeries((atuais) =>
-          atuais.map((item) =>
-            item.chave === serie.chave
-              ? { ...item, concluida: false, registroId: undefined }
-              : item,
-          ),
-        );
-        setMensagem("Série desmarcada e removida somente desta sessão.");
-        return;
-      }
-      const reps = Number(serie.reps);
-      const peso = Number(serie.weight_kg.replace(",", "."));
-      if (
-        !Number.isInteger(reps) ||
+    if (sincronizandoRef.current) return;
+    const reps = Number(serie.reps);
+    const peso = Number(serie.weight_kg.replace(",", "."));
+    if (
+      !serie.concluida &&
+      (!Number.isInteger(reps) ||
         reps < 1 ||
         reps > 1000 ||
         !Number.isFinite(peso) ||
         peso < 0 ||
-        peso > 2000
-      ) {
-        avisar(
-          "Dados inválidos",
-          "Informe repetições inteiras positivas e uma carga entre 0 e 2.000 kg.",
-        );
-        return;
-      }
-      const { data, error } = await supabase
-        .from("workout_sets")
-        .insert({
-          user_id: usuarioId,
-          session_id: sessao.id,
-          exercise_id: serie.exercise_id,
-          exercise_name: serie.exercise_name,
-          set_number: serie.set_number,
-          reps,
-          weight_kg: peso,
-        })
-        .select("id")
-        .single();
-      if (error || !data)
-        throw error ?? new Error("Não foi possível salvar a série.");
-      setSeries((atuais) =>
-        atuais.map((item) =>
-          item.chave === serie.chave
-            ? {
-                ...item,
-                reps: String(reps),
-                weight_kg: String(peso),
-                concluida: true,
-                registroId: data.id,
-              }
-            : item,
-        ),
-      );
-      setMensagem(
-        `${serie.exercise_name}: série ${serie.set_number} salva no registro deste treino.`,
-      );
-      const ultimaChave = series[series.length - 1]?.chave;
-      if (serie.chave !== ultimaChave) iniciarDescanso();
-    } catch (erro) {
+        peso > 2000)
+    ) {
       avisar(
-        "Erro ao salvar série",
-        erro instanceof Error ? erro.message : "Tente novamente.",
+        "Dados inválidos",
+        "Informe repetições inteiras positivas e carga entre 0 e 2.000 kg.",
+      );
+      return;
+    }
+    setChaveEmSalvamento(serie.chave);
+    const proximo: SerieAtiva = serie.concluida
+      ? {
+          ...serie,
+          concluida: false,
+          pendente: serie.registroId ? "remover" : undefined,
+          registroId: serie.registroId,
+        }
+      : {
+          ...serie,
+          reps: String(reps),
+          weight_kg: String(peso),
+          concluida: true,
+          registroId: serie.registroId ?? novoIdSerie(),
+          pendente: "salvar",
+        };
+    const atualizadas = seriesRef.current.map((item) =>
+      item.chave === serie.chave ? proximo : item,
+    );
+    try {
+      // Primeiro disco; só depois inicia a transmissão. Se falhar, não promete proteção.
+      await salvarLocal(atualizadas);
+      seriesRef.current = atualizadas;
+      setSeries(atualizadas);
+      setMensagem(
+        serie.concluida
+          ? "Série desmarcada. Alteração guardada e aguardando sincronização."
+          : "✓ Série protegida no aparelho. Sincronização automática ativada.",
+      );
+      if (
+        !serie.concluida &&
+        serie.chave !== seriesRef.current[seriesRef.current.length - 1]?.chave
+      )
+        iniciarDescanso();
+    } catch {
+      avisar(
+        "Não foi possível proteger a série",
+        "O armazenamento local falhou. Verifique o espaço disponível antes de continuar.",
       );
     } finally {
       setChaveEmSalvamento(null);
     }
+    void sincronizar();
   }
 
   async function finalizarSessao() {
-    if (!sessao || !usuarioId) return;
+    if (!sessao || !usuarioId || bloqueioSessao) return;
+    if (
+      sincronizandoRef.current ||
+      seriesRef.current.some((item) => item.pendente)
+    ) {
+      avisar(
+        "Sincronização pendente",
+        "Conecte-se à internet e toque em Sincronizar agora antes de finalizar. Nenhum dado local será descartado.",
+      );
+      return;
+    }
     if (totalSeriesConcluidas === 0) {
       avisar(
         "Nenhuma série concluída",
@@ -630,7 +994,7 @@ export default function TreinoAtivo({
         .update({
           finished_at: final.toISOString(),
           status: "concluido",
-          notes: "Treino concluído no modo ativo",
+          notes: `Treino concluído no modo ativo${esforco !== "nao_informado" ? `;esforco_percebido=${esforco}` : ""}`,
         })
         .eq("id", sessao.id)
         .eq("user_id", usuarioId)
@@ -673,6 +1037,8 @@ export default function TreinoAtivo({
       if (erroMetadados) erroDetalhes = erroMetadados.message;
 
       pularDescanso();
+      prontoRef.current = false;
+      await apagarRascunho(usuarioId, planId).catch(() => {});
       setSessao(null);
       const resumo = `Duração: ${duracaoMinutos.toLocaleString("pt-BR")} min\nExercícios: ${estimativa?.quantidadeExercicios ?? exerciciosFeitos.size}\nSéries concluídas: ${estimativa?.quantidadeSeries ?? totalSeriesConcluidas}\nRepetições: ${estimativa?.repeticoesTotais ?? seriesFeitas.reduce((soma, serie) => soma + (Number(serie.reps) || 0), 0)}\n${estimativa ? `Calorias ativas estimadas: ${estimativa.caloriasAtivas} kcal\nMET: ${estimativa.met}` : "Calorias não calculadas: confira os dados do perfil."}`;
       if (erroDetalhes) {
@@ -727,6 +1093,120 @@ export default function TreinoAtivo({
           Modo de treino ativo · registre as séries que realmente concluiu.
         </Text>
         {mensagem ? <Text style={estilos.mensagem}>{mensagem}</Text> : null}
+        {sessao &&
+        (restaurado ||
+          !online ||
+          erroSincronizacao ||
+          series.some((s) => s.pendente)) ? (
+          <View style={[estilos.cartao, { borderColor: "#547563" }]}>
+            <Text style={[estilos.tituloCartao, { color: corTema }]}>
+              ↻ {restaurado ? "Treino recuperado" : "Proteção do treino"}
+            </Text>
+            <Text style={estilos.secundario}>
+              {totalSeriesConcluidas} de {series.length} séries concluídas ·{" "}
+              {progressoPercentual}%
+            </Text>
+            <Text style={estilos.secundario}>
+              {!online
+                ? "Sem internet. Seus dados continuam guardados neste aparelho."
+                : sincronizando
+                  ? "Sincronizando com o Supabase..."
+                  : series.some((s) => s.pendente)
+                    ? `${series.filter((s) => s.pendente).length} alteração(ões) aguardando envio.`
+                    : "Treino salvo e sincronizado."}
+            </Text>
+            {erroSincronizacao ? (
+              <Text style={estilos.aviso}>{erroSincronizacao}</Text>
+            ) : null}
+            {conflitoRemoto && !bloqueioSessao ? (
+              <TouchableOpacity
+                style={estilos.botaoSecundario}
+                onPress={() => {
+                  const mensagemConflito =
+                    "Existe um registro diferente no Supabase. Enviar os valores deste aparelho irá substituir o registro remoto dessa série. Deseja continuar?";
+                  if (Platform.OS === "web" && typeof window !== "undefined") {
+                    if (window.confirm(mensagemConflito))
+                      void sincronizar(true);
+                  } else {
+                    Alert.alert("Conflito entre aparelhos", mensagemConflito, [
+                      { text: "Cancelar", style: "cancel" },
+                      {
+                        text: "Enviar minha versão",
+                        onPress: () => {
+                          void sincronizar(true);
+                        },
+                      },
+                    ]);
+                  }
+                }}
+              >
+                <Text style={estilos.textoBotaoSecundario}>
+                  Enviar minha versão (substituir no servidor)
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {bloqueioSessao ? (
+              <>
+                <Text style={estilos.aviso}>
+                  Sessão alterada ou encerrada em outro dispositivo. Não faremos
+                  alterações automáticas.
+                </Text>
+                <TouchableOpacity
+                  style={estilos.botaoSecundario}
+                  onPress={() => {
+                    const texto =
+                      "Descartar a cópia deste aparelho? Dados locais pendentes que não estiverem no Supabase serão perdidos. Faça isso somente se já conferiu o histórico.";
+                    const descartar = async () => {
+                      try {
+                        prontoRef.current = false;
+                        await apagarRascunho(usuarioId, planId);
+                        setBloqueioSessao(false);
+                        setSessao(null);
+                        setSeries([]);
+                        onVoltar();
+                      } catch {
+                        avisar("Falha", "Não foi possível remover o rascunho.");
+                      }
+                    };
+                    if (
+                      Platform.OS === "web" &&
+                      typeof window !== "undefined"
+                    ) {
+                      if (window.confirm(texto)) void descartar();
+                    } else
+                      Alert.alert("Descartar rascunho?", texto, [
+                        { text: "Cancelar", style: "cancel" },
+                        {
+                          text: "Descartar",
+                          style: "destructive",
+                          onPress: () => {
+                            void descartar();
+                          },
+                        },
+                      ]);
+                  }}
+                >
+                  <Text style={estilos.textoBotaoSecundario}>
+                    Descartar rascunho deste aparelho
+                  </Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+            {!bloqueioSessao &&
+            !conflitoRemoto &&
+            series.some((s) => s.pendente) ? (
+              <TouchableOpacity
+                disabled={sincronizando}
+                style={estilos.botaoSecundario}
+                onPress={() => void sincronizar()}
+              >
+                <Text style={estilos.textoBotaoSecundario}>
+                  {sincronizando ? "Sincronizando..." : "↻ Sincronizar agora"}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
         {outroTreinoAtivo ? (
           <TouchableOpacity
             onPress={onVoltar}
@@ -932,7 +1412,11 @@ export default function TreinoAtivo({
                               atualizarCampo(serie.chave, "reps", v)
                             }
                             keyboardType="number-pad"
-                            editable={!serie.concluida && !chaveEmSalvamento}
+                            editable={
+                              !serie.concluida &&
+                              !chaveEmSalvamento &&
+                              !bloqueioSessao
+                            }
                           />
                           <View style={estilos.controlesRapidos}>
                             <TouchableOpacity
@@ -941,7 +1425,8 @@ export default function TreinoAtivo({
                               disabled={
                                 serie.concluida ||
                                 chaveEmSalvamento !== null ||
-                                salvando
+                                salvando ||
+                                bloqueioSessao
                               }
                               onPress={() => ajustarNumero(serie, "reps", -1)}
                               style={estilos.botaoAjuste}
@@ -954,7 +1439,8 @@ export default function TreinoAtivo({
                               disabled={
                                 serie.concluida ||
                                 chaveEmSalvamento !== null ||
-                                salvando
+                                salvando ||
+                                bloqueioSessao
                               }
                               onPress={() => ajustarNumero(serie, "reps", 1)}
                               style={estilos.botaoAjuste}
@@ -972,7 +1458,11 @@ export default function TreinoAtivo({
                               atualizarCampo(serie.chave, "weight_kg", v)
                             }
                             keyboardType="decimal-pad"
-                            editable={!serie.concluida && !chaveEmSalvamento}
+                            editable={
+                              !serie.concluida &&
+                              !chaveEmSalvamento &&
+                              !bloqueioSessao
+                            }
                           />
                           <View style={estilos.controlesRapidos}>
                             <TouchableOpacity
@@ -981,7 +1471,8 @@ export default function TreinoAtivo({
                               disabled={
                                 serie.concluida ||
                                 chaveEmSalvamento !== null ||
-                                salvando
+                                salvando ||
+                                bloqueioSessao
                               }
                               onPress={() =>
                                 ajustarNumero(serie, "weight_kg", -2.5)
@@ -996,7 +1487,8 @@ export default function TreinoAtivo({
                               disabled={
                                 serie.concluida ||
                                 chaveEmSalvamento !== null ||
-                                salvando
+                                salvando ||
+                                bloqueioSessao
                               }
                               onPress={() =>
                                 ajustarNumero(serie, "weight_kg", 2.5)
@@ -1009,7 +1501,12 @@ export default function TreinoAtivo({
                         </View>
                       </View>
                       <TouchableOpacity
-                        disabled={chaveEmSalvamento !== null || salvando}
+                        disabled={
+                          chaveEmSalvamento !== null ||
+                          salvando ||
+                          sincronizando ||
+                          bloqueioSessao
+                        }
                         onPress={() => alternarSerie(serie)}
                         style={[
                           estilos.botaoSerie,
@@ -1031,9 +1528,13 @@ export default function TreinoAtivo({
                               serie.concluida && { color: corTema },
                             ]}
                           >
-                            {serie.concluida
-                              ? "✓ Série concluída · desfazer"
-                              : "Marcar série concluída"}
+                            {serie.pendente
+                              ? serie.pendente === "salvar"
+                                ? "✓ Concluída · aguardando envio"
+                                : "↻ Desmarcada · aguardando envio"
+                              : serie.concluida
+                                ? "✓ Série concluída · desfazer"
+                                : "Marcar série concluída"}
                           </Text>
                         )}
                       </TouchableOpacity>
@@ -1081,13 +1582,54 @@ export default function TreinoAtivo({
                   finalizar.
                 </Text>
               )}
+              <Text style={estilos.tituloCartao}>
+                Como foi seu esforço? (opcional)
+              </Text>
+              <Text style={estilos.secundario}>
+                Ajuda a personalizar sugestões futuras. Não há metas nem
+                cobranças.
+              </Text>
+              <View style={estilos.opcoesDescanso}>
+                {(
+                  [
+                    ["nao_informado", "Pular"],
+                    ["leve", "Leve"],
+                    ["adequado", "Adequado"],
+                    ["intenso", "Intenso"],
+                  ] as [EsforcoPercebido, string][]
+                ).map(([valor, rotulo]) => (
+                  <TouchableOpacity
+                    key={valor}
+                    onPress={() => setEsforco(valor)}
+                    style={[
+                      estilos.opcaoDescanso,
+                      esforco === valor && {
+                        borderColor: corTema,
+                        backgroundColor: `${corTema}20`,
+                      },
+                    ]}
+                  >
+                    <Text style={estilos.textoOpcao}>{rotulo}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <TouchableOpacity
-                disabled={salvando}
+                disabled={
+                  salvando ||
+                  chaveEmSalvamento !== null ||
+                  sincronizando ||
+                  bloqueioSessao ||
+                  series.some((serie) => serie.pendente)
+                }
                 onPress={finalizarSessao}
                 style={[estilos.botaoPrimario, { backgroundColor: corTema }]}
               >
                 <Text style={estilos.textoPrimario}>
-                  {salvando ? "Salvando..." : "Finalizar e salvar treino"}
+                  {salvando
+                    ? "Salvando..."
+                    : series.some((serie) => serie.pendente)
+                      ? "Sincronize as séries para finalizar"
+                      : "Finalizar e salvar treino"}
                 </Text>
               </TouchableOpacity>
             </View>

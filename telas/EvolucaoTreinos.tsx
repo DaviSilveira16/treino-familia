@@ -19,9 +19,21 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabase";
+import {
+  analisarHistorico,
+  gerarSugestoes,
+  extrairEsforco,
+  type AnaliseHistorico,
+  type Recorde,
+} from "../servicos/analiseTreinos";
 
 type Props = { onVoltar: () => void; corTema?: string };
-type Sessao = { id: string; started_at: string; status: string | null };
+type Sessao = {
+  id: string;
+  started_at: string;
+  status: string | null;
+  notes?: string | null;
+};
 type Serie = {
   session_id: string;
   exercise_id: string | null;
@@ -53,6 +65,16 @@ function formatarData(valor: string) {
     year: "2-digit",
   });
 }
+function nomeRecorde(tipo: Recorde["tipo"]) {
+  return tipo === "carga"
+    ? "Maior carga"
+    : tipo === "repeticoes"
+      ? "Mais repetições na mesma carga"
+      : "Maior volume";
+}
+function unidadeRecorde(tipo: Recorde["tipo"]) {
+  return tipo === "carga" ? "kg" : tipo === "repeticoes" ? "reps" : "kg·reps";
+}
 function formatarNumero(valor: number, casas = 1) {
   return Number(valor).toLocaleString("pt-BR", {
     maximumFractionDigits: casas,
@@ -66,6 +88,10 @@ export default function EvolucaoTreinos({
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
   const [erro, setErro] = useState("");
+  const [analise, setAnalise] = useState<AnaliseHistorico | null>(null);
+  const [notasPorSessao, setNotasPorSessao] = useState<Record<string, string>>(
+    {},
+  );
   const [pontosPorExercicio, setPontosPorExercicio] = useState<
     Record<string, { nome: string; pontos: Ponto[] }>
   >({});
@@ -92,7 +118,7 @@ export default function EvolucaoTreinos({
       const [resultadoSessoes, resultadoSeries] = await Promise.all([
         supabase
           .from("workout_sessions")
-          .select("id, started_at, status")
+          .select("id, started_at, status, notes")
           .eq("user_id", idUsuario)
           .order("started_at", { ascending: true }),
         supabase
@@ -106,62 +132,15 @@ export default function EvolucaoTreinos({
       if (resultadoSessoes.error) throw resultadoSessoes.error;
       if (resultadoSeries.error) throw resultadoSeries.error;
       const sessoes = (resultadoSessoes.data ?? []) as Sessao[];
-      const idsValidos = new Set(
-        sessoes
-          .filter((sessao) => sessao.status !== "em_andamento")
-          .map((sessao) => sessao.id),
+      const resultadoAnalise = analisarHistorico(
+        sessoes,
+        (resultadoSeries.data ?? []) as Serie[],
       );
-      const sessoesPorId = new Map(
-        sessoes
-          .filter((sessao) => idsValidos.has(sessao.id))
-          .map((sessao) => [sessao.id, sessao]),
+      const porNome = resultadoAnalise.porExercicio;
+      setAnalise(resultadoAnalise);
+      setNotasPorSessao(
+        Object.fromEntries(sessoes.map((item) => [item.id, item.notes ?? ""])),
       );
-      const grupos = new Map<
-        string,
-        { nome: string; sessao: Sessao; series: Serie[] }
-      >();
-      for (const serie of (resultadoSeries.data ?? []) as Serie[]) {
-        const sessao = sessoesPorId.get(serie.session_id);
-        if (!sessao) continue;
-        const nome = serie.exercise_name?.trim() || "Exercício sem nome";
-        const chave = normalizar(nome);
-        const chaveGrupo = `${chave}::${sessao.id}`;
-        const grupo = grupos.get(chaveGrupo) ?? { nome, sessao, series: [] };
-        grupo.series.push(serie);
-        grupos.set(chaveGrupo, grupo);
-      }
-      const porNome: Record<string, { nome: string; pontos: Ponto[] }> = {};
-      for (const grupo of grupos.values()) {
-        const chave = normalizar(grupo.nome);
-        const cargaMaxima = Math.max(
-          ...grupo.series.map((serie) => Number(serie.weight_kg) || 0),
-        );
-        const repsNaMaiorCarga = grupo.series
-          .filter((serie) => Number(serie.weight_kg) === cargaMaxima)
-          .reduce(
-            (maior, serie) => Math.max(maior, Number(serie.reps) || 0),
-            0,
-          );
-        const volume = grupo.series.reduce(
-          (total, serie) =>
-            total + (Number(serie.weight_kg) || 0) * (Number(serie.reps) || 0),
-          0,
-        );
-        const ponto: Ponto = {
-          id: grupo.sessao.id,
-          data: grupo.sessao.started_at,
-          cargaMaxima,
-          repsNaMaiorCarga,
-          volume,
-          quantidadeSeries: grupo.series.length,
-        };
-        if (!porNome[chave]) porNome[chave] = { nome: grupo.nome, pontos: [] };
-        porNome[chave].pontos.push(ponto);
-      }
-      for (const item of Object.values(porNome))
-        item.pontos.sort(
-          (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime(),
-        );
       const exercicioAtual = selecionadoRef.current;
       const atual =
         exercicioAtual && porNome[exercicioAtual]
@@ -279,8 +258,25 @@ export default function EvolucaoTreinos({
     [],
   );
   const pontos = pontosPorExercicio[exercicioSelecionado]?.pontos ?? [];
+  const esforcoRecente = pontos.length
+    ? extrairEsforco(notasPorSessao[pontos[pontos.length - 1].id])
+    : undefined;
+  const sugestoes = gerarSugestoes(
+    pontosPorExercicio[exercicioSelecionado]?.nome ?? "exercício",
+    pontos,
+    esforcoRecente,
+  );
+  const recordesExercicio = (analise?.recordes ?? [])
+    .filter((item) => item.chave === exercicioSelecionado)
+    .slice(-8)
+    .reverse();
+  const recordesRecentes = (analise?.recordes ?? []).slice(-5).reverse();
   const maiorCarga = Math.max(1, ...pontos.map((ponto) => ponto.cargaMaxima));
   const maiorVolume = Math.max(1, ...pontos.map((ponto) => ponto.volume));
+  const maiorRepeticoes = Math.max(
+    1,
+    ...pontos.map((ponto) => ponto.repsNaMaiorCarga),
+  );
   const primeiro = pontos[0];
   const ultimo = pontos[pontos.length - 1];
   const progressoCarga =
@@ -321,6 +317,63 @@ export default function EvolucaoTreinos({
           </Text>
         </TouchableOpacity>
         {erro ? <Text style={estilos.erro}>{erro}</Text> : null}
+        {analise ? (
+          <View style={estilos.cartao}>
+            <Text style={estilos.tituloCartao}>Seu histórico em números</Text>
+            <View style={estilos.gradeIndicadores}>
+              <View style={estilos.indicador}>
+                <Text style={estilos.rotulo}>TREINOS EM 30 DIAS</Text>
+                <Text style={[estilos.numeroIndicador, { color: corTema }]}>
+                  {analise.treinos30Dias}
+                </Text>
+                <Text style={estilos.secundario}>
+                  Período anterior: {analise.treinos30DiasAnteriores}
+                </Text>
+              </View>
+              <View style={estilos.indicador}>
+                <Text style={estilos.rotulo}>NOVOS RECORDES</Text>
+                <Text style={[estilos.numeroIndicador, { color: corTema }]}>
+                  {analise.recordes30Dias}
+                </Text>
+                <Text style={estilos.secundario}>Últimos 30 dias</Text>
+              </View>
+            </View>
+            {analise.treinos30Dias >= 3 &&
+            analise.treinos30DiasAnteriores >= 3 &&
+            Math.abs(analise.treinos30Dias - analise.treinos30DiasAnteriores) <=
+              1 ? (
+              <Text style={estilos.secundario}>
+                Sua frequência ficou semelhante nos dois períodos de 30 dias.
+                Isso é uma observação, não uma meta.
+              </Text>
+            ) : null}
+            <Text style={estilos.secundario}>
+              Sem metas: estes números apenas descrevem seus treinos realizados
+              e os recordes registrados.
+            </Text>
+          </View>
+        ) : null}
+        {recordesRecentes.length ? (
+          <View style={estilos.cartao}>
+            <Text style={estilos.tituloCartao}>🏆 Conquistas recentes</Text>
+            {recordesRecentes.map((r, indice) => (
+              <View
+                key={`${r.chave}-${r.data}-${r.tipo}-${indice}`}
+                style={estilos.linhaDetalhe}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={estilos.textoDetalhe}>{r.nome}</Text>
+                  <Text style={estilos.secundario}>
+                    {formatarData(r.data)} · {nomeRecorde(r.tipo)}
+                  </Text>
+                </View>
+                <Text style={[estilos.textoDetalhe, { color: corTema }]}>
+                  {formatarNumero(r.valor)} {unidadeRecorde(r.tipo)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
         {nomes.length === 0 ? (
           <View style={estilos.cartao}>
             <Text style={estilos.tituloCartao}>
@@ -550,6 +603,84 @@ export default function EvolucaoTreinos({
                 ))}
               </View>
               <View style={estilos.cartao}>
+                <Text style={estilos.tituloCartao}>
+                  Repetições na maior carga
+                </Text>
+                <Text style={estilos.secundario}>
+                  Compare quantas repetições foram realizadas na maior carga de
+                  cada sessão.
+                </Text>
+                {pontos.map((ponto) => (
+                  <View key={`r-${ponto.id}`} style={estilos.linhaGrafico}>
+                    <View style={estilos.linhaData}>
+                      <Text style={estilos.textoData}>
+                        {formatarData(ponto.data)}
+                      </Text>
+                      <Text style={estilos.textoValor}>
+                        {ponto.repsNaMaiorCarga} reps
+                      </Text>
+                    </View>
+                    <View style={estilos.fundoBarra}>
+                      <View
+                        style={[
+                          estilos.barra,
+                          {
+                            width: `${Math.max(2, (ponto.repsNaMaiorCarga / maiorRepeticoes) * 100)}%`,
+                            backgroundColor: corTema,
+                          },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
+              <View style={estilos.cartao}>
+                <Text style={estilos.tituloCartao}>
+                  ✨ Sugestões para seu treino
+                </Text>
+                <Text style={estilos.secundario}>
+                  Baseadas no histórico, não em metas. Use apenas se fizer
+                  sentido para você.
+                </Text>
+                {sugestoes.map((sugestao, indice) => (
+                  <View
+                    key={`${indice}-${sugestao.tipo}`}
+                    style={estilos.caixaSugestao}
+                  >
+                    <Text style={estilos.textoDetalhe}>{sugestao.titulo}</Text>
+                    <Text style={estilos.secundario}>{sugestao.texto}</Text>
+                  </View>
+                ))}
+              </View>
+              {recordesExercicio.length ? (
+                <View style={estilos.cartao}>
+                  <Text style={estilos.tituloCartao}>
+                    🏆 Recordes deste exercício
+                  </Text>
+                  {recordesExercicio.map((recorde, indice) => (
+                    <View
+                      key={`${recorde.data}-${recorde.tipo}-${indice}`}
+                      style={estilos.linhaDetalhe}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={estilos.textoDetalhe}>
+                          {nomeRecorde(recorde.tipo)}
+                        </Text>
+                        <Text style={estilos.secundario}>
+                          {formatarData(recorde.data)} · antes{" "}
+                          {formatarNumero(recorde.anterior)}{" "}
+                          {unidadeRecorde(recorde.tipo)}
+                        </Text>
+                      </View>
+                      <Text style={[estilos.textoDetalhe, { color: corTema }]}>
+                        {formatarNumero(recorde.valor)}{" "}
+                        {unidadeRecorde(recorde.tipo)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              <View style={estilos.cartao}>
                 <Text style={estilos.tituloCartao}>Histórico detalhado</Text>
                 {pontos
                   .slice()
@@ -626,6 +757,14 @@ const estilos = StyleSheet.create({
     gap: 12,
   },
   tituloCartao: { color: "#F0F4F1", fontWeight: "800", fontSize: 17 },
+  caixaSugestao: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#314138",
+    backgroundColor: "#161E1A",
+    padding: 12,
+    gap: 7,
+  },
   tituloSecao: {
     color: "#F0F4F1",
     fontSize: 19,
