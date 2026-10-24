@@ -22,6 +22,7 @@ import {
   verificarAtualizacao,
 } from "./servicos/atualizacao";
 import {
+  CommonActions,
   createNavigationContainerRef,
   NavigationContainer,
 } from "@react-navigation/native";
@@ -62,6 +63,26 @@ type Rotas = {
 };
 
 const Pilha = createStackNavigator<Rotas>();
+// A Comunidade é uma aba principal; apenas as páginas abaixo têm voltar.
+const ROTAS_COM_BOTAO_VOLTAR = new Set<keyof Rotas>([
+  "perfil",
+  "treinos",
+  "cardios",
+  "evolucao",
+  "historico",
+  "frequencia",
+  "evolucaoTreinos",
+  "treinoAtivo",
+]);
+
+function modoTelaInicialSafari() {
+  if (Platform.OS !== "web" || typeof window === "undefined") return false;
+  const navegador = window.navigator as Navigator & { standalone?: boolean };
+  return (
+    navegador.standalone === true ||
+    window.matchMedia?.("(display-mode: standalone)")?.matches === true
+  );
+}
 const referenciaNavegacao = createNavigationContainerRef<Rotas>();
 
 const COR_PADRAO = "#35D07F";
@@ -141,41 +162,32 @@ function AppConteudo() {
   const [corTema, setCorTema] = useState(COR_PADRAO);
   const [rotaAtual, setRotaAtual] = useState<keyof Rotas>("Inicio");
   const [semInternet, setSemInternet] = useState(false);
-  const assinaturaHistoricoWeb = useRef("");
-  const ignorarProximoHistoricoWeb = useRef(false);
+  const ultimaVoltaWeb = useRef(0);
+  const ignorarPopstateAte = useRef(0);
 
   function atualizarRotaAtual() {
     const rota = referenciaNavegacao.getCurrentRoute();
-    const estado = referenciaNavegacao.getRootState();
-    if (!rota) return;
+    if (rota) setRotaAtual(rota.name as keyof Rotas);
+  }
 
-    setRotaAtual(rota.name as keyof Rotas);
-
-    if (Platform.OS !== "web" || typeof window === "undefined" || !estado) {
+  // Um único comando de voltar para toque, gesto e histórico do Safari.
+  // O intervalo curto protege contra eventos duplicados do mesmo arrasto.
+  function voltarComSeguranca() {
+    const rota = referenciaNavegacao.getCurrentRoute()?.name;
+    if (
+      !referenciaNavegacao.isReady() ||
+      !referenciaNavegacao.canGoBack() ||
+      !rota ||
+      !ROTAS_COM_BOTAO_VOLTAR.has(rota)
+    ) {
       return;
     }
-
-    const assinatura = `${estado.index}:${estado.routes
-      .map((item) => `${item.key}:${item.name}`)
-      .join("|")}`;
-    if (assinatura === assinaturaHistoricoWeb.current) return;
-
-    assinaturaHistoricoWeb.current = assinatura;
-    if (ignorarProximoHistoricoWeb.current) {
-      ignorarProximoHistoricoWeb.current = false;
-      return;
+    if (Platform.OS === "web") {
+      const agora = Date.now();
+      if (agora - ultimaVoltaWeb.current < 850) return;
+      ultimaVoltaWeb.current = agora;
     }
-
-    window.history.pushState(
-      {
-        treinoFamilia: true,
-        assinatura,
-        rota: rota.name,
-        parametros: rota.params ?? null,
-      },
-      "",
-      window.location.href,
-    );
+    referenciaNavegacao.goBack();
   }
 
   function atualizarSessao(novaSessao: Session | null) {
@@ -183,55 +195,40 @@ function AppConteudo() {
     setCorTema(obterCorTema(novaSessao?.user.user_metadata?.tema_cor));
   }
 
+  // Na web, o histórico existe apenas para conter o gesto nativo do Safari.
+  // NÃO espelhamos cada tela em pushState: isso empilhava telas antigas e
+  // disparava um segundo retorno (às vezes para a Comunidade).
   useEffect(() => {
-    if (Platform.OS !== "web" || !sessao || typeof window === "undefined") {
-      return;
+    if (!sessao || !modoTelaInicialSafari()) return;
+
+    const url = window.location.href;
+    const chave = "treinoFamiliaProtecao";
+    try {
+      if (!window.history.state?.[chave]) {
+        window.history.pushState({ [chave]: true }, "", url);
+      }
+    } catch {
+      // Alguns navegadores bloqueiam History API; o botão de voltar continua.
     }
 
-    function tratarVoltaDoNavegador(evento: PopStateEvent) {
-      if (!referenciaNavegacao.isReady()) return;
-      const estadoAnterior = evento.state as {
-        treinoFamilia?: boolean;
-        assinatura?: string;
-        rota?: string;
-        parametros?: unknown;
-      } | null;
-      if (!estadoAnterior?.treinoFamilia || !estadoAnterior.rota) return;
-
-      const rotaAtualWeb = referenciaNavegacao.getCurrentRoute()?.name;
-      if (
-        estadoAnterior.assinatura &&
-        estadoAnterior.assinatura === assinaturaHistoricoWeb.current
-      ) {
-        if (referenciaNavegacao.canGoBack()) {
-          ignorarProximoHistoricoWeb.current = true;
-          referenciaNavegacao.goBack();
-        }
-        return;
+    function tratarVoltaDoNavegador() {
+      // O mesmo gesto pode disparar touchend e popstate no iPhone.
+      // Nunca executamos o segundo retorno para um único arrasto.
+      if (Date.now() >= ignorarPopstateAte.current) {
+        voltarComSeguranca();
       }
-
-      ignorarProximoHistoricoWeb.current = true;
+      ignorarPopstateAte.current = 0;
+      // Recria o único degrau de proteção, sem armazenar rotas passadas.
       try {
-        if (
-          estadoAnterior.rota === rotaAtualWeb &&
-          referenciaNavegacao.canGoBack()
-        ) {
-          referenciaNavegacao.goBack();
-          return;
-        }
-        referenciaNavegacao.navigate(
-          estadoAnterior.rota as keyof Rotas,
-          estadoAnterior.parametros as never,
-        );
+        window.history.pushState({ [chave]: true }, "", url);
       } catch {
-        ignorarProximoHistoricoWeb.current = false;
-        if (referenciaNavegacao.canGoBack()) referenciaNavegacao.goBack();
+        // Falhas na API de histórico não devem travar a navegação.
       }
     }
 
     window.addEventListener("popstate", tratarVoltaDoNavegador);
     return () => window.removeEventListener("popstate", tratarVoltaDoNavegador);
-  }, [sessao]);
+  }, [Boolean(sessao)]);
 
   useEffect(() => {
     if (Platform.OS !== "android" || !sessao) {
@@ -273,44 +270,55 @@ function AppConteudo() {
   }, [sessao]);
 
   useEffect(() => {
-    if (Platform.OS !== "web" || typeof document === "undefined") {
+    if (typeof document === "undefined" || !modoTelaInicialSafari()) {
       return;
     }
 
+    function podeVoltar() {
+      return (
+        referenciaNavegacao.isReady() &&
+        referenciaNavegacao.canGoBack() &&
+        // Apenas telas com botão de voltar; não nas abas Início/Comunidade.
+        ROTAS_COM_BOTAO_VOLTAR.has(
+          referenciaNavegacao.getCurrentRoute()?.name as keyof Rotas,
+        )
+      );
+    }
+
     function iniciarToque(evento: TouchEvent) {
-      if (evento.touches.length !== 1) {
-        toqueInicialWeb.current = null;
-        return;
-      }
-
+      toqueInicialWeb.current = null;
+      if (evento.touches.length !== 1 || !podeVoltar()) return;
       const toque = evento.touches[0];
+      if (toque.clientX <= 28) {
+        toqueInicialWeb.current = { x: toque.clientX, y: toque.clientY };
+      }
+    }
 
-      toqueInicialWeb.current =
-        toque.clientX <= 36 ? { x: toque.clientX, y: toque.clientY } : null;
+    function moverToque(evento: TouchEvent) {
+      const inicio = toqueInicialWeb.current;
+      if (!inicio || evento.touches.length !== 1) return;
+      const toque = evento.touches[0];
+      const dx = toque.clientX - inicio.x;
+      const dy = toque.clientY - inicio.y;
+      // Consome somente arrastos horizontais da borda: a rolagem vertical
+      // permanece nativa, e o Safari não inicia outro retorno em paralelo.
+      if (dx > 14 && dx > Math.abs(dy) * 1.3 && evento.cancelable) {
+        evento.preventDefault();
+      }
     }
 
     function finalizarToque(evento: TouchEvent) {
       const inicio = toqueInicialWeb.current;
       toqueInicialWeb.current = null;
-
-      if (!inicio || evento.changedTouches.length !== 1) {
+      if (!inicio || evento.changedTouches.length !== 1 || !podeVoltar()) {
         return;
       }
-
       const toque = evento.changedTouches[0];
-      const deslocamentoX = toque.clientX - inicio.x;
-      const deslocamentoY = toque.clientY - inicio.y;
-
-      const eDeslizeParaVoltar =
-        deslocamentoX >= 65 &&
-        Math.abs(deslocamentoX) > Math.abs(deslocamentoY) * 1.3;
-
-      if (
-        eDeslizeParaVoltar &&
-        referenciaNavegacao.isReady() &&
-        referenciaNavegacao.canGoBack()
-      ) {
-        referenciaNavegacao.goBack();
+      const dx = toque.clientX - inicio.x;
+      const dy = toque.clientY - inicio.y;
+      if (dx >= 75 && dx > Math.abs(dy) * 1.3) {
+        ignorarPopstateAte.current = Date.now() + 1800;
+        voltarComSeguranca();
       }
     }
 
@@ -319,11 +327,13 @@ function AppConteudo() {
     }
 
     document.addEventListener("touchstart", iniciarToque, { passive: true });
+    document.addEventListener("touchmove", moverToque, { passive: false });
     document.addEventListener("touchend", finalizarToque, { passive: true });
     document.addEventListener("touchcancel", cancelarToque, { passive: true });
 
     return () => {
       document.removeEventListener("touchstart", iniciarToque);
+      document.removeEventListener("touchmove", moverToque);
       document.removeEventListener("touchend", finalizarToque);
       document.removeEventListener("touchcancel", cancelarToque);
     };
@@ -845,7 +855,7 @@ function AppConteudo() {
           detachInactiveScreens={true}
           screenOptions={{
             headerShown: false,
-            gestureEnabled: Platform.OS !== "web",
+            gestureEnabled: Platform.OS === "ios",
             gestureDirection: "horizontal",
             gestureResponseDistance: 40,
             gestureVelocityImpact: 0.3,
@@ -1014,12 +1024,12 @@ function AppConteudo() {
           <Pilha.Screen name="perfil">
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
-                onVoltar={() => navigation.goBack()}
+                onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
                 <Perfil
                   usuario={sessao.user}
-                  onVoltar={() => navigation.goBack()}
+                  onVoltar={voltarComSeguranca}
                   onTemaAlterado={setCorTema}
                 />
               </NavegacaoVoltarGlobal>
@@ -1029,11 +1039,11 @@ function AppConteudo() {
           <Pilha.Screen name="treinos">
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
-                onVoltar={() => navigation.goBack()}
+                onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
                 <MeusTreinos
-                  onVoltar={() => navigation.goBack()}
+                  onVoltar={voltarComSeguranca}
                   onIniciarTreino={(treino) =>
                     navigation.navigate("treinoAtivo", {
                       planId: treino.id,
@@ -1049,13 +1059,10 @@ function AppConteudo() {
           <Pilha.Screen name="cardios">
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
-                onVoltar={() => navigation.goBack()}
+                onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <MeusCardios
-                  onVoltar={() => navigation.goBack()}
-                  corTema={corTema}
-                />
+                <MeusCardios onVoltar={voltarComSeguranca} corTema={corTema} />
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>
@@ -1063,11 +1070,11 @@ function AppConteudo() {
           <Pilha.Screen name="evolucao">
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
-                onVoltar={() => navigation.goBack()}
+                onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
                 <EvolucaoFisica
-                  onVoltar={() => navigation.goBack()}
+                  onVoltar={voltarComSeguranca}
                   corTema={corTema}
                 />
               </NavegacaoVoltarGlobal>
@@ -1077,11 +1084,11 @@ function AppConteudo() {
           <Pilha.Screen name="historico">
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
-                onVoltar={() => navigation.goBack()}
+                onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
                 <HistoricoTreinos
-                  onVoltar={() => navigation.goBack()}
+                  onVoltar={voltarComSeguranca}
                   corTema={corTema}
                 />
               </NavegacaoVoltarGlobal>
@@ -1091,13 +1098,10 @@ function AppConteudo() {
           <Pilha.Screen name="frequencia">
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
-                onVoltar={() => navigation.goBack()}
+                onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
-                <Frequencia
-                  onVoltar={() => navigation.goBack()}
-                  corTema={corTema}
-                />
+                <Frequencia onVoltar={voltarComSeguranca} corTema={corTema} />
               </NavegacaoVoltarGlobal>
             )}
           </Pilha.Screen>
@@ -1105,7 +1109,7 @@ function AppConteudo() {
           <Pilha.Screen name="comunidade">
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
-                onVoltar={() => navigation.goBack()}
+                onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
                 <ComunidadeFamilia corTema={corTema} />
@@ -1116,11 +1120,11 @@ function AppConteudo() {
           <Pilha.Screen name="evolucaoTreinos">
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
-                onVoltar={() => navigation.goBack()}
+                onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
                 <EvolucaoTreinos
-                  onVoltar={() => navigation.goBack()}
+                  onVoltar={voltarComSeguranca}
                   corTema={corTema}
                 />
               </NavegacaoVoltarGlobal>
@@ -1130,12 +1134,12 @@ function AppConteudo() {
           <Pilha.Screen name="treinoAtivo">
             {({ navigation, route }) => (
               <NavegacaoVoltarGlobal
-                onVoltar={() => navigation.goBack()}
+                onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
                 <TreinoAtivo
                   route={route}
-                  onVoltar={() => navigation.goBack()}
+                  onVoltar={voltarComSeguranca}
                   corTema={corTema}
                 />
               </NavegacaoVoltarGlobal>
@@ -1154,9 +1158,19 @@ function AppConteudo() {
             corTema={corTema}
             rotaAtual={rotaAtual}
             onNavegar={(rota) => {
-              if (referenciaNavegacao.isReady()) {
-                referenciaNavegacao.navigate(rota);
-              }
+              if (!referenciaNavegacao.isReady()) return;
+              // Início e Comunidade são destinos principais, não novas telas
+              // sobrepostas: trocar de aba limpa a pilha anterior.
+              const routes =
+                rota === "Inicio"
+                  ? [{ name: "Inicio" as const }]
+                  : [
+                      { name: "Inicio" as const },
+                      { name: "comunidade" as const },
+                    ];
+              referenciaNavegacao.dispatch(
+                CommonActions.reset({ index: routes.length - 1, routes }),
+              );
             }}
           />
         ) : null}
