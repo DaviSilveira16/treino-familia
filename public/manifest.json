@@ -7,8 +7,8 @@
   "scope": "/",
   "display": "fullscreen",
   "orientation": "portrait",
-  "theme_color": "#111312",
-  "background_color": "#111312",
+  "theme_color": "#111613",
+  "background_color": "#111613",
   "icons": [
     {
       "src": "/treino-familia-icon-192-v2.png",
@@ -29,8 +29,5 @@
       "purpose": "maskable"
     }
   ],
-  "display_override": [
-    "fullscreen",
-    "standalone"
-  ]
+  "display_override": ["fullscreen", "standalone"]
 }

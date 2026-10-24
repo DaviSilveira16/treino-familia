@@ -22,8 +22,8 @@
     "web": {
       "name": "Treino Família",
       "shortName": "Treino Fam",
-      "themeColor": "#111312",
-      "backgroundColor": "#111312",
+      "themeColor": "#111613",
+      "backgroundColor": "#111613",
       "favicon": "./assets/favicon.png"
     },
     "plugins": [

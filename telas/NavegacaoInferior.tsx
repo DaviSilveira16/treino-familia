@@ -15,7 +15,6 @@ export default function NavegacaoInferior({
   onNavegar,
 }: Props) {
   const comunidadeAtiva = rotaAtual === "comunidade";
-  const treinosAtivo = !comunidadeAtiva;
   const corIconeComunidade = comunidadeAtiva ? corTema : "#9AA69D";
 
   return (
@@ -101,7 +100,7 @@ export default function NavegacaoInferior({
         <View
           style={[
             estilos.icone,
-            treinosAtivo && {
+            !comunidadeAtiva && {
               backgroundColor: `${corTema}24`,
               borderColor: `${corTema}90`,
             },
@@ -109,7 +108,7 @@ export default function NavegacaoInferior({
         >
           <Text style={estilos.emoji}>🏋️</Text>
         </View>
-        <Text style={[estilos.rotulo, treinosAtivo && { color: corTema }]}>
+        <Text style={[estilos.rotulo, !comunidadeAtiva && { color: corTema }]}>
           Treinos
         </Text>
       </TouchableOpacity>
@@ -119,9 +118,9 @@ export default function NavegacaoInferior({
 
 const estilos = StyleSheet.create({
   barra: {
-    height: 48,
-    minHeight: 48,
-    maxHeight: 48,
+    height: 56,
+    minHeight: 56,
+    maxHeight: 56,
     padding: 0,
     paddingHorizontal: 6,
     margin: 0,
@@ -138,61 +137,48 @@ const estilos = StyleSheet.create({
   item: {
     flex: 1,
     minWidth: 0,
-    height: 46,
+    height: 52,
     padding: 0,
     margin: 0,
     alignItems: "center",
     justifyContent: "center",
-    gap: 1,
+    gap: 0,
   },
   icone: {
-    minWidth: 36,
-    height: 26,
-    paddingHorizontal: 7,
+    minWidth: 34,
+    height: 24,
+    paddingHorizontal: 4,
     margin: 0,
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
-  emoji: {
-    fontSize: 21,
-    lineHeight: 24,
-  },
-  iconeComunidadeFundo: {
-    paddingHorizontal: 7,
-  },
-  desenhoComunidade: {
-    width: 27,
-    height: 23,
-    position: "relative",
-  },
+  emoji: { fontSize: 17, lineHeight: 20 },
+  iconeComunidadeFundo: { paddingHorizontal: 6 },
+  desenhoComunidade: { width: 20, height: 15, position: "relative" },
   cabecaComunidade: { position: "absolute", borderRadius: 8 },
-  cabecaEsquerda: { width: 7, height: 7, left: 1, top: 4 },
-  cabecaCentral: { width: 8, height: 8, left: 9.5, top: 0 },
-  cabecaDireita: { width: 7, height: 7, right: 1, top: 4 },
+  cabecaEsquerda: { width: 5, height: 5, left: 1, top: 3 },
+  cabecaCentral: { width: 6, height: 6, left: 7, top: 0 },
+  cabecaDireita: { width: 5, height: 5, right: 1, top: 3 },
   corpoComunidade: {
     position: "absolute",
-    borderTopLeftRadius: 6,
-    borderTopRightRadius: 6,
+    borderTopLeftRadius: 5,
+    borderTopRightRadius: 5,
     borderBottomLeftRadius: 2,
     borderBottomRightRadius: 2,
   },
-  corpoEsquerdo: { width: 8, height: 8, left: 0, top: 12 },
-  corpoCentral: { width: 11, height: 12, left: 8, top: 9 },
-  corpoDireito: { width: 8, height: 8, right: 0, top: 12 },
+  corpoEsquerdo: { width: 7, height: 6, left: 0, top: 9 },
+  corpoCentral: { width: 8, height: 8, left: 6, top: 7 },
+  corpoDireito: { width: 7, height: 6, right: 0, top: 9 },
   rotulo: {
     color: "#9AA69D",
-    fontSize: 10,
-    lineHeight: 12,
+    fontSize: 11,
+    lineHeight: 13,
     fontWeight: "700",
     margin: 0,
     padding: 0,
   },
-  divisor: {
-    width: 1,
-    height: 24,
-    backgroundColor: "#303A33",
-  },
+  divisor: { width: 1, height: 26, backgroundColor: "#303A33" },
 });

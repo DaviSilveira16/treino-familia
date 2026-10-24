@@ -2,77 +2,100 @@
 <html lang="%LANG_ISO_CODE%">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#101312" />
-    <meta
-      name="apple-mobile-web-app-status-bar-style"
-      content="black-translucent"
-    />
+    <meta name="theme-color" content="#111613" />
+    <!-- No iOS recente, a barra de status usa a cor da própria página. -->
+    <meta name="color-scheme" content="dark" />
     <link
       rel="apple-touch-icon"
       sizes="180x180"
-      href="/apple-touch-icon-v3.png"
+      href="/apple-touch-icon-v2.png"
     />
-    <link rel="manifest" href="/manifest.json?v=20261023-fullscreen" />
+    <link rel="manifest" href="/manifest.json?v=20261023-2" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Treino Família" />
     <title>%WEB_TITLE%</title>
+
     <style id="expo-reset">
-      *,
-      *::before,
-      *::after {
-        box-sizing: border-box;
-      }
-      html,
-      body {
+      /* A raiz deve ocupar o viewport inteiro; só as telas internas rolam. */
+      html {
         width: 100%;
         height: 100%;
-        min-height: 100%;
         margin: 0;
         padding: 0;
-        background: #101312;
-      }
-      html {
         overflow: hidden;
+        background: #111613;
+        overscroll-behavior: none;
       }
+
       body {
         position: fixed;
         inset: 0;
-        overflow: hidden;
-        overscroll-behavior: none;
-        background: #101312;
-      }
-      #root {
-        position: fixed;
-        inset: 0;
-        display: flex;
-        flex-direction: column;
         width: 100%;
         height: 100%;
         min-height: 0;
         margin: 0;
         padding: 0;
         overflow: hidden;
-        background: #101312;
+        background: #111613;
+        overscroll-behavior: none;
       }
-      #navegacao-inferior {
-        flex: 0 0 48px !important;
-        height: 48px !important;
-        min-height: 48px !important;
-        max-height: 48px !important;
-        margin: 0 !important;
-        padding: 0 6px !important;
+
+      #root {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
         overflow: hidden;
+        box-sizing: border-box;
+        background: #111613;
+      }
+
+      /* A faixa inferior é parte da navegação, não uma área vazia do body.
+         O padding se estende atrás do indicador de Início no iPhone. */
+      #navegacao-inferior {
+        height: calc(56px + var(--app-safe-bottom, 0px)) !important;
+        min-height: calc(56px + var(--app-safe-bottom, 0px)) !important;
+        max-height: calc(56px + var(--app-safe-bottom, 0px)) !important;
+        padding-bottom: var(--app-safe-bottom, 0px) !important;
+        box-sizing: border-box !important;
+        flex-shrink: 0 !important;
         background: #111613 !important;
-        border-top: 1px solid #303a33 !important;
       }
     </style>
+    <script>
+      /* No iOS 26, alguns PWAs têm uma faixa reservada pelo WebKit fora
+         do viewport. Não somamos safe-area duas vezes nesses aparelhos. */
+      (function () {
+        var installed =
+          window.navigator.standalone === true ||
+          (window.matchMedia &&
+            (window.matchMedia("(display-mode: standalone)").matches ||
+              window.matchMedia("(display-mode: fullscreen)").matches));
+        if (!installed) return;
+
+        var onIOS =
+          /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+          (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+        var missingViewport =
+          onIOS && window.screen.height - window.innerHeight >= 45;
+        document.documentElement.style.setProperty(
+          "--app-safe-bottom",
+          missingViewport ? "0px" : "env(safe-area-inset-bottom, 0px)",
+        );
+      })();
+    </script>
   </head>
+
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
