@@ -20,6 +20,7 @@ export type SerieRascunho = {
   concluida: boolean;
   registroId?: string;
   pendente?: AcaoPendente;
+  baseRemota?: { id: string; reps: number; weight_kg: number };
 };
 export type PlanoExercicio = {
   id: string;
@@ -43,7 +44,45 @@ export type TreinoRascunho = {
   intensidade: "leve" | "moderada" | "intensa";
   esforco: EsforcoPercebido;
   salvoEm: string;
+  descanso?: DescansoTreino;
+  finalizacao?: FinalizacaoTreino;
+  erroSincronizacao?: string;
+  conflitoSincronizacao?: boolean;
 };
+
+export type DescansoTreino = {
+  fimEm: number | null;
+  pausado: boolean;
+  segundosPausados: number;
+  duracao: number;
+};
+export type FinalizacaoTreino = {
+  /** Momento real do toque em finalizar, jamais o momento da sincronização. */
+  finishedAt: string;
+  notes: string;
+  metricas: Record<string, string | number | null>;
+};
+export type ResumoTreinoAtivo = {
+  planId: string;
+  planName: string;
+  sessaoId: string;
+  startedAt: string;
+  seriesConcluidas: number;
+  totalSeries: number;
+  descanso?: DescansoTreino;
+  finalizacaoPendente: boolean;
+  pendencias: number;
+  conflito: boolean;
+};
+
+const ouvintes = new Set<() => void>();
+export function assinarRascunhos(ouvinte: () => void): () => void {
+  ouvintes.add(ouvinte);
+  return () => { ouvintes.delete(ouvinte); };
+}
+function notificar() {
+  ouvintes.forEach((ouvinte) => { try { ouvinte(); } catch { /* UI isolada */ } });
+}
 
 function chave(usuarioId: string, planId: string) {
   return `@treino-familia:rascunho:v1:${usuarioId}:${planId}`;
@@ -58,7 +97,7 @@ export function gravarRascunho(rascunho: TreinoRascunho): Promise<void> {
       AsyncStorage.setItem(
         chave(rascunho.usuarioId, rascunho.planId),
         JSON.stringify(rascunho),
-      ),
+      ).then(notificar),
     );
   fila = tarefa.catch(() => {});
   return tarefa;
@@ -87,9 +126,76 @@ export async function lerRascunho(usuarioId: string, planId: string) {
 export async function apagarRascunho(usuarioId: string, planId: string) {
   const tarefa = fila
     .catch(() => {})
-    .then(() => AsyncStorage.removeItem(chave(usuarioId, planId)));
+    .then(() => AsyncStorage.removeItem(chave(usuarioId, planId)).then(notificar));
   fila = tarefa.catch(() => {});
   await tarefa;
+}
+
+/** Leitura e alteração entram na mesma fila: confirmações não apagam edições novas. */
+export function atualizarRascunho(
+  usuarioId: string,
+  planId: string,
+  alterar: (atual: TreinoRascunho) => TreinoRascunho | null,
+): Promise<TreinoRascunho | null> {
+  const tarefa = fila.catch(() => {}).then(async () => {
+    const texto = await AsyncStorage.getItem(chave(usuarioId, planId));
+    if (!texto) return null;
+    const atual = JSON.parse(texto) as TreinoRascunho;
+    if (atual.usuarioId !== usuarioId || atual.planId !== planId) return null;
+    const proximo = alterar(atual);
+    if (proximo) await AsyncStorage.setItem(chave(usuarioId, planId), JSON.stringify(proximo));
+    else await AsyncStorage.removeItem(chave(usuarioId, planId));
+    notificar();
+    return proximo;
+  });
+  fila = tarefa.catch(() => {});
+  return tarefa;
+}
+
+export async function listarRascunhos(usuarioId: string): Promise<TreinoRascunho[]> {
+  await fila.catch(() => {});
+  const prefixo = `@treino-familia:rascunho:v1:${usuarioId}:`;
+  const chaves = (await AsyncStorage.getAllKeys()).filter((item) => item.startsWith(prefixo));
+  const itens = await Promise.all(chaves.map((item) => lerRascunho(usuarioId, item.slice(prefixo.length))));
+  return itens.filter((item): item is TreinoRascunho => item !== null)
+    .sort((a, b) => Date.parse(b.sessao.started_at) - Date.parse(a.sessao.started_at));
+}
+
+export async function lerResumoTreinoAtivo(usuarioId: string): Promise<ResumoTreinoAtivo | null> {
+  const [rascunho] = await listarRascunhos(usuarioId);
+  return rascunho ? {
+    planId: rascunho.planId, planName: rascunho.planName,
+    sessaoId: rascunho.sessao.id, startedAt: rascunho.sessao.started_at,
+    seriesConcluidas: rascunho.series.filter((serie) => serie.concluida).length,
+    totalSeries: rascunho.series.length, descanso: rascunho.descanso,
+    finalizacaoPendente: Boolean(rascunho.finalizacao),
+    pendencias: rascunho.series.filter((serie) => serie.pendente).length + Number(Boolean(rascunho.finalizacao)),
+    conflito: Boolean(rascunho.conflitoSincronizacao),
+  } : null;
+}
+
+export function segundosDeDescanso(descanso?: DescansoTreino, agora = Date.now()): number {
+  if (!descanso) return 0;
+  return descanso.pausado ? Math.max(0, descanso.segundosPausados)
+    : descanso.fimEm === null ? 0 : Math.max(0, Math.ceil((descanso.fimEm - agora) / 1000));
+}
+
+export function mesmaOperacao(a: SerieRascunho, b: SerieRascunho): boolean {
+  return a.chave === b.chave && a.pendente === b.pendente && a.registroId === b.registroId
+    && a.reps === b.reps && a.weight_kg === b.weight_kg && a.concluida === b.concluida;
+}
+
+export type SerieAnterior = { exercise_id: string; set_number: number; reps: number; weight_kg: number };
+/** Cópia explícita para o rascunho; séries concluídas ou com envio pendente são intocáveis. */
+export function copiarSeriesAnteriores<T extends SerieRascunho>(series: T[], anteriores: SerieAnterior[], exercicioId: string): T[] {
+  const porNumero = new Map(anteriores.filter((serie) => serie.exercise_id === exercicioId).map((serie) => [serie.set_number, serie]));
+  return series.map((serie) => {
+    const anterior = porNumero.get(serie.set_number);
+    if (serie.exercise_id !== exercicioId || serie.concluida || serie.pendente || !anterior
+      || !Number.isInteger(anterior.reps) || anterior.reps < 1 || anterior.reps > 1000
+      || !Number.isFinite(anterior.weight_kg) || anterior.weight_kg < 0 || anterior.weight_kg > 2000) return serie;
+    return { ...serie, reps: String(anterior.reps), weight_kg: String(anterior.weight_kg) };
+  });
 }
 
 /** UUID salvo ANTES de enviar. Repetir a requisição usa o mesmo ID no PK. */
@@ -141,6 +247,7 @@ export function mesclarSeries<T extends SerieRascunho>(
         weight_kg: String(remoto.weight_kg),
         concluida: true,
         registroId: remoto.id,
+        baseRemota: { id: remoto.id, reps: remoto.reps, weight_kg: remoto.weight_kg },
         pendente: undefined,
       };
     return {

@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.treinofamilia.wrapper",
+      "sha256_cert_fingerprints": ["F2:D9:AB:E3:4A:C6:39:46:67:12:85:75:8E:62:1C:F0:7D:93:63:42:90:C7:C8:E8:CC:7E:9B:44:B3:7B:86:51"]
+    }
+  }
+]

@@ -1,0 +1,14 @@
+const assert = require("node:assert/strict");
+const { carregar } = require("./suporte.cjs");
+const { validarRetornoAndroid } = carregar("servicos/authAndroidValidacao.ts");
+const origem = "https://treino-familia-zeta.vercel.app";
+const pedido = { state: "a".repeat(64), kind: "google", criadoEm: 1000 };
+const valido = `${origem}/auth/android/callback?android_state=${pedido.state}&android_flow=google&code=code-valid`;
+assert.equal(validarRetornoAndroid(valido, origem, pedido, 2000).code, "code-valid");
+for (const caso of [valido.replace(origem, "https://evil.test"), valido + "&code=second", valido.replace("android_flow=google", "android_flow=recovery"), valido.replace(pedido.state, "b".repeat(64)), valido + "#access_token=token", valido + "&redirect_to=https://evil.test"]) assert.throws(() => validarRetornoAndroid(caso, origem, pedido, 2000));
+assert.throws(() => validarRetornoAndroid(valido, origem, pedido, 16 * 60_000));
+assert.throws(() => validarRetornoAndroid(valido, origem, null, 2000));
+assert.throws(() => validarRetornoAndroid(valido, origem, { ...pedido, kind: "unknown" }, 2000));
+const erro = valido.replace("code=code-valid", "error=access_denied");
+assert.equal(validarRetornoAndroid(erro, origem, pedido, 2000).error, "access_denied");
+console.log("OK — retorno PKCE: origem, estado, prazo, fluxo, duplicatas e replay");

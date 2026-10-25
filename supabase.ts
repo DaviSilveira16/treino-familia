@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
 import { registrarTempo } from "./servicos/performance";
+import { noAndroidWrapper } from "./servicos/ambienteAndroid";
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabasePublishableKey =
@@ -46,6 +47,8 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
     storage: AsyncStorage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: Platform.OS === "web",
+    flowType: noAndroidWrapper() ? "pkce" : "implicit",
+    detectSessionInUrl: Platform.OS === "web" && !noAndroidWrapper()
+      && !(typeof location !== "undefined" && location.pathname === "/auth/android/callback"),
   },
 });

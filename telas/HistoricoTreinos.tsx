@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   RefreshControl,
-  ScrollView,
+  FlatList,
   StatusBar,
   StyleSheet,
   Text,
@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
+import { carregarTodasPorId, criarControleConsultas, filtroCursorDesc, unirPorId, type CursorData } from "../servicos/paginacaoHistorico";
 const estiloRolagemWeb =
   Platform.OS === "web"
     ? ({
@@ -55,6 +56,7 @@ type SerieTreino = {
 type TreinoHistorico = SessaoTreino & {
   nomeTreino: string;
   series: SerieTreino[];
+  detalhesCarregados?: boolean;
 };
 type SessaoCardioHistorico = {
   id: string;
@@ -128,300 +130,190 @@ export default function HistoricoTreinos({
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
   const [sessaoExpandida, setSessaoExpandida] = useState<string | null>(null);
-  // ScrollView não virtualiza: evita montar centenas de cartões de uma vez.
-  const [limiteTreinosVisiveis, setLimiteTreinosVisiveis] = useState(15);
-  const [limiteCardiosVisiveis, setLimiteCardiosVisiveis] = useState(15);
   const [haMaisTreinos, setHaMaisTreinos] = useState(false);
   const [haMaisCardios, setHaMaisCardios] = useState(false);
   const [carregandoMais, setCarregandoMais] = useState(false);
+  const [detalhesCarregando, setDetalhesCarregando] = useState<Record<string, boolean>>({});
+  const [errosDetalhes, setErrosDetalhes] = useState<Record<string, string>>({});
+  const controleConsultas = useRef(criarControleConsultas());
+  const usuarioIdRef = useRef("");
+  const cursores = useRef<{ treinos: CursorData | null; cardios: CursorData | null }>({ treinos: null, cardios: null });
   const dadosCarregadosRef = useRef(false);
-  const carregarHistorico = useCallback(
-    async (atualizacao = false) => {
-      if (atualizacao) setAtualizando(true);
-      else if (dadosCarregadosRef.current) setCarregandoMais(true);
-      else setCarregando(true);
-      try {
-        const { data: usuarioData, error: erroUsuario } =
-          await supabase.auth.getUser();
-        if (erroUsuario || !usuarioData.user) {
-          Alert.alert("Sessão inválida", "Entre novamente na sua conta.");
-          setHistorico([]);
-          return;
-        }
-        const usuarioId = usuarioData.user.id;
-        // Treinos e cardio independem entre si: iniciar ambos na mesma rodada.
-        const [resultadoCardios, resultadoSessoes] = await Promise.all([
-          supabase
-            .from("cardio_sessions")
-            .select(
-              "id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes",
-            )
-            .eq("user_id", usuarioId)
-            .order("started_at", { ascending: false })
-            // Busca um registro extra para descobrir se há outra página.
-            .range(0, limiteCardiosVisiveis),
-          supabase
-            .from("workout_sessions")
-            .select(
-              "id, plan_id, started_at, finished_at, notes, status, duration_minutes, intensity, active_calories, volume_kg, exercises_count, sets_completed, reps_completed, met_value",
-            )
-            .eq("user_id", usuarioId)
-            .order("started_at", { ascending: false })
-            .range(0, limiteTreinosVisiveis),
-        ]);
-        const { data: cardios, error: erroCardios } = resultadoCardios;
-        const { data: sessoes, error: erroSessoes } = resultadoSessoes;
-        if (erroCardios) {
-          Alert.alert(
-            "Erro",
-            `Não foi possível carregar o histórico de cardio: ${erroCardios.message}`,
-          );
-          return;
-        }
-        setHaMaisCardios((cardios?.length ?? 0) > limiteCardiosVisiveis);
-        setHistoricoCardio(
-          (cardios ?? []).slice(
-            0,
-            limiteCardiosVisiveis,
-          ) as SessaoCardioHistorico[],
-        );
-        if (erroSessoes) {
-          Alert.alert(
-            "Erro",
-            `Não foi possível carregar o histórico: ${erroSessoes.message}`,
-          );
-          return;
-        }
-        setHaMaisTreinos((sessoes?.length ?? 0) > limiteTreinosVisiveis);
-        const listaSessoes = (
-          (sessoes ?? []).slice(0, limiteTreinosVisiveis) as SessaoTreino[]
-        ).filter((sessao) => sessao.status !== "em_andamento");
-        if (listaSessoes.length === 0) {
-          setHistorico([]);
-          dadosCarregadosRef.current = true;
-          return;
-        }
-        const idsSessoes = listaSessoes.map((sessao) => sessao.id);
-        const idsPlanos = Array.from(
-          new Set(
-            listaSessoes
-              .map((sessao) => sessao.plan_id)
-              .filter((id): id is string => Boolean(id)),
-          ),
-        );
-        const [resultadoSeries, resultadoPlanos] = await Promise.all([
-          supabase
-            .from("workout_sets")
-            .select(
-              "id, session_id, exercise_id, exercise_name, set_number, reps, weight_kg",
-            )
-            .eq("user_id", usuarioId)
-            .in("session_id", idsSessoes)
-            .order("set_number", { ascending: true }),
-          idsPlanos.length > 0
-            ? supabase
-                .from("workout_plans")
-                .select("id, name")
-                .eq("user_id", usuarioId)
-                .in("id", idsPlanos)
-            : Promise.resolve({ data: [], error: null }),
-        ]);
-        if (resultadoSeries.error) {
-          Alert.alert(
-            "Erro",
-            `Não foi possível carregar as séries: ${resultadoSeries.error.message}`,
-          );
-          return;
-        }
-        if (resultadoPlanos.error) {
-          Alert.alert(
-            "Erro",
-            `Não foi possível carregar os nomes dos treinos: ${resultadoPlanos.error.message}`,
-          );
-          return;
-        }
-        const series = (resultadoSeries.data ?? []) as SerieTreino[];
-        const planos = (resultadoPlanos.data ?? []) as {
-          id: string;
-          name: string;
-        }[];
-        const nomesPlanos = new Map(
-          planos.map((plano) => [plano.id, plano.name]),
-        );
-        // Agrupar uma vez evita percorrer todo o histórico para cada sessão.
-        const seriesPorSessao = new Map<string, SerieTreino[]>();
-        for (const serie of series) {
-          const lista = seriesPorSessao.get(serie.session_id) ?? [];
-          lista.push(serie);
-          seriesPorSessao.set(serie.session_id, lista);
-        }
-        const resultado: TreinoHistorico[] = listaSessoes.map((sessao) => ({
-          ...sessao,
-          nomeTreino: sessao.plan_id
-            ? (nomesPlanos.get(sessao.plan_id) ?? "Treino removido")
-            : "Treino removido",
-          series: (seriesPorSessao.get(sessao.id) ?? []).map((serie) => ({
-            ...serie,
-          })),
-        }));
-        const ordemCronologica = [...resultado].sort(
-          (a, b) =>
-            new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-        );
-        const ultimasSeriesPorExercicio = new Map<string, SerieTreino[]>();
-        for (const sessao of ordemCronologica) {
-          const gruposExercicios = new Map<string, SerieTreino[]>();
-          for (const serie of sessao.series) {
-            const chave = `${sessao.plan_id ?? "sem-plano"}::${chaveExercicio(serie)}`;
-            const grupo = gruposExercicios.get(chave) ?? [];
-            grupo.push(serie);
-            gruposExercicios.set(chave, grupo);
-          }
-          for (const [chave, seriesAtuais] of gruposExercicios) {
-            const seriesAnteriores = ultimasSeriesPorExercicio.get(chave) ?? [];
-            for (const serieAtual of seriesAtuais) {
-              const serieAnterior = seriesAnteriores.find(
-                (serie) =>
-                  Number(serie.set_number) === Number(serieAtual.set_number),
-              );
-              if (!serieAnterior) {
-                // Histórico anterior pode estar em outra página.
-                // Não afirmar "série nova" sem informação suficiente.
-                serieAtual.serieNova = false;
-                serieAtual.mudou = false;
-                continue;
-              }
-              const diferencaCarga =
-                Number(serieAtual.weight_kg) - Number(serieAnterior.weight_kg);
-              const diferencaReps =
-                Number(serieAtual.reps) - Number(serieAnterior.reps);
-              serieAtual.diferencaCarga = diferencaCarga;
-              serieAtual.diferencaReps = diferencaReps;
-              serieAtual.mudou = diferencaCarga !== 0 || diferencaReps !== 0;
-              if (diferencaCarga > 0) {
-                serieAtual.progressoCarga = diferencaCarga;
-              }
-              if (diferencaReps > 0) {
-                serieAtual.progressoReps = diferencaReps;
-              }
-            }
-            ultimasSeriesPorExercicio.set(
-              chave,
-              seriesAtuais.map((serie) => ({ ...serie })),
-            );
-          }
-        }
-        setHistorico(resultado);
-        dadosCarregadosRef.current = true;
-      } catch {
-        Alert.alert(
-          "Erro",
-          "Não foi possível conectar ao Supabase para carregar o histórico.",
-        );
-      } finally {
+  const carregandoInicialRef = useRef(false);
+
+  async function buscarTreinos(usuarioId: string, cursor: CursorData | null, sinal: AbortSignal) {
+    let pedido = supabase.from("workout_sessions")
+      .select("id, plan_id, started_at, finished_at, notes, status, duration_minutes, intensity, active_calories, volume_kg, exercises_count, sets_completed, reps_completed, met_value")
+      .eq("user_id", usuarioId)
+      .or("status.is.null,status.neq.em_andamento")
+      .order("started_at", { ascending: false }).order("id", { ascending: false })
+      .limit(16).abortSignal(sinal);
+    if (cursor) pedido = pedido.or(filtroCursorDesc("started_at", cursor));
+    const resposta = await pedido;
+    if (resposta.error) throw resposta.error;
+    const brutos = (resposta.data ?? []) as SessaoTreino[];
+    const pagina = brutos.slice(0, 15);
+    const idsPlanos = [...new Set(pagina.map((item) => item.plan_id).filter((id): id is string => Boolean(id)))];
+    const planos = idsPlanos.length ? await supabase.from("workout_plans").select("id, name")
+      .eq("user_id", usuarioId).in("id", idsPlanos).abortSignal(sinal) : { data: [], error: null };
+    if (planos.error) throw planos.error;
+    const nomes = new Map((planos.data ?? []).map((plano) => [plano.id, plano.name]));
+    const itens: TreinoHistorico[] = pagina.map((sessao) => ({ ...sessao,
+      nomeTreino: sessao.plan_id ? nomes.get(sessao.plan_id) ?? "Treino removido" : "Treino removido",
+      series: [],
+    }));
+    const ultimo = pagina[pagina.length - 1];
+    return { itens, mais: brutos.length > 15, cursor: ultimo ? { id: ultimo.id, data: ultimo.started_at } : cursor };
+  }
+  async function buscarCardios(usuarioId: string, cursor: CursorData | null, sinal: AbortSignal) {
+    let pedido = supabase.from("cardio_sessions")
+      .select("id, activity_name, activity_type, started_at, duration_minutes, distance_km, calories, active_calories, intensity, incline_percent, heart_rate_avg, speed_kmh, weight_kg_snapshot, height_cm_snapshot, age_snapshot, sex_snapshot, floors_up, met_value, notes")
+      .eq("user_id", usuarioId)
+      .order("started_at", { ascending: false }).order("id", { ascending: false })
+      .limit(16).abortSignal(sinal);
+    if (cursor) pedido = pedido.or(filtroCursorDesc("started_at", cursor));
+    const resposta = await pedido;
+    if (resposta.error) throw resposta.error;
+    const brutos = (resposta.data ?? []) as SessaoCardioHistorico[];
+    const itens = brutos.slice(0, 15);
+    const ultimo = itens[itens.length - 1];
+    return { itens, mais: brutos.length > 15, cursor: ultimo ? { id: ultimo.id, data: ultimo.started_at } : cursor };
+  }
+  const carregarHistorico = useCallback(async (atualizacao = false) => {
+    const consulta = controleConsultas.current.iniciar();
+    carregandoInicialRef.current = true;
+    setCarregandoMais(false);
+    setDetalhesCarregando({});
+    if (atualizacao) setAtualizando(true);
+    else if (!dadosCarregadosRef.current) setCarregando(true);
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (!consulta.atual()) return;
+      if (error || !data.user) throw new Error("Entre novamente na sua conta.");
+      usuarioIdRef.current = data.user.id;
+      const [treinos, cardios] = await Promise.all([
+        buscarTreinos(data.user.id, null, consulta.signal),
+        buscarCardios(data.user.id, null, consulta.signal),
+      ]);
+      if (!consulta.atual()) return;
+      setHistorico(treinos.itens);
+      setHistoricoCardio(cardios.itens);
+      cursores.current = { treinos: treinos.cursor, cardios: cardios.cursor };
+      setHaMaisTreinos(treinos.mais);
+      setHaMaisCardios(cardios.mais);
+      setSessaoExpandida(null);
+      setErrosDetalhes({});
+      dadosCarregadosRef.current = true;
+    } catch (erro) {
+      if (consulta.atual()) Alert.alert("Não foi possível carregar o histórico", erro instanceof Error ? erro.message : "Tente novamente.");
+    } finally {
+      if (consulta.atual()) {
+        carregandoInicialRef.current = false;
         setCarregando(false);
         setAtualizando(false);
-        setCarregandoMais(false);
       }
-    },
-    [limiteTreinosVisiveis, limiteCardiosVisiveis],
-  );
+    }
+  }, []);
+  async function carregarMais(tipo: "treinos" | "cardios") {
+    const cursor = cursores.current[tipo];
+    if (!cursor || carregandoInicialRef.current || !(tipo === "treinos" ? haMaisTreinos : haMaisCardios)) return;
+    const consulta = controleConsultas.current.iniciarPagina();
+    if (!consulta) return;
+    setCarregandoMais(true);
+    try {
+      if (tipo === "treinos") {
+        const pagina = await buscarTreinos(usuarioIdRef.current, cursor, consulta.signal);
+        if (!consulta.atual()) return;
+        setHistorico((anteriores) => unirPorId(anteriores, pagina.itens));
+        setHaMaisTreinos(pagina.mais);
+        cursores.current.treinos = pagina.cursor;
+      } else {
+        const pagina = await buscarCardios(usuarioIdRef.current, cursor, consulta.signal);
+        if (!consulta.atual()) return;
+        setHistoricoCardio((anteriores) => unirPorId(anteriores, pagina.itens));
+        setHaMaisCardios(pagina.mais);
+        cursores.current.cardios = pagina.cursor;
+      }
+    } catch (erro) {
+      if (consulta.atual()) Alert.alert("Não foi possível carregar mais registros", erro instanceof Error ? erro.message : "Tente novamente.");
+    } finally {
+      if (consulta.atual()) setCarregandoMais(false);
+      consulta.concluir();
+    }
+  }
+  async function buscarSeries(ids: string[], sinal: AbortSignal) {
+    return carregarTodasPorId<SerieTreino>((cursor) => {
+      let pedido = supabase.from("workout_sets")
+        .select("id, session_id, exercise_id, exercise_name, set_number, reps, weight_kg")
+        .eq("user_id", usuarioIdRef.current).in("session_id", ids)
+        .order("id", { ascending: true }).limit(500).abortSignal(sinal);
+      if (cursor) pedido = pedido.gt("id", cursor);
+      return pedido;
+    }, sinal);
+  }
+  async function carregarDetalhes(sessao: TreinoHistorico) {
+    if (sessao.detalhesCarregados || carregandoInicialRef.current) return;
+    const consulta = controleConsultas.current.iniciarPagina('detalhe:' + sessao.id);
+    if (!consulta) return;
+    setDetalhesCarregando((atual) => ({ ...atual, [sessao.id]: true }));
+    setErrosDetalhes((atual) => ({ ...atual, [sessao.id]: "" }));
+    try {
+      const series = await buscarSeries([sessao.id], consulta.signal);
+      const pendentes = new Set(series.map(chaveExercicio));
+      const anterioresPorExercicio = new Map<string, SerieTreino[]>();
+      let cursor = { id: sessao.id, data: sessao.started_at };
+      // Só busca os detalhes ao abrir. A comparação percorre o passado até achar
+      // a ocorrência anterior de cada exercício, inclusive fora da página visível.
+      while (pendentes.size) {
+        let pedido = supabase.from("workout_sessions").select("id, started_at")
+          .eq("user_id", usuarioIdRef.current)
+          .or("status.is.null,status.neq.em_andamento")
+          .or(filtroCursorDesc("started_at", cursor))
+          .order("started_at", { ascending: false }).order("id", { ascending: false })
+          .limit(10).abortSignal(consulta.signal);
+        pedido = sessao.plan_id ? pedido.eq("plan_id", sessao.plan_id) : pedido.is("plan_id", null);
+        const resposta = await pedido;
+        if (resposta.error) throw resposta.error;
+        const sessoes = (resposta.data ?? []) as { id: string; started_at: string }[];
+        if (!sessoes.length) break;
+        const anteriores = await buscarSeries(sessoes.map((item) => item.id), consulta.signal);
+        for (const anterior of sessoes) {
+          for (const chave of [...pendentes]) {
+            const grupo = anteriores.filter((serie) => serie.session_id === anterior.id && chaveExercicio(serie) === chave);
+            if (grupo.length) { anterioresPorExercicio.set(chave, grupo); pendentes.delete(chave); }
+          }
+        }
+        const ultima = sessoes[sessoes.length - 1];
+        cursor = { id: ultima.id, data: ultima.started_at };
+      }
+      if (!consulta.atual()) return;
+      const comparadas = series.map((serie) => {
+        const anteriores = anterioresPorExercicio.get(chaveExercicio(serie));
+        const anterior = anteriores?.find((item) => Number(item.set_number) === Number(serie.set_number));
+        if (!anterior) return { ...serie, serieNova: Boolean(anteriores?.length), mudou: Boolean(anteriores?.length) };
+        const diferencaCarga = Number(serie.weight_kg) - Number(anterior.weight_kg);
+        const diferencaReps = Number(serie.reps) - Number(anterior.reps);
+        return { ...serie, diferencaCarga, diferencaReps,
+          progressoCarga: Math.max(0, diferencaCarga), progressoReps: Math.max(0, diferencaReps),
+          mudou: diferencaCarga !== 0 || diferencaReps !== 0 };
+      }).sort((a, b) => Number(a.set_number) - Number(b.set_number) || a.id.localeCompare(b.id));
+      setHistorico((atual) => atual.map((item) => item.id === sessao.id ? { ...item, series: comparadas, detalhesCarregados: true } : item));
+    } catch (erro) {
+      if (consulta.atual()) setErrosDetalhes((atual) => ({ ...atual, [sessao.id]: erro instanceof Error ? erro.message : "Não foi possível carregar as séries." }));
+    } finally {
+      if (consulta.atual()) setDetalhesCarregando((atual) => ({ ...atual, [sessao.id]: false }));
+      consulta.concluir();
+    }
+  }
   useEffect(() => {
     void carregarHistorico();
+    return () => controleConsultas.current.cancelar();
   }, [carregarHistorico]);
-  function alternarDetalhes(id: string) {
-    setSessaoExpandida((atual) => (atual === id ? null : id));
+  function alternarDetalhes(sessao: TreinoHistorico) {
+    setSessaoExpandida((atual) => atual === sessao.id ? null : sessao.id);
+    void carregarDetalhes(sessao);
   }
-  if (carregando) {
-    return (
-      <View style={estilos.centralizado}>
-        <StatusBar hidden={true} barStyle="light-content" />
-        <ActivityIndicator size="large" color={corTema} />
-        <Text style={estilos.textoSecundario}>Carregando seu histórico...</Text>
-      </View>
-    );
-  }
-  return (
-    <View style={estilos.container}>
-      <StatusBar hidden={true} barStyle="light-content" />
-      <ScrollView
-        style={estiloRolagemWeb}
-        contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={atualizando}
-            onRefresh={() => carregarHistorico(true)}
-            tintColor={corTema}
-            colors={[corTema]}
-          />
-        }
-      >
-        <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar}>
-          <Text style={[estilos.textoVoltar, { color: corTema }]}>
-            ‹ Voltar
-          </Text>
-        </TouchableOpacity>
-        <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
-        <Text style={estilos.titulo}>Histórico de treinos</Text>
-        <Text style={estilos.subtitulo}>
-          Veja seus treinos registrados, o volume total e apenas as séries novas
-          ou diferentes da última vez que você fez cada exercício.
-        </Text>
-        <View
-          style={[
-            estilos.resumo,
-            {
-              backgroundColor: corComTransparencia(corTema, "20"),
-              borderColor: corComTransparencia(corTema, "66"),
-            },
-          ]}
-        >
-          <Text style={[estilos.resumoNumero, { color: corTema }]}>
-            {historico.length}
-          </Text>
-          <Text style={estilos.resumoTexto}>
-            {historico.length === 1
-              ? "registro encontrado"
-              : "registros encontrados"}
-          </Text>
-        </View>
-        <View
-          style={[
-            estilos.legendaProgresso,
-            { borderColor: corComTransparencia(corTema, "66") },
-          ]}
-        >
-          <Text style={estilos.legendaTitulo}>COMO LER SUA EVOLUÇÃO</Text>
-          <Text style={estilos.legendaTexto}>
-            <Text style={[estilos.textoVerde, { color: corTema }]}>↑ +kg</Text>{" "}
-            aumento de carga
-          </Text>
-          <Text style={estilos.legendaTexto}>
-            <Text style={[estilos.textoVerde, { color: corTema }]}>
-              ↑ +reps
-            </Text>{" "}
-            aumento de repetições
-          </Text>
-          <Text style={estilos.legendaTexto}>
-            Séries novas e reduções de carga ou repetições também são
-            destacadas.
-          </Text>
-        </View>
-        {historico.length === 0 ? (
-          <View style={estilos.vazio}>
-            <Text style={estilos.vazioEmoji}>📋</Text>
-            <Text style={estilos.vazioTitulo}>
-              Seu histórico aparecerá aqui
-            </Text>
-            <Text style={estilos.vazioDescricao}>
-              Registre as cargas e repetições em “Meus treinos”. Os registros
-              salvos serão exibidos nesta tela.
-            </Text>
-          </View>
-        ) : (
-          <View style={estilos.lista}>
-            {historico.slice(0, limiteTreinosVisiveis).map((sessao) => {
+  function renderizarTreino(sessao: TreinoHistorico) {
               const expandida = sessaoExpandida === sessao.id;
               const todosExercicios = Array.from(
                 new Set(
@@ -455,10 +347,10 @@ export default function HistoricoTreinos({
                 seriesComProgresso.map(chaveExercicio),
               ).size;
               return (
-                <View key={sessao.id} style={estilos.cartao}>
+                <View key={sessao.id} style={[estilos.cartao, { marginBottom: 14 }]}>
                   <TouchableOpacity
                     style={estilos.cabecalhoCartao}
-                    onPress={() => alternarDetalhes(sessao.id)}
+                    onPress={() => alternarDetalhes(sessao)}
                     activeOpacity={0.8}
                   >
                     <View
@@ -527,14 +419,11 @@ export default function HistoricoTreinos({
                         </Text>
                       )}
                       <Text style={[estilos.resumoSessao, { color: corTema }]}>
-                        {todosExercicios.length}{" "}
-                        {todosExercicios.length === 1
-                          ? "exercício"
-                          : "exercícios"}{" "}
-                        · {sessao.series.length}{" "}
-                        {sessao.series.length === 1
-                          ? "série registrada"
-                          : "séries registradas"}
+                        {sessao.detalhesCarregados
+                          ? todosExercicios.length + " exercícios · " + sessao.series.length + " séries registradas"
+                          : sessao.exercises_count != null && sessao.sets_completed != null
+                            ? sessao.exercises_count + " exercícios · " + sessao.sets_completed + " séries registradas"
+                            : "Abra para ver os exercícios e séries"}
                       </Text>
                       {seriesComProgresso.length > 0 && (
                         <View
@@ -569,7 +458,15 @@ export default function HistoricoTreinos({
                   </TouchableOpacity>
                   {expandida && (
                     <View style={estilos.detalhes}>
-                      {sessao.series.length === 0 ? (
+                      {!sessao.detalhesCarregados ? (
+                        <View style={{ gap: 10 }}>
+                          {detalhesCarregando[sessao.id] ? <ActivityIndicator color={corTema} /> : null}
+                          <Text style={estilos.semSeries}>{errosDetalhes[sessao.id] || "Carregando séries e comparação com o registro anterior..."}</Text>
+                          {errosDetalhes[sessao.id] ? <TouchableOpacity onPress={() => void carregarDetalhes(sessao)}>
+                            <Text style={{ color: corTema }}>Tentar novamente</Text>
+                          </TouchableOpacity> : null}
+                        </View>
+                      ) : sessao.series.length === 0 ? (
                         <Text style={estilos.semSeries}>
                           Este registro não possui séries salvas.
                         </Text>
@@ -791,7 +688,7 @@ export default function HistoricoTreinos({
                           );
                         })
                       )}
-                      <View
+                      {sessao.detalhesCarregados ? <View
                         style={[
                           estilos.rodapeDetalhes,
                           {
@@ -805,7 +702,7 @@ export default function HistoricoTreinos({
                         <Text style={[estilos.volumeValor, { color: corTema }]}>
                           {formatarCarga(volumeTotal)} kg × repetições
                         </Text>
-                      </View>
+                      </View> : null}
                       {sessao.notes ? (
                         <Text style={estilos.observacoes}>
                           Observação: {sessao.notes}
@@ -815,42 +712,9 @@ export default function HistoricoTreinos({
                   )}
                 </View>
               );
-            })}
-            {haMaisTreinos && (
-              <TouchableOpacity
-                accessibilityRole="button"
-                style={{ padding: 18, alignItems: "center" }}
-                onPress={() => setLimiteTreinosVisiveis((total) => total + 15)}
-                disabled={carregandoMais}
-              >
-                <Text
-                  style={{ color: corTema, fontWeight: "700", fontSize: 15 }}
-                >
-                  {carregandoMais
-                    ? "Carregando treinos..."
-                    : "Ver mais treinos"}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-        <View style={{ marginTop: 28 }}>
-          <Text style={[estilos.titulo, { fontSize: 22, marginBottom: 8 }]}>
-            Histórico de cardio
-          </Text>
-          <Text style={estilos.subtitulo}>
-            Cada sessão preserva os valores registrados naquela data.
-          </Text>
-          {historicoCardio.length === 0 ? (
-            <View style={estilos.vazio}>
-              <Text style={estilos.vazioEmoji}>❤️‍🔥</Text>
-              <Text style={estilos.vazioTitulo}>Nenhum cardio registrado</Text>
-              <Text style={estilos.vazioDescricao}>
-                Registre uma sessão na área Frequência para vê-la aqui.
-              </Text>
-            </View>
-          ) : (
-            historicoCardio.slice(0, limiteCardiosVisiveis).map((cardio) => (
+  }
+  function renderizarCardio(cardio: SessaoCardioHistorico) {
+    return (
               <View
                 key={cardio.id}
                 style={[estilos.cartao, { padding: 18, marginBottom: 12 }]}
@@ -1017,25 +881,148 @@ export default function HistoricoTreinos({
                   </Text>
                 ) : null}
               </View>
-            ))
-          )}
-          {haMaisCardios && (
-            <TouchableOpacity
-              accessibilityRole="button"
-              style={{ padding: 18, alignItems: "center" }}
-              onPress={() => setLimiteCardiosVisiveis((total) => total + 15)}
-              disabled={carregandoMais}
-            >
+    );
+  }
+  type Linha = { id: string; tipo: "treino"; sessao: TreinoHistorico }
+    | { id: string; tipo: "cardio"; cardio: SessaoCardioHistorico }
+    | { id: string; tipo: "secaoCardio" | "maisTreinos" };
+  const linhas: Linha[] = [
+    ...historico.map((sessao): Linha => ({ id: "treino:" + sessao.id, tipo: "treino", sessao })),
+    ...(haMaisTreinos ? [{ id: "maisTreinos", tipo: "maisTreinos" as const }] : []),
+    { id: "secaoCardio", tipo: "secaoCardio" },
+    ...historicoCardio.map((cardio): Linha => ({ id: "cardio:" + cardio.id, tipo: "cardio", cardio })),
+  ];
+  if (carregando) {
+    return (
+      <View style={estilos.centralizado}>
+        <StatusBar hidden={true} barStyle="light-content" />
+        <ActivityIndicator size="large" color={corTema} />
+        <Text style={estilos.textoSecundario}>Carregando seu histórico...</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={estilos.container}>
+      <StatusBar hidden={true} barStyle="light-content" />
+      <FlatList
+        style={estiloRolagemWeb}
+        contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}
+        showsVerticalScrollIndicator={false}
+        data={linhas}
+        keyExtractor={(item) => item.id}
+        initialNumToRender={8}
+        maxToRenderPerBatch={5}
+        windowSize={7}
+        refreshControl={<RefreshControl refreshing={atualizando} onRefresh={() => void carregarHistorico(true)} tintColor={corTema} colors={[corTema]} />}
+        ListHeaderComponent={<View>
+        <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar}>
+          <Text style={[estilos.textoVoltar, { color: corTema }]}>
+            ‹ Voltar
+          </Text>
+        </TouchableOpacity>
+        <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
+        <Text style={estilos.titulo}>Histórico de treinos</Text>
+        <Text style={estilos.subtitulo}>
+          Veja seus treinos registrados, o volume total e apenas as séries novas
+          ou diferentes da última vez que você fez cada exercício.
+        </Text>
+        <View
+          style={[
+            estilos.resumo,
+            {
+              backgroundColor: corComTransparencia(corTema, "20"),
+              borderColor: corComTransparencia(corTema, "66"),
+            },
+          ]}
+        >
+          <Text style={[estilos.resumoNumero, { color: corTema }]}>
+            {historico.length}
+          </Text>
+          <Text style={estilos.resumoTexto}>
+            {historico.length === 1
+              ? "registro encontrado"
+              : "registros encontrados"}
+          </Text>
+        </View>
+        <View
+          style={[
+            estilos.legendaProgresso,
+            { borderColor: corComTransparencia(corTema, "66") },
+          ]}
+        >
+          <Text style={estilos.legendaTitulo}>COMO LER SUA EVOLUÇÃO</Text>
+          <Text style={estilos.legendaTexto}>
+            <Text style={[estilos.textoVerde, { color: corTema }]}>↑ +kg</Text>{" "}
+            aumento de carga
+          </Text>
+          <Text style={estilos.legendaTexto}>
+            <Text style={[estilos.textoVerde, { color: corTema }]}>
+              ↑ +reps
+            </Text>{" "}
+            aumento de repetições
+          </Text>
+          <Text style={estilos.legendaTexto}>
+            Séries novas e reduções de carga ou repetições também são
+            destacadas.
+          </Text>
+        </View>
+        {historico.length === 0 ? (
+          <View style={estilos.vazio}>
+            <Text style={estilos.vazioEmoji}>📋</Text>
+            <Text style={estilos.vazioTitulo}>
+              Seu histórico aparecerá aqui
+            </Text>
+            <Text style={estilos.vazioDescricao}>
+              Registre as cargas e repetições em “Meus treinos”. Os registros
+              salvos serão exibidos nesta tela.
+            </Text>
+          </View>
+        ) : null}
+        </View>}
+        renderItem={({ item }) => {
+          if (item.tipo === "treino") return renderizarTreino(item.sessao);
+          if (item.tipo === "cardio") return renderizarCardio(item.cardio);
+          if (item.tipo === "maisTreinos") return (
+            <TouchableOpacity accessibilityRole="button" style={{ padding: 18, alignItems: "center" }}
+              onPress={() => void carregarMais("treinos")} disabled={carregandoMais || atualizando}>
               <Text style={{ color: corTema, fontWeight: "700", fontSize: 15 }}>
-                {carregandoMais ? "Carregando cardios..." : "Ver mais cardios"}
+                {carregandoMais ? "Carregando treinos..." : "Ver mais treinos"}
               </Text>
             </TouchableOpacity>
-          )}
+          );
+          return (
+        <View style={{ marginTop: 28 }}>
+          <Text style={[estilos.titulo, { fontSize: 22, marginBottom: 8 }]}>
+            Histórico de cardio
+          </Text>
+          <Text style={estilos.subtitulo}>
+            Cada sessão preserva os valores registrados naquela data.
+          </Text>
+          {historicoCardio.length === 0 ? (
+            <View style={estilos.vazio}>
+              <Text style={estilos.vazioEmoji}>❤️‍🔥</Text>
+              <Text style={estilos.vazioTitulo}>Nenhum cardio registrado</Text>
+              <Text style={estilos.vazioDescricao}>
+                Registre uma sessão na área Frequência para vê-la aqui.
+              </Text>
+            </View>
+          ) : null}
         </View>
-      </ScrollView>
+          );
+        }}
+        ListFooterComponent={haMaisCardios ? (
+          <TouchableOpacity accessibilityRole="button" style={{ padding: 18, alignItems: "center" }}
+            onPress={() => void carregarMais("cardios")} disabled={carregandoMais || atualizando}>
+            <Text style={{ color: corTema, fontWeight: "700", fontSize: 15 }}>
+              {carregandoMais ? "Carregando cardios..." : "Ver mais cardios"}
+            </Text>
+          </TouchableOpacity>
+        ) : undefined}
+      />
     </View>
   );
 }
+
 const estilos = StyleSheet.create({
   container: {
     flex: 1,

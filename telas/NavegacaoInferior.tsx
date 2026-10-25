@@ -23,6 +23,7 @@ export default function NavegacaoInferior({
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
+        accessibilityState={{ selected: comunidadeAtiva }}
         onPress={() => {
           if (!comunidadeAtiva) onNavegar("comunidade");
         }}
@@ -87,8 +88,9 @@ export default function NavegacaoInferior({
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Ir para treinos"
+        accessibilityState={{ selected: treinosAtivo }}
         onPress={() => {
-          if (!treinosAtivo) onNavegar("Inicio");
+          if (rotaAtual !== "Inicio") onNavegar("Inicio");
         }}
         style={estilos.item}
         activeOpacity={0.85}

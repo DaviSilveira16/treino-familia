@@ -14,7 +14,6 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -27,6 +26,12 @@ import {
   lerRascunho,
   mesclarSeries,
   novoIdSerie,
+  copiarSeriesAnteriores,
+  listarRascunhos,
+  mesmaOperacao,
+  type DescansoTreino,
+  type FinalizacaoTreino,
+  type SerieRascunho,
   type EsforcoPercebido,
   type TreinoRascunho,
 } from "../servicos/treinoLocal";
@@ -39,7 +44,10 @@ import {
 } from "../servicos/caloriasTreino";
 
 const CHAVE_PREFERENCIA_DESCANSO = "@treino-familia:descanso-segundos:v1";
-const OPCOES_DESCANSO = [30, 60, 90, 120, 180] as const;
+import { CronometroTreino, PainelDescanso, OPCOES_DESCANSO } from "../componentes/ContadoresTreino";
+import { CartaoExercicioTreino } from "../componentes/CartaoExercicioTreino";
+import { sincronizarRascunho } from "../servicos/treinoSincronizacao";
+import { carregarUltimasSeries, type UltimoExercicio } from "../servicos/ultimasSeriesTreino";
 
 type PerfilTreino = Pick<
   DadosCalculoTreino,
@@ -57,17 +65,7 @@ type ExercicioBase = {
   sets_goal: number;
   reps_goal: string;
 };
-type SerieAtiva = {
-  chave: string;
-  exercise_id: string;
-  exercise_name: string;
-  set_number: number;
-  reps: string;
-  weight_kg: string;
-  concluida: boolean;
-  registroId?: string;
-  pendente?: "salvar" | "remover";
-};
+type SerieAtiva = SerieRascunho;
 type SessaoAtiva = { id: string; plan_id: string; started_at: string };
 type RegistroSalvo = {
   id: string;
@@ -100,12 +98,6 @@ function confirmar(titulo: string, mensagem: string): Promise<boolean> {
       { text: "Finalizar", onPress: () => resolver(true) },
     ]);
   });
-}
-
-function formatarTempo(segundos: number) {
-  const seguros = Math.max(0, Math.floor(segundos));
-  const minutos = Math.floor(seguros / 60);
-  return `${String(minutos).padStart(2, "0")}:${String(seguros % 60).padStart(2, "0")}`;
 }
 
 function lerPerfil(metadados: Record<string, unknown>): PerfilTreino | null {
@@ -147,12 +139,10 @@ export default function TreinoAtivo({
     null,
   );
   const [intensidade, setIntensidade] = useState<IntensidadeTreino>("moderada");
-  const [duracaoDescanso, setDuracaoDescanso] = useState(90);
-  const [fimDescanso, setFimDescanso] = useState<number | null>(null);
-  const [descansoPausado, setDescansoPausado] = useState(false);
-  const [segundosRestantes, setSegundosRestantes] = useState(0);
-  const [descansoConcluido, setDescansoConcluido] = useState(false);
-  const [agora, setAgora] = useState(Date.now());
+  const [descanso, setDescanso] = useState<DescansoTreino>({ fimEm: null, pausado: false, segundosPausados: 0, duracao: 90 });
+  const [finalizacao, setFinalizacao] = useState<FinalizacaoTreino | undefined>();
+  const [ultimasSeries, setUltimasSeries] = useState<Record<string, UltimoExercicio>>({});
+  const [erroReferencia, setErroReferencia] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [outroTreinoAtivo, setOutroTreinoAtivo] = useState(false);
   const [esforco, setEsforco] = useState<EsforcoPercebido>("nao_informado");
@@ -170,6 +160,16 @@ export default function TreinoAtivo({
   const usuarioRef = useRef(usuarioId);
   const intensidadeRef = useRef(intensidade);
   const esforcoRef = useRef(esforco);
+  const descansoRef = useRef(descanso);
+  const finalizacaoRef = useRef(finalizacao);
+  const bloqueioRef = useRef(false);
+  const salvandoRef = useRef(false);
+  const chaveSalvandoRef = useRef<string | null>(null);
+  descansoRef.current = descanso;
+  finalizacaoRef.current = finalizacao;
+  bloqueioRef.current = bloqueioSessao;
+  salvandoRef.current = salvando;
+  chaveSalvandoRef.current = chaveEmSalvamento;
   seriesRef.current = series;
   sessaoRef.current = sessao;
   exerciciosRef.current = exercicios;
@@ -197,6 +197,8 @@ export default function TreinoAtivo({
         series: novasSeries ?? seriesRef.current,
         intensidade: intensidadeRef.current,
         esforco: esforcoRef.current,
+        descanso: descansoRef.current,
+        finalizacao: finalizacaoRef.current,
         salvoEm: new Date().toISOString(),
       };
     },
@@ -211,175 +213,40 @@ export default function TreinoAtivo({
     [montarRascunho],
   );
 
-  /** A operação é gravada no aparelho antes de qualquer envio ao servidor. */
-  const sincronizar = useCallback(
-    async (permitirSobrescrever = false) => {
-      if (sincronizandoRef.current || bloqueioSessao || !prontoRef.current)
-        return;
-      if (
-        Platform.OS === "web" &&
-        typeof navigator !== "undefined" &&
-        navigator.onLine === false
-      ) {
-        setOnline(false);
-        return;
+  const sincronizar = useCallback(async (permitirSobrescrever = false) => {
+    if (sincronizandoRef.current || bloqueioRef.current || !prontoRef.current) return;
+    if (Platform.OS === "web" && typeof navigator !== "undefined" && navigator.onLine === false) {
+      setOnline(false); return;
+    }
+    const id = usuarioRef.current;
+    const atual = sessaoRef.current;
+    if (!id || !atual || atual.plan_id !== planId) return;
+    sincronizandoRef.current = true; setSincronizando(true);
+    const antes = seriesRef.current;
+    try {
+      const resultado = await sincronizarRascunho(id, planId, permitirSobrescrever);
+      if (resultado.concluido && !resultado.rascunho) {
+        prontoRef.current = false; sessaoRef.current = null; finalizacaoRef.current = undefined;
+        setFinalizacao(undefined); setSessao(null); setErroSincronizacao("");
+        setMensagem("Treino concluído e sincronizado. O horário original foi preservado.");
+        onVoltar(); return;
       }
-      const sessaoAtual = sessaoRef.current;
-      const idUsuario = usuarioRef.current;
-      if (
-        !sessaoAtual ||
-        sessaoAtual.plan_id !== planId ||
-        !idUsuario ||
-        !seriesRef.current.some((serie) => serie.pendente)
-      )
-        return;
-      sincronizandoRef.current = true;
-      setSincronizando(true);
-      setErroSincronizacao("");
-      if (!permitirSobrescrever) setConflitoRemoto(false);
-      try {
-        const { data: autenticado, error: erroAuth } =
-          await supabase.auth.getUser();
-        if (erroAuth || autenticado.user?.id !== idUsuario)
-          throw new Error("Faça login novamente para sincronizar este treino.");
-        const { data: situacao, error: erroSituacao } = await supabase
-          .from("workout_sessions")
-          .select("id, status, plan_id")
-          .eq("id", sessaoAtual.id)
-          .eq("user_id", idUsuario)
-          .maybeSingle();
-        if (erroSituacao) throw erroSituacao;
-        if (
-          !situacao ||
-          situacao.status !== "em_andamento" ||
-          situacao.plan_id !== planId
-        ) {
-          setBloqueioSessao(true);
-          throw new Error(
-            "Esta sessão foi encerrada ou alterada em outro aparelho. O rascunho local foi preservado; nenhuma série será sobrescrita automaticamente.",
-          );
-        }
-        for (const item of seriesRef.current.filter(
-          (serie) => serie.pendente,
-        )) {
-          const { data: existentes, error: erroBusca } = await supabase
-            .from("workout_sets")
-            .select("id, reps, weight_kg")
-            .eq("user_id", idUsuario)
-            .eq("session_id", sessaoAtual.id)
-            .eq("exercise_id", item.exercise_id)
-            .eq("set_number", item.set_number)
-            .limit(2);
-          if (erroBusca) throw erroBusca;
-          if ((existentes ?? []).length > 1)
-            throw new Error(
-              "Existem séries duplicadas no servidor. A sincronização foi interrompida para preservar os dados.",
-            );
-          const existente = existentes?.[0];
-          let registroId: string | undefined;
-          if (item.pendente === "remover") {
-            if (existente) {
-              const { error } = await supabase
-                .from("workout_sets")
-                .delete()
-                .eq("id", existente.id)
-                .eq("session_id", sessaoAtual.id)
-                .eq("user_id", idUsuario);
-              if (error) throw error;
-            }
-          } else {
-            const reps = Number(item.reps);
-            const peso = Number(item.weight_kg.replace(",", "."));
-            if (
-              !Number.isInteger(reps) ||
-              reps < 1 ||
-              reps > 1000 ||
-              !Number.isFinite(peso) ||
-              peso < 0 ||
-              peso > 2000
-            ) {
-              throw new Error(
-                `Valores inválidos na série ${item.set_number} de ${item.exercise_name}.`,
-              );
-            }
-            const dados = {
-              user_id: idUsuario,
-              session_id: sessaoAtual.id,
-              exercise_id: item.exercise_id,
-              exercise_name: item.exercise_name,
-              set_number: item.set_number,
-              reps,
-              weight_kg: peso,
-            };
-            if (existente) {
-              const iguais =
-                Number(existente.reps) === reps &&
-                Number(existente.weight_kg) === peso;
-              if (!iguais && !permitirSobrescrever) {
-                setConflitoRemoto(true);
-                throw new Error(
-                  `${item.exercise_name}, série ${item.set_number}: existem valores diferentes no Supabase. Escolha explicitamente se deseja enviar sua versão local.`,
-                );
-              }
-              if (iguais) {
-                // Uma resposta de sucesso pode ter se perdido: confirmar sem regravar.
-                registroId = existente.id;
-              } else {
-                const { data, error } = await supabase
-                  .from("workout_sets")
-                  .update(dados)
-                  .eq("id", existente.id)
-                  .eq("user_id", idUsuario)
-                  .select("id")
-                  .single();
-                if (error) throw error;
-                registroId = data.id;
-              }
-            } else {
-              // O UUID é persistido antes da tentativa: repetir o envio é idempotente por PK.
-              const { data, error } = await supabase
-                .from("workout_sets")
-                .upsert({ id: item.registroId, ...dados }, { onConflict: "id" })
-                .select("id")
-                .single();
-              if (error) throw error;
-              registroId = data.id;
-            }
-          }
-          // Não confirma uma operação se o usuário alterou a série durante o envio.
-          const atuais = seriesRef.current.map((serie) =>
-            serie.chave === item.chave &&
-            serie.pendente === item.pendente &&
-            serie.reps === item.reps &&
-            serie.weight_kg === item.weight_kg
-              ? {
-                  ...serie,
-                  registroId:
-                    item.pendente === "remover" ? undefined : registroId,
-                  pendente: undefined,
-                }
-              : serie,
-          );
-          seriesRef.current = atuais;
-          setSeries(atuais);
-          await salvarLocal(atuais);
-        }
-        setOnline(true);
-        setConflitoRemoto(false);
-        setMensagem("✓ Séries sincronizadas com o Supabase.");
-      } catch (erro) {
-        setErroSincronizacao(
-          erro instanceof Error
-            ? erro.message
-            : "Falha ao sincronizar. Os dados locais foram preservados.",
-        );
-      } finally {
-        sincronizandoRef.current = false;
-        setSincronizando(false);
+      if (resultado.rascunho?.sessao.id === atual.id) {
+        const porChave = new Map(resultado.rascunho.series.map((serie) => [serie.chave, serie]));
+        const antesPorChave = new Map(antes.map((serie) => [serie.chave, serie]));
+        const atualizadas = seriesRef.current.map((serie) => {
+          const original = antesPorChave.get(serie.chave);
+          const remota = porChave.get(serie.chave);
+          return original && remota && mesmaOperacao(serie, original) ? remota : serie;
+        });
+        seriesRef.current = atualizadas; setSeries(atualizadas);
       }
-    },
-    [bloqueioSessao, planId, salvarLocal],
-  );
+      setConflitoRemoto(Boolean(resultado.conflito)); setErroSincronizacao(resultado.erro ?? "");
+      if (!resultado.erro) { setOnline(true); setMensagem("Treino sincronizado."); }
+    } catch {
+      setErroSincronizacao("Não foi possível sincronizar. Seus dados continuam guardados neste aparelho.");
+    } finally { sincronizandoRef.current = false; setSincronizando(false); }
+  }, [onVoltar, planId]);
 
   // Grava também mudanças de carga/repetições ainda não concluídas.
   useEffect(() => {
@@ -389,7 +256,7 @@ export default function TreinoAtivo({
         "Não foi possível salvar o rascunho no aparelho. Verifique o armazenamento.",
       ),
     );
-  }, [series, sessao, exercicios, intensidade, esforco, salvarLocal]);
+  }, [series, sessao, exercicios, intensidade, esforco, descanso, finalizacao, salvarLocal]);
 
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
@@ -407,16 +274,23 @@ export default function TreinoAtivo({
       window.removeEventListener("focus", aoVoltar);
     };
   }, [sincronizar]);
+  const operacoesPendentes = useMemo(() => JSON.stringify({
+    series: series.filter((serie) => serie.pendente).map(({ chave, pendente, registroId, reps, weight_kg, concluida }) => ({ chave, pendente, registroId, reps, weight_kg, concluida })),
+    finalizacao: finalizacao?.finishedAt,
+  }), [series, finalizacao]);
   useEffect(() => {
-    if (sessao && series.some((serie) => serie.pendente)) void sincronizar();
-  }, [sessao, series, sincronizar]);
+    if (!sessao || (!finalizacao && !seriesRef.current.some((serie) => serie.pendente))) return;
+    // Persist before sending. A failed attempt with unchanged operations must not
+    // immediately trigger another render/send loop.
+    void salvarLocal().then(() => sincronizar()).catch(() => setErroSincronizacao("Não foi possível proteger as alterações neste aparelho."));
+  }, [sessao, operacoesPendentes, salvarLocal, sincronizar, finalizacao]);
   useEffect(() => {
-    if (!sessao || !series.some((serie) => serie.pendente)) return;
+    if (!sessao || (!finalizacao && !seriesRef.current.some((serie) => serie.pendente))) return;
     const intervalo = setInterval(() => {
       void sincronizar();
     }, 12000);
     return () => clearInterval(intervalo);
-  }, [sessao, series, sincronizar]);
+  }, [sessao, operacoesPendentes, finalizacao, sincronizar]);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -431,6 +305,7 @@ export default function TreinoAtivo({
         );
       const idUsuario = usuarioEmCache.id;
       const local = await lerRascunho(idUsuario, planId);
+      usuarioRef.current = idUsuario;
       const sessaoUsuario = { user: usuarioEmCache };
       setUsuarioId(idUsuario);
       setPerfil(
@@ -439,6 +314,20 @@ export default function TreinoAtivo({
         ),
       );
 
+      if (local?.finalizacao) {
+        setExercicios(local.exercicios); exerciciosRef.current = local.exercicios;
+        setSeries(local.series); seriesRef.current = local.series;
+        setSessao(local.sessao); sessaoRef.current = local.sessao;
+        setIntensidade(local.intensidade); intensidadeRef.current = local.intensidade;
+        setEsforco(local.esforco); esforcoRef.current = local.esforco;
+        setFinalizacao(local.finalizacao); finalizacaoRef.current = local.finalizacao;
+        if (local.descanso) { setDescanso(local.descanso); descansoRef.current = local.descanso; }
+        setRestaurado(true); prontoRef.current = true;
+        setErroSincronizacao(local.erroSincronizacao ?? "");
+        setConflitoRemoto(Boolean(local.conflitoSincronizacao));
+        setMensagem("Treino encerrado neste aparelho. A conclusão aguarda confirmação do servidor.");
+        return;
+      }
       const { data: listaExercicios, error: erroExercicios } = await supabase
         .from("exercises")
         .select("id, name, sets_goal, reps_goal")
@@ -455,6 +344,8 @@ export default function TreinoAtivo({
           setSessao(local.sessao);
           setIntensidade(local.intensidade);
           setEsforco(local.esforco ?? "nao_informado");
+          if (local.descanso) { setDescanso(local.descanso); descansoRef.current = local.descanso; }
+          setFinalizacao(local.finalizacao); finalizacaoRef.current = local.finalizacao;
           setRestaurado(true);
           setBloqueioSessao(true);
           setMensagem(
@@ -505,6 +396,7 @@ export default function TreinoAtivo({
         });
       });
       setExercicios(base);
+      exerciciosRef.current = base;
 
       const { data: sessoesAtivas, error: erroSessoesAtivas } = await supabase
         .from("workout_sessions")
@@ -540,6 +432,8 @@ export default function TreinoAtivo({
           sessaoRef.current = local.sessao;
           setIntensidade(local.intensidade);
           setEsforco(local.esforco ?? "nao_informado");
+          if (local.descanso) { setDescanso(local.descanso); descansoRef.current = local.descanso; }
+          setFinalizacao(local.finalizacao); finalizacaoRef.current = local.finalizacao;
           setRestaurado(true);
           setBloqueioSessao(true);
           setMensagem(
@@ -565,6 +459,8 @@ export default function TreinoAtivo({
         setSessao(local.sessao);
         setIntensidade(local.intensidade);
         setEsforco(local.esforco ?? "nao_informado");
+          if (local.descanso) { setDescanso(local.descanso); descansoRef.current = local.descanso; }
+          setFinalizacao(local.finalizacao); finalizacaoRef.current = local.finalizacao;
         setRestaurado(true);
         setBloqueioSessao(true);
         setMensagem(
@@ -592,6 +488,8 @@ export default function TreinoAtivo({
       if (local?.sessao.id === ativa.id) {
         setIntensidade(local.intensidade);
         setEsforco(local.esforco ?? "nao_informado");
+          if (local.descanso) { setDescanso(local.descanso); descansoRef.current = local.descanso; }
+          setFinalizacao(local.finalizacao); finalizacaoRef.current = local.finalizacao;
         setRestaurado(true);
         setMensagem(
           "Treino recuperado. Seus ajustes e séries pendentes estão protegidos no aparelho.",
@@ -617,6 +515,8 @@ export default function TreinoAtivo({
           sessaoRef.current = local.sessao;
           setIntensidade(local.intensidade);
           setEsforco(local.esforco ?? "nao_informado");
+          if (local.descanso) { setDescanso(local.descanso); descansoRef.current = local.descanso; }
+          setFinalizacao(local.finalizacao); finalizacaoRef.current = local.finalizacao;
           setRestaurado(true);
           prontoRef.current = true;
           setMensagem(
@@ -651,7 +551,7 @@ export default function TreinoAtivo({
       .then((valor) => {
         const tempo = Number(valor);
         if (ativo && OPCOES_DESCANSO.some((opcao) => opcao === tempo)) {
-          setDuracaoDescanso(tempo);
+          setDescanso((atual) => ({ ...atual, duracao: tempo }));
         }
       })
       .catch(() => {});
@@ -660,28 +560,21 @@ export default function TreinoAtivo({
     };
   }, []);
   useEffect(() => {
-    // A tela inativa não precisa redesenhar centenas de controles a cada segundo.
-    if (!sessao || !estaEmFoco) return;
-    setAgora(Date.now());
-    const intervalo = setInterval(() => setAgora(Date.now()), 1000);
-    return () => clearInterval(intervalo);
-  }, [sessao, estaEmFoco]);
-  useEffect(() => {
-    if (!estaEmFoco || fimDescanso === null || descansoPausado) return;
-    const atualizar = () => {
-      const faltam = Math.max(0, Math.ceil((fimDescanso - Date.now()) / 1000));
-      setSegundosRestantes(faltam);
-      if (faltam === 0) {
-        setFimDescanso(null);
-        setDescansoPausado(false);
-        setDescansoConcluido(true);
-        setMensagem("✓ Descanso concluído. Pode continuar o treino.");
-      }
-    };
-    atualizar();
-    const intervalo = setInterval(atualizar, 1000);
-    return () => clearInterval(intervalo);
-  }, [fimDescanso, descansoPausado, estaEmFoco]);
+    if (!usuarioId || !exercicios.length) return;
+    let ativo = true; setErroReferencia("");
+    carregarUltimasSeries(usuarioId, exercicios.map((exercicio) => exercicio.id))
+      .then((referencias) => { if (ativo) setUltimasSeries(referencias); })
+      .catch(() => { if (ativo) setErroReferencia("Não foi possível consultar a última sessão. Seus campos atuais continuam disponíveis."); });
+    return () => { ativo = false; };
+  }, [usuarioId, exercicios]);
+  const seriesPorExercicio = useMemo(() => {
+    const grupos = new Map<string, SerieAtiva[]>();
+    for (const serie of series) {
+      const grupo = grupos.get(serie.exercise_id);
+      if (grupo) grupo.push(serie); else grupos.set(serie.exercise_id, [serie]);
+    }
+    return grupos;
+  }, [series]);
 
   const proximaSerie = useMemo(
     () => series.find((item) => !item.concluida) ?? null,
@@ -705,17 +598,15 @@ export default function TreinoAtivo({
         ),
     [series],
   );
-  const duracaoAtual = sessao
-    ? Math.max(
-        0,
-        Math.floor((agora - new Date(sessao.started_at).getTime()) / 60000),
-      )
-    : 0;
-
   async function iniciarSessao() {
     if (!usuarioId || !exercicios.length) return;
     setSalvando(true);
     try {
+      const pendentes = await listarRascunhos(usuarioId);
+      if (pendentes.some((rascunho) => rascunho.finalizacao || rascunho.series.some((serie) => serie.pendente))) {
+        avisar("Treino aguardando sincronização", "Abra o treino pendente e confirme sua sincronização antes de iniciar outra sessão.");
+        return;
+      }
       const { data: ativas, error: erroAtivas } = await supabase
         .from("workout_sessions")
         .select("id, plan_id, started_at")
@@ -782,7 +673,7 @@ export default function TreinoAtivo({
       prontoRef.current = true;
       // Persistir a sessão antes de permitir qualquer registro.
       await salvarLocal();
-      setAgora(Date.now());
+
       setMensagem(
         "Treino iniciado. Marque cada série ao terminá-la; as cargas e repetições serão salvas como registro desta sessão.",
       );
@@ -798,75 +689,36 @@ export default function TreinoAtivo({
     }
   }
 
-  function atualizarCampo(
-    chave: string,
-    campo: "reps" | "weight_kg",
-    valor: string,
-  ) {
-    setSeries((atuais) =>
-      atuais.map((item) =>
-        item.chave === chave ? { ...item, [campo]: valor } : item,
-      ),
-    );
-  }
+  const atualizarCampo = useCallback((chave: string, campo: "reps" | "weight_kg", valor: string) => {
+    if (finalizacaoRef.current || bloqueioRef.current || salvandoRef.current || chaveSalvandoRef.current) return;
+    const atualizadas = seriesRef.current.map((item) => item.chave === chave && !item.concluida && !item.pendente ? { ...item, [campo]: valor } : item);
+    seriesRef.current = atualizadas; setSeries(atualizadas);
+  }, []);
+  const alterarDescanso = useCallback((valor: DescansoTreino) => {
+    if (finalizacaoRef.current) return;
+    descansoRef.current = valor; setDescanso(valor);
+  }, []);
+  const mudarPreferenciaDescanso = useCallback((valor: number) => {
+    const atual = descansoRef.current;
+    alterarDescanso({ ...atual, duracao: valor, fimEm: atual.fimEm === null ? null : Date.now() + valor * 1000,
+      segundosPausados: atual.pausado ? valor : 0 });
+    AsyncStorage.setItem(CHAVE_PREFERENCIA_DESCANSO, String(valor)).catch(() => {});
+  }, [alterarDescanso]);
+  const iniciarDescanso = useCallback(() => {
+    const atual = descansoRef.current;
+    alterarDescanso({ ...atual, fimEm: Date.now() + atual.duracao * 1000, pausado: false, segundosPausados: 0 });
+  }, [alterarDescanso]);
+  const copiarUltimaSessao = useCallback((id: string) => {
+    if (finalizacaoRef.current || bloqueioRef.current || salvandoRef.current || chaveSalvandoRef.current || sincronizandoRef.current) return;
+    const anterior = ultimasSeries[id]; if (!anterior) return;
+    const atualizadas = copiarSeriesAnteriores(seriesRef.current, anterior.series, id);
+    seriesRef.current = atualizadas; setSeries(atualizadas);
+    setMensagem("Valores da última sessão copiados para as séries abertas deste rascunho. Confira antes de concluir.");
+  }, [ultimasSeries]);
 
-  function iniciarDescanso() {
-    setDescansoConcluido(false);
-    setSegundosRestantes(duracaoDescanso);
-    setDescansoPausado(false);
-    setFimDescanso(Date.now() + duracaoDescanso * 1000);
-  }
-  function pausarDescanso() {
-    if (fimDescanso !== null)
-      setSegundosRestantes(
-        Math.max(0, Math.ceil((fimDescanso - Date.now()) / 1000)),
-      );
-    setFimDescanso(null);
-    setDescansoPausado(true);
-  }
-  function continuarDescanso() {
-    if (segundosRestantes > 0)
-      setFimDescanso(Date.now() + segundosRestantes * 1000);
-    setDescansoPausado(false);
-  }
-  function pularDescanso() {
-    setDescansoConcluido(false);
-    setFimDescanso(null);
-    setSegundosRestantes(0);
-    setDescansoPausado(false);
-  }
-
-  function mudarPreferenciaDescanso(valor: number) {
-    setDuracaoDescanso(valor);
-    setDescansoConcluido(false);
-    if (fimDescanso !== null) {
-      setFimDescanso(Date.now() + valor * 1000);
-    }
-    setSegundosRestantes(valor);
-    AsyncStorage.setItem(CHAVE_PREFERENCIA_DESCANSO, String(valor)).catch(
-      () => {},
-    );
-  }
-
-  function ajustarNumero(
-    serie: SerieAtiva,
-    campo: "reps" | "weight_kg",
-    delta: number,
-  ) {
-    if (serie.concluida || chaveEmSalvamento !== null || salvando) return;
-    const valorAtual = Number(serie[campo].replace(",", "."));
-    const base = Number.isFinite(valorAtual) ? valorAtual : 0;
-    const minimo = campo === "reps" ? 1 : 0;
-    const maximo = campo === "reps" ? 1000 : 2000;
-    const proximo = Math.max(
-      minimo,
-      Math.min(maximo, Math.round((base + delta) * 10) / 10),
-    );
-    atualizarCampo(serie.chave, campo, String(proximo));
-  }
-
-  async function alternarSerie(serie: SerieAtiva) {
-    if (!sessao || !usuarioId || bloqueioSessao) {
+  const alternarSerie = useCallback(async (serie: SerieAtiva) => {
+    if (finalizacaoRef.current || salvandoRef.current || chaveSalvandoRef.current) return;
+    if (!sessaoRef.current || !usuarioRef.current || bloqueioRef.current) {
       avisar(
         "Treino indisponível",
         "Inicie o treino ou confira a situação da sessão antes de registrar séries.",
@@ -891,6 +743,7 @@ export default function TreinoAtivo({
       );
       return;
     }
+    chaveSalvandoRef.current = serie.chave;
     setChaveEmSalvamento(serie.chave);
     const proximo: SerieAtiva = serie.concluida
       ? {
@@ -931,23 +784,15 @@ export default function TreinoAtivo({
         "O armazenamento local falhou. Verifique o espaço disponível antes de continuar.",
       );
     } finally {
+      chaveSalvandoRef.current = null;
       setChaveEmSalvamento(null);
     }
     void sincronizar();
-  }
+  }, [iniciarDescanso, salvarLocal, sincronizar]);
 
   async function finalizarSessao() {
     if (!sessao || !usuarioId || bloqueioSessao) return;
-    if (
-      sincronizandoRef.current ||
-      seriesRef.current.some((item) => item.pendente)
-    ) {
-      avisar(
-        "Sincronização pendente",
-        "Conecte-se à internet e toque em Sincronizar agora antes de finalizar. Nenhum dado local será descartado.",
-      );
-      return;
-    }
+    if (sincronizandoRef.current || finalizacaoRef.current) return;
     if (totalSeriesConcluidas === 0) {
       avisar(
         "Nenhuma série concluída",
@@ -991,34 +836,10 @@ export default function TreinoAtivo({
           })
         : null;
 
-      // Primeiro marca a sessão como concluída usando apenas colunas básicas.
-      // Assim, a sessão não fica presa como "em_andamento" caso falte alguma
-      // coluna opcional da migração de métricas/calorias.
-      const { data: sessaoConcluida, error: erroConclusao } = await supabase
-        .from("workout_sessions")
-        .update({
-          finished_at: final.toISOString(),
-          status: "concluido",
-          notes: `Treino concluído no modo ativo${esforco !== "nao_informado" ? `;esforco_percebido=${esforco}` : ""}`,
-        })
-        .eq("id", sessao.id)
-        .eq("user_id", usuarioId)
-        .select("id, status")
-        .maybeSingle();
-
-      if (erroConclusao) throw erroConclusao;
-      if (!sessaoConcluida) {
-        throw new Error(
-          "O banco não confirmou a conclusão desta sessão. Confira se você está conectado e tente finalizar novamente.",
-        );
-      }
-      // Uma gravação confirmada invalida o pequeno cache de navegação.
-      registrarMudancaDeDados();
-
-      let erroDetalhes: string | null = null;
-      const { error: erroMetadados } = await supabase
-        .from("workout_sessions")
-        .update({
+      const conclusao: FinalizacaoTreino = {
+        finishedAt: final.toISOString(),
+        notes: "Treino concluído no modo ativo" + (esforco !== "nao_informado" ? ";esforco_percebido=" + esforco : ""),
+        metricas: {
           duration_minutes: duracaoMinutos,
           intensity: intensidade,
           active_calories: estimativa?.caloriasAtivas ?? null,
@@ -1038,34 +859,23 @@ export default function TreinoAtivo({
               (soma, serie) => soma + (Number(serie.reps) || 0),
               0,
             ),
-        })
-        .eq("id", sessao.id)
-        .eq("user_id", usuarioId);
-      if (erroMetadados) erroDetalhes = erroMetadados.message;
-
-      pularDescanso();
-      prontoRef.current = false;
-      await apagarRascunho(usuarioId, planId).catch(() => {});
-      setSessao(null);
-      const resumo = `Duração: ${duracaoMinutos.toLocaleString("pt-BR")} min\nExercícios: ${estimativa?.quantidadeExercicios ?? exerciciosFeitos.size}\nSéries concluídas: ${estimativa?.quantidadeSeries ?? totalSeriesConcluidas}\nRepetições: ${estimativa?.repeticoesTotais ?? seriesFeitas.reduce((soma, serie) => soma + (Number(serie.reps) || 0), 0)}\n${estimativa ? `Calorias ativas estimadas: ${estimativa.caloriasAtivas} kcal\nMET: ${estimativa.met}` : "Calorias não calculadas: confira os dados do perfil."}`;
-      if (erroDetalhes) {
-        avisar(
-          "Treino concluído",
-          `${resumo}\n\nO treino foi finalizado e já deve aparecer na Frequência. Alguns detalhes de duração/calorias não foram salvos. Execute a migração SQL atualizada.\n\nDetalhe: ${erroDetalhes}`,
-        );
-      } else {
-        avisar(
-          "Treino concluído",
-          `${resumo}\n\nO registro foi salvo e deve aparecer na Frequência e na Evolução dos treinos. A estimativa não é uma medição exata.`,
-        );
-      }
-      onVoltar();
+        },
+      };
+      const anterior = finalizacaoRef.current;
+      finalizacaoRef.current = conclusao;
+      const rascunho = montarRascunho();
+      if (!rascunho) throw new Error("Não foi possível preparar a conclusão local.");
+      try { await gravarRascunho(rascunho); }
+      catch (erro) { finalizacaoRef.current = anterior; throw erro; }
+      setFinalizacao(conclusao);
+      setMensagem("Encerramento protegido no aparelho. O treino aguarda confirmação do servidor e manterá este horário, mesmo offline.");
+      void sincronizar();
     } catch (erro) {
       avisar(
         "Erro ao finalizar",
         erro instanceof Error
           ? erro.message
-          : "Não foi possível salvar o fim da sessão.",
+          : "Não foi possível proteger o encerramento neste aparelho. Tente novamente.",
       );
     } finally {
       setSalvando(false);
@@ -1101,7 +911,7 @@ export default function TreinoAtivo({
         </Text>
         {mensagem ? <Text style={estilos.mensagem}>{mensagem}</Text> : null}
         {sessao &&
-        (restaurado ||
+        (finalizacao || restaurado ||
           !online ||
           erroSincronizacao ||
           series.some((s) => s.pendente)) ? (
@@ -1120,7 +930,7 @@ export default function TreinoAtivo({
                   ? "Sincronizando com o Supabase..."
                   : series.some((s) => s.pendente)
                     ? `${series.filter((s) => s.pendente).length} alteração(ões) aguardando envio.`
-                    : "Treino salvo e sincronizado."}
+                    : finalizacao ? "Encerramento aguardando confirmação. Você pode sair desta tela; os dados permanecem protegidos." : "Treino salvo e sincronizado."}
             </Text>
             {erroSincronizacao ? (
               <Text style={estilos.aviso}>{erroSincronizacao}</Text>
@@ -1201,7 +1011,7 @@ export default function TreinoAtivo({
             ) : null}
             {!bloqueioSessao &&
             !conflitoRemoto &&
-            series.some((s) => s.pendente) ? (
+            (finalizacao || series.some((s) => s.pendente)) ? (
               <TouchableOpacity
                 disabled={sincronizando}
                 style={estilos.botaoSecundario}
@@ -1243,15 +1053,7 @@ export default function TreinoAtivo({
           <>
             <View style={[estilos.cartaoResumo, { borderColor: corTema }]}>
               <Text style={estilos.rotulo}>TEMPO DE TREINO</Text>
-              <Text style={[estilos.cronometroGrande, { color: corTema }]}>
-                {formatarTempo(
-                  duracaoAtual * 60 +
-                    (Math.floor(
-                      (agora - new Date(sessao.started_at).getTime()) / 1000,
-                    ) %
-                      60),
-                )}
-              </Text>
+              <CronometroTreino inicio={sessao.started_at} fim={finalizacao?.finishedAt} ativo={estaEmFoco} cor={corTema} />
               <Text style={estilos.progressoTexto}>
                 {totalSeriesConcluidas} de {series.length} séries ·{" "}
                 {progressoPercentual}% concluído
@@ -1300,255 +1102,13 @@ export default function TreinoAtivo({
                 </View>
               </View>
             </View>
-            <View style={estilos.cartao}>
-              <Text style={estilos.tituloCartao}>Cronômetro de descanso</Text>
-              <Text style={[estilos.cronometroDescanso, { color: corTema }]}>
-                {formatarTempo(segundosRestantes)}
-              </Text>
-              {descansoConcluido ? (
-                <Text style={[estilos.descansoPronto, { color: corTema }]}>
-                  ✓ Descanso concluído · pode continuar
-                </Text>
-              ) : null}
-              <View style={estilos.opcoesDescanso}>
-                {OPCOES_DESCANSO.map((valor) => (
-                  <TouchableOpacity
-                    key={valor}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Descanso de ${valor} segundos`}
-                    accessibilityState={{ selected: duracaoDescanso === valor }}
-                    onPress={() => mudarPreferenciaDescanso(valor)}
-                    style={[
-                      estilos.opcaoDescanso,
-                      duracaoDescanso === valor && {
-                        borderColor: corTema,
-                        backgroundColor: `${corTema}20`,
-                      },
-                    ]}
-                  >
-                    <Text style={estilos.textoOpcao}>{valor}s</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <View style={estilos.linhaBotoes}>
-                {descansoPausado ? (
-                  <TouchableOpacity
-                    style={estilos.botaoSecundario}
-                    onPress={continuarDescanso}
-                  >
-                    <Text style={estilos.textoBotaoSecundario}>Continuar</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={estilos.botaoSecundario}
-                    onPress={pausarDescanso}
-                    disabled={fimDescanso === null}
-                  >
-                    <Text style={estilos.textoBotaoSecundario}>Pausar</Text>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={estilos.botaoSecundario}
-                  onPress={iniciarDescanso}
-                >
-                  <Text style={estilos.textoBotaoSecundario}>Reiniciar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={estilos.botaoSecundario}
-                  onPress={pularDescanso}
-                >
-                  <Text style={estilos.textoBotaoSecundario}>Pular</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={estilos.secundario}>
-                Ao concluir uma série, o descanso começa automaticamente. Seu
-                tempo preferido fica salvo neste aparelho.
-              </Text>
-            </View>
+            <PainelDescanso descanso={descanso} ativo={estaEmFoco} bloqueado={Boolean(finalizacao) || bloqueioSessao} cor={corTema} onAlterar={alterarDescanso} onPreferencia={mudarPreferenciaDescanso} />
             <Text style={estilos.tituloSecao}>Séries do treino</Text>
-            {exercicios.map((exercicio) => (
-              <View key={exercicio.id} style={estilos.cartaoExercicio}>
-                <Text style={estilos.tituloCartao}>{exercicio.name}</Text>
-                <Text style={estilos.secundario}>
-                  {
-                    series.filter(
-                      (item) =>
-                        item.exercise_id === exercicio.id && item.concluida,
-                    ).length
-                  }
-                  /
-                  {
-                    series.filter((item) => item.exercise_id === exercicio.id)
-                      .length
-                  }{" "}
-                  séries concluídas
-                </Text>
-                <Text style={estilos.secundario}>
-                  {exercicio.sets_goal} séries previstas · {exercicio.reps_goal}{" "}
-                  repetições
-                </Text>
-                {series
-                  .filter((item) => item.exercise_id === exercicio.id)
-                  .map((serie) => (
-                    <View
-                      key={serie.chave}
-                      style={[
-                        estilos.cartaoSerie,
-                        serie.concluida && {
-                          borderColor: corTema,
-                          backgroundColor: `${corTema}12`,
-                        },
-                        !serie.concluida &&
-                          proximaSerie?.chave === serie.chave && {
-                            borderColor: `${corTema}80`,
-                          },
-                      ]}
-                    >
-                      <Text style={estilos.rotulo}>
-                        Série {serie.set_number}
-                      </Text>
-                      <View style={estilos.linhaCampos}>
-                        <View style={estilos.campo}>
-                          <Text style={estilos.rotuloCampo}>
-                            Repetições realizadas
-                          </Text>
-                          <TextInput
-                            style={estilos.input}
-                            value={serie.reps}
-                            onChangeText={(v) =>
-                              atualizarCampo(serie.chave, "reps", v)
-                            }
-                            keyboardType="number-pad"
-                            editable={
-                              !serie.concluida &&
-                              !chaveEmSalvamento &&
-                              !bloqueioSessao
-                            }
-                          />
-                          <View style={estilos.controlesRapidos}>
-                            <TouchableOpacity
-                              accessibilityRole="button"
-                              accessibilityLabel={`Diminuir repetições da série ${serie.set_number}`}
-                              disabled={
-                                serie.concluida ||
-                                chaveEmSalvamento !== null ||
-                                salvando ||
-                                bloqueioSessao
-                              }
-                              onPress={() => ajustarNumero(serie, "reps", -1)}
-                              style={estilos.botaoAjuste}
-                            >
-                              <Text style={estilos.textoAjuste}>−1</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              accessibilityRole="button"
-                              accessibilityLabel={`Aumentar repetições da série ${serie.set_number}`}
-                              disabled={
-                                serie.concluida ||
-                                chaveEmSalvamento !== null ||
-                                salvando ||
-                                bloqueioSessao
-                              }
-                              onPress={() => ajustarNumero(serie, "reps", 1)}
-                              style={estilos.botaoAjuste}
-                            >
-                              <Text style={estilos.textoAjuste}>+1</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                        <View style={estilos.campo}>
-                          <Text style={estilos.rotuloCampo}>Carga (kg)</Text>
-                          <TextInput
-                            style={estilos.input}
-                            value={serie.weight_kg}
-                            onChangeText={(v) =>
-                              atualizarCampo(serie.chave, "weight_kg", v)
-                            }
-                            keyboardType="decimal-pad"
-                            editable={
-                              !serie.concluida &&
-                              !chaveEmSalvamento &&
-                              !bloqueioSessao
-                            }
-                          />
-                          <View style={estilos.controlesRapidos}>
-                            <TouchableOpacity
-                              accessibilityRole="button"
-                              accessibilityLabel={`Diminuir carga da série ${serie.set_number} em 2,5 kg`}
-                              disabled={
-                                serie.concluida ||
-                                chaveEmSalvamento !== null ||
-                                salvando ||
-                                bloqueioSessao
-                              }
-                              onPress={() =>
-                                ajustarNumero(serie, "weight_kg", -2.5)
-                              }
-                              style={estilos.botaoAjuste}
-                            >
-                              <Text style={estilos.textoAjuste}>−2,5</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              accessibilityRole="button"
-                              accessibilityLabel={`Aumentar carga da série ${serie.set_number} em 2,5 kg`}
-                              disabled={
-                                serie.concluida ||
-                                chaveEmSalvamento !== null ||
-                                salvando ||
-                                bloqueioSessao
-                              }
-                              onPress={() =>
-                                ajustarNumero(serie, "weight_kg", 2.5)
-                              }
-                              style={estilos.botaoAjuste}
-                            >
-                              <Text style={estilos.textoAjuste}>+2,5</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      </View>
-                      <TouchableOpacity
-                        disabled={
-                          chaveEmSalvamento !== null ||
-                          salvando ||
-                          sincronizando ||
-                          bloqueioSessao
-                        }
-                        onPress={() => alternarSerie(serie)}
-                        style={[
-                          estilos.botaoSerie,
-                          {
-                            backgroundColor: serie.concluida
-                              ? "#26342B"
-                              : corTema,
-                          },
-                        ]}
-                      >
-                        {chaveEmSalvamento === serie.chave ? (
-                          <ActivityIndicator
-                            color={serie.concluida ? corTema : "#101312"}
-                          />
-                        ) : (
-                          <Text
-                            style={[
-                              estilos.textoPrimario,
-                              serie.concluida && { color: corTema },
-                            ]}
-                          >
-                            {serie.pendente
-                              ? serie.pendente === "salvar"
-                                ? "✓ Concluída · aguardando envio"
-                                : "↻ Desmarcada · aguardando envio"
-                              : serie.concluida
-                                ? "✓ Série concluída · desfazer"
-                                : "Marcar série concluída"}
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-              </View>
-            ))}
+            {erroReferencia ? <Text style={estilos.secundario}>{erroReferencia}</Text> : null}
+            {exercicios.map((exercicio) => <CartaoExercicioTreino key={exercicio.id} exercicio={exercicio}
+              series={seriesPorExercicio.get(exercicio.id) ?? []} anterior={ultimasSeries[exercicio.id]}
+              cor={corTema} proximaChave={proximaSerie?.chave} bloqueado={salvando || sincronizando || bloqueioSessao || Boolean(finalizacao)}
+              chaveSalvando={chaveEmSalvamento} onCampo={atualizarCampo} onAlternar={alternarSerie} onCopiar={copiarUltimaSessao} />)}
             <View style={estilos.cartao}>
               <Text style={estilos.tituloCartao}>Intensidade da sessão</Text>
               <Text style={estilos.secundario}>
@@ -1565,6 +1125,7 @@ export default function TreinoAtivo({
                 ).map(([valor, rotulo]) => (
                   <TouchableOpacity
                     key={valor}
+                    disabled={Boolean(finalizacao)}
                     onPress={() => setIntensidade(valor)}
                     style={[
                       estilos.opcaoDescanso,
@@ -1607,6 +1168,7 @@ export default function TreinoAtivo({
                 ).map(([valor, rotulo]) => (
                   <TouchableOpacity
                     key={valor}
+                    disabled={Boolean(finalizacao)}
                     onPress={() => setEsforco(valor)}
                     style={[
                       estilos.opcaoDescanso,
@@ -1626,7 +1188,7 @@ export default function TreinoAtivo({
                   chaveEmSalvamento !== null ||
                   sincronizando ||
                   bloqueioSessao ||
-                  series.some((serie) => serie.pendente)
+                  Boolean(finalizacao)
                 }
                 onPress={finalizarSessao}
                 style={[estilos.botaoPrimario, { backgroundColor: corTema }]}
@@ -1634,9 +1196,7 @@ export default function TreinoAtivo({
                 <Text style={estilos.textoPrimario}>
                   {salvando
                     ? "Salvando..."
-                    : series.some((serie) => serie.pendente)
-                      ? "Sincronize as séries para finalizar"
-                      : "Finalizar e salvar treino"}
+                    : finalizacao ? "Encerramento aguardando confirmação" : "Finalizar e salvar treino"}
                 </Text>
               </TouchableOpacity>
             </View>

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useVoltarDoModal } from "../servicos/voltarModal";
 import {
   ActivityIndicator,
   Image,
@@ -119,6 +120,10 @@ export default function MeusTreinos({
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [fotoCarregandoId, setFotoCarregandoId] = useState<string | null>(null);
+  useVoltarDoModal(Boolean(treinoSelecionado), () => { setTreinoSelecionado(null); setExercicioEditando(null); setExercicioParaCarga(null); setMostrarFormularioExercicio(false); });
+  useVoltarDoModal(mostrarFormularioExercicio, () => setMostrarFormularioExercicio(false));
+  useVoltarDoModal(Boolean(exercicioEditando), () => setExercicioEditando(null));
+  useVoltarDoModal(Boolean(exercicioParaCarga), () => setExercicioParaCarga(null));
   const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView> | null>(
     null,
   );
@@ -685,6 +690,7 @@ export default function MeusTreinos({
                 : "jpg";
       const respostaImagem = await fetch(imagem.uri);
       const arquivoImagem = await respostaImagem.arrayBuffer();
+      // eslint-disable-next-line react-hooks/purity -- Timestamp is created in the async photo button handler, never during render.
       const novoCaminho = `${usuarioId}/${exercicio.id}/${Date.now()}.${extensao}`;
       const { error: erroUpload } = await supabase.storage
         .from("exercise-photos")
