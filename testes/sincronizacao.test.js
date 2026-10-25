@@ -47,5 +47,10 @@ const draft = { versao: 1, usuarioId: "u1", planId: "p1", planName: "Plano", ses
   await local.gravarRascunho({ ...draft, series: [{ ...serie, weight_kg: "25" }] });
   const conflito = await sync.sincronizarRascunho("u1", "p1");
   assert.equal(conflito.conflito, true); assert.equal(state.sets[0].weight_kg, 20); assert.equal((await local.lerRascunho("u1", "p1")).series[0].weight_kg, "25");
+  await local.gravarRascunho({ ...draft, series: [{ ...serie, weight_kg: "25", baseRemota: { id: "r1", reps: 10, weight_kg: 20 } }] });
+  const correcao = await sync.sincronizarRascunho("u1", "p1"); assert.equal(correcao.conflito, undefined); assert.equal(state.sets[0].weight_kg, 25, "Correção explícita aplica somente sobre a base conhecida");
+  state.sets[0].weight_kg = 30;
+  await local.gravarRascunho({ ...draft, series: [{ ...serie, weight_kg: "35", baseRemota: { id: "r1", reps: 10, weight_kg: 25 } }] });
+  assert.equal((await sync.sincronizarRascunho("u1", "p1")).conflito, true); assert.equal(state.sets[0].weight_kg, 30, "Mudança concorrente não é sobrescrita");
   console.log("OK — resposta perdida, reenvio idempotente, conclusão offline e conflito preservado");
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -99,7 +99,9 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
         const iguais = existente && Number(existente.reps) === reps && Number(existente.weight_kg) === peso;
         if (iguais) registroId = existente.id;
         else if (existente) {
-          if (!permitirSobrescrever) throw new ConflitoTreino(`${item.exercise_name}, série ${item.set_number}: existem valores diferentes no servidor. Confirme se deseja enviar sua versão local.`);
+          const base = item.baseRemota;
+          const mesmaBase = base && existente.id === base.id && Number(existente.reps) === base.reps && Number(existente.weight_kg) === base.weight_kg;
+          if (!permitirSobrescrever && !mesmaBase) throw new ConflitoTreino(`${item.exercise_name}, série ${item.set_number}: existem valores diferentes no servidor. Confirme se deseja enviar sua versão local.`);
           const { data, error } = await supabase.from("workout_sets").update(dados)
             .eq("id", existente.id).eq("user_id", usuarioId).eq("session_id", sessaoId)
             .eq("reps", existente.reps).eq("weight_kg", existente.weight_kg).select("id").maybeSingle();

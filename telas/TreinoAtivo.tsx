@@ -687,7 +687,7 @@ export default function TreinoAtivo({
 
   const atualizarCampo = useCallback((chave: string, campo: "reps" | "weight_kg", valor: string) => {
     if (finalizacaoRef.current || bloqueioRef.current || salvandoRef.current || chaveSalvandoRef.current) return;
-    const atualizadas = seriesRef.current.map((item) => item.chave === chave && !item.excluida && !item.concluida && !item.pendente ? { ...item, [campo]: valor } : item);
+    const atualizadas = seriesRef.current.map((item) => item.chave === chave && !item.excluida && !item.concluida && item.pendente !== "salvar" ? { ...item, [campo]: valor } : item);
     seriesRef.current = atualizadas; setSeries(atualizadas);
   }, []);
   const alterarDescanso = useCallback((valor: DescansoTreino) => {
@@ -742,12 +742,7 @@ export default function TreinoAtivo({
     chaveSalvandoRef.current = serie.chave;
     setChaveEmSalvamento(serie.chave);
     const proximo: SerieAtiva = serie.concluida
-      ? {
-          ...serie,
-          concluida: false,
-          pendente: serie.registroId ? "remover" : undefined,
-          registroId: serie.registroId,
-        }
+      ? { ...retirarSerie(serie), excluida: false }
       : {
           ...serie,
           reps: String(reps),

@@ -108,6 +108,9 @@ function filtered(table, search) {
     assert.equal(await page.getByRole("button", { name: "Concluir Remada academia viagem, série 3", exact: true }).count(), 0);
     await page.getByRole("button", { name: "Concluir Remada academia viagem, série 1", exact: true }).click();
     await page.getByRole("button", { name: "Concluir Agachamento teste, série 1", exact: true }).click();
+    await page.getByRole("button", { name: "Desmarcar Agachamento teste, série 1", exact: true }).click();
+    await reps.fill("15");
+    await page.getByRole("button", { name: "Concluir Agachamento teste, série 1", exact: true }).click();
     await page.waitForFunction(key => JSON.parse(localStorage.getItem(key)).series[0].pendente === "salvar", draftKey);
     backendOffline = true; await context.setOffline(false); await page.reload();
     await page.getByRole("button", { name: /Continuar treino: Plano teste/ }).click();

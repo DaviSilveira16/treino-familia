@@ -14,7 +14,8 @@ export function criarExercicioSessao(nome: string, quantidade: number, repeticoe
 }
 
 export function retirarSerie(serie: SerieRascunho): SerieRascunho {
-  return { ...serie, excluida: true, concluida: false, pendente: serie.registroId ? "remover" : undefined };
+  return { ...serie, excluida: true, concluida: false, pendente: serie.registroId ? "remover" : undefined,
+    baseRemota: serie.baseRemota ?? (serie.registroId ? { id: serie.registroId, reps: Number(serie.reps), weight_kg: Number(serie.weight_kg.replace(",", ".")) } : undefined) };
 }
 export function acrescentarSerie(exercicio: PlanoExercicio, series: SerieRascunho[]): SerieRascunho {
   const doExercicio = series.filter(s => s.exercise_id === exercicio.id);
