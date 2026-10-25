@@ -23,11 +23,12 @@ const tables = {
   workout_sets: [1, 2].map(set_number => ({ id: `old-set-${set_number}`, session_id: oldSession.id, user_id: uid, exercise_id: eid, exercise_name: "Agachamento teste", set_number, reps: 8, weight_kg: 30 })),
   exercise_load_defaults: [1, 2].map(set_number => ({ id: `default-${set_number}`, exercise_id: eid, user_id: uid, set_number, reps: 10, weight_kg: 20 })),
   family_members: [{ user_id: uid, family_id: "family-a", role: "owner" }],
-  families: [{ id: "family-a", name: "Família teste", owner_id: uid, invite_code: "TESTE" }],
+  families: [{ id: "family-a", name: "Família teste", owner_user_id: uid, invite_code: "TESTE" }, { id: "family-c", name: "Amigos da academia", owner_user_id: "outro-usuario", invite_code: "AMIGOS" }],
   community_posts: Array.from({ length: 12 }, (_, i) => ({ id: `post-${String(i).padStart(2, "0")}`, family_id: "family-a", user_id: uid, author_name: "Teste", content: `Publicação de teste ${i + 1}`, post_type: "texto", image_path: null, workout_plan_name: null, workout_snapshot: null, created_at: new Date(now - i * 60000).toISOString() })),
   cardio_activities: [{ id: "cardio-a", user_id: uid, nome: "Escadas teste", tipo: "Escadas", duracao_min: 10, distancia_km: null, calorias: null, observacoes: null }], cardio_sessions: [],
 };
 let backendOffline = false, feedPages = 0;
+let releasePost, releaseFeed, holdPost = false, holdFeedFamily = null, postCounter = 0;
 const server = http.createServer((req, res) => {
   let requestPath; try { requestPath = decodeURIComponent(new URL(req.url, "http://localhost").pathname); } catch { res.writeHead(400).end(); return; }
   const dist = path.resolve(root, "dist"), file = path.resolve(dist, `.${requestPath}`);
@@ -66,13 +67,35 @@ function filtered(table, search) {
       const headers = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS", "content-type": "application/json" };
       if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
       if (url.pathname === "/auth/v1/user") return route.fulfill({ json: user, headers });
+      if (url.pathname.endsWith("/rpc/entrar_na_familia_por_codigo")) {
+        const family = tables.families.find(f => f.invite_code === request.postDataJSON().p_codigo);
+        if (!family) return route.fulfill({ status: 400, json: { message: "Convite inválido" }, headers });
+        if (!tables.family_members.some(m => m.user_id === uid && m.family_id === family.id)) tables.family_members.push({ user_id: uid, family_id: family.id, role: "member" });
+        return route.fulfill({ json: true, headers });
+      }
+      if (url.pathname.endsWith("/rpc/resumo_painel_familia_por_id")) {
+        const id = request.postDataJSON().p_family_id;
+        return route.fulfill({ json: [{ family_id: id, user_id: uid, display_name: `Participante de ${id}`, workouts_this_week: 1 }, { family_id: "fora-do-grupo", user_id: "outro", display_name: "Não exibir outro grupo" }], headers });
+      }
       if (url.pathname.includes("/rpc/")) return route.fulfill({ json: url.pathname.endsWith("tf_resumo_semanal") ? { treinos: 1, cardios: 0, minutos: 10, calorias: 0, caloriasDisponiveis: 0 } : [], headers });
       const table = url.pathname.split("/").pop(); if (!(table in tables)) return route.fulfill({ json: [], headers });
       if (table === "community_posts") feedPages++;
       let rows = filtered(table, url.searchParams);
+      if (table === "community_posts" && request.method() === "GET" && url.searchParams.get("family_id") === `eq.${holdFeedFamily}`) {
+        holdFeedFamily = null; await new Promise(resolve => { releaseFeed = resolve; });
+        return route.fulfill({ json: rows, headers }).catch(() => {});
+      }
       if (["POST", "PATCH"].includes(request.method())) {
         const body = request.postDataJSON();
-        if (request.method() === "POST") { const inserted = Array.isArray(body) ? body : [body]; tables[table].push(...inserted); rows = inserted; }
+        if (table === "community_posts" && request.method() === "POST") {
+          if (holdPost) { holdPost = false; await new Promise(resolve => { releasePost = resolve; }); }
+          Object.assign(body, { id: `post-novo-${++postCounter}`, created_at: new Date().toISOString() });
+        }
+        if (request.method() === "POST") {
+          const inserted = Array.isArray(body) ? body : [body];
+          if (table === "families") { body.invite_code = "NOVAFAMILIA"; tables.family_members.push({ user_id: body.owner_user_id, family_id: body.id, role: "owner" }); }
+          tables[table].push(...inserted); rows = inserted;
+        }
         else rows.forEach(row => Object.assign(row, body));
       }
       const one = request.headers().accept?.includes("application/vnd.pgrst.object+json");
@@ -83,7 +106,10 @@ function filtered(table, search) {
     const draftKey = `@treino-familia:rascunho:v1:${uid}:${pid}`;
     await context.addInitScript(({ key, auth, draftKey, uid, pid, sid, eid, start }) => {
       localStorage.setItem(key, JSON.stringify(auth));
-      if (!localStorage.getItem(draftKey)) localStorage.setItem(draftKey, JSON.stringify({ versao: 1, usuarioId: uid, planId: pid, planName: "Plano teste", sessao: { id: sid, plan_id: pid, started_at: start }, exercicios: [{ id: eid, name: "Agachamento teste", sets_goal: 2, reps_goal: "8-12" }], series: [1, 2].map(set_number => ({ chave: `${eid}:${set_number}`, exercise_id: eid, exercise_name: "Agachamento teste", set_number, reps: "10", weight_kg: "20", concluida: false })), intensidade: "moderada", esforco: "adequado", salvoEm: start, descanso: { fimEm: Date.now() + 90000, pausado: false, segundosPausados: 0, duracao: 90 } }));
+      if (!localStorage.getItem("@smoke:rascunho-inicial")) {
+        localStorage.setItem(draftKey, JSON.stringify({ versao: 1, usuarioId: uid, planId: pid, planName: "Plano teste", sessao: { id: sid, plan_id: pid, started_at: start }, exercicios: [{ id: eid, name: "Agachamento teste", sets_goal: 2, reps_goal: "8-12" }], series: [1, 2].map(set_number => ({ chave: `${eid}:${set_number}`, exercise_id: eid, exercise_name: "Agachamento teste", set_number, reps: "10", weight_kg: "20", concluida: false })), intensidade: "moderada", esforco: "adequado", salvoEm: start, descanso: { fimEm: Date.now() + 90000, pausado: false, segundosPausados: 0, duracao: 90 } }));
+        localStorage.setItem("@smoke:rascunho-inicial", "1");
+      }
     }, { key: storageKey, auth: session, draftKey, uid, pid, sid, eid, start: active.started_at });
     await page.reload(); await page.getByText("Olá, Conta de!", { exact: true }).waitFor({ timeout: 15000 });
     await page.getByRole("button", { name: /Continuar treino: Plano teste/ }).click();
@@ -143,6 +169,55 @@ function filtered(table, search) {
     await page.getByText("Ver mais publicações", { exact: true }).click();
     await page.waitForFunction(() => !Array.from(document.querySelectorAll('div')).some(el => el.textContent === "Ver mais publicações"));
     assert.ok(feedPages >= 2);
+    assert.equal(await page.getByRole("button", { name: "Abrir família Amigos da academia", exact: true }).count(), 0, "Não lista família sem vínculo");
+    assert.equal(await page.getByText("Não exibir outro grupo", { exact: true }).count(), 0);
+    const composer = page.getByRole("textbox", { name: "Texto para a família selecionada", exact: true });
+    await composer.fill("Rascunho exclusivo da família A");
+    await page.getByRole("button", { name: "Foto", exact: true }).click();
+    const photoChooser = page.waitForEvent("filechooser"); await page.getByText("Escolher foto", { exact: true }).click();
+    await (await photoChooser).setFiles(path.join(root, "public", "treino-familia-icon-192-v2.png"));
+    await page.getByText("Trocar foto", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Criar outra família", exact: true }).click();
+    await page.getByRole("textbox", { name: "Nome da nova família", exact: true }).fill("Família da academia");
+    await page.getByRole("button", { name: "Confirmar criação de família", exact: true }).click();
+    await page.getByRole("button", { name: "Publicar em Família da academia", exact: true }).waitFor();
+    const familyB = tables.families.find(f => f.name === "Família da academia");
+    assert.ok(familyB); assert.equal(tables.family_members.length, 2); assert.equal(await composer.inputValue(), "");
+    assert.equal(await page.getByText("Trocar foto", { exact: true }).count(), 0);
+    await composer.fill("Mensagem exclusiva da academia"); holdPost = true;
+    const sending = page.waitForRequest(r => r.method() === "POST" && r.url().includes("/rest/v1/community_posts"));
+    await page.getByRole("button", { name: "Publicar em Família da academia", exact: true }).click(); await sending;
+    assert.equal(await page.getByRole("button", { name: "Abrir família Família teste", exact: true }).isDisabled(), true);
+    while (!releasePost) await page.waitForTimeout(10); releasePost();
+    await page.getByText("Mensagem exclusiva da academia", { exact: true }).waitFor();
+    assert.equal(tables.community_posts.find(p => p.content === "Mensagem exclusiva da academia").family_id, familyB.id);
+    await page.getByRole("button", { name: "Abrir família Família teste", exact: true }).click();
+    await page.getByRole("button", { name: "Publicar em Família teste", exact: true }).waitFor();
+    await page.waitForFunction(() => document.querySelector('textarea[aria-label="Texto para a família selecionada"]')?.value === "Rascunho exclusivo da família A");
+    assert.equal(await page.getByText("Mensagem exclusiva da academia", { exact: true }).count(), 0);
+    await page.getByRole("button", { name: "Texto", exact: true }).click();
+    await page.getByRole("button", { name: "Publicar em Família teste", exact: true }).click();
+    await page.getByText("Rascunho exclusivo da família A", { exact: true }).waitFor();
+    assert.equal(tables.community_posts.find(p => p.content === "Rascunho exclusivo da família A").family_id, "family-a");
+    await page.getByPlaceholder("Código de convite", { exact: true }).fill("AMIGOS");
+    await page.getByText("Entrar com código", { exact: true }).click();
+    await page.getByRole("button", { name: "Publicar em Amigos da academia", exact: true }).waitFor();
+    assert.equal(tables.family_members.length, 3);
+    assert.equal(await page.getByText("Mensagem exclusiva da academia", { exact: true }).count(), 0);
+    assert.equal(await page.getByText("Rascunho exclusivo da família A", { exact: true }).count(), 0);
+    holdFeedFamily = "family-a";
+    const stale = page.waitForRequest(r => r.url().includes("/rest/v1/community_posts") && new URL(r.url()).searchParams.get("family_id") === "eq.family-a");
+    await page.getByRole("button", { name: "Abrir família Família teste", exact: true }).click(); await stale;
+    await page.getByRole("button", { name: "Abrir família Família da academia", exact: true }).click();
+    await page.getByText("Mensagem exclusiva da academia", { exact: true }).waitFor();
+    while (!releaseFeed) await page.waitForTimeout(10); releaseFeed(); await page.waitForTimeout(150);
+    assert.equal(await page.getByText("Rascunho exclusivo da família A", { exact: true }).count(), 0);
+    assert.equal(await page.getByText("Não exibir outro grupo", { exact: true }).count(), 0);
+    await page.reload(); await page.getByRole("button", { name: "Abrir comunidade da família" }).click();
+    await page.getByRole("button", { name: "Publicar em Família da academia", exact: true }).waitFor();
+    await page.getByText("Mensagem exclusiva da academia", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Abrir família Família da academia", exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(output, "web-minhas-familias.png") });
     await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByText("Frequência", { exact: true }).click();
     await page.getByText("Registrar cardio", { exact: true }).waitFor();
@@ -174,7 +249,7 @@ function filtered(table, search) {
     await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
-    console.log("OK UI — edição durante treino, novo plano offline/reabertura/reenvio, original preservado, registro manual com calorias, retomada, comunidade e cardio");
+    console.log("OK UI — várias famílias, convites, publicações/rascunhos isolados, troca rápida, preferência após reabrir, treino offline, registro manual e cardio");
     await context.close();
   } catch (error) {
     if (activePage) { await activePage.screenshot({ path: path.join(output, "web-failure.png") }).catch(() => {}); console.error((await activePage.locator("body").innerText()).slice(0, 2000)); }
