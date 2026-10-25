@@ -159,12 +159,15 @@ function filtered(table, search) {
     await page.getByText("Plano teste", { exact: true }).first().click();
     await page.getByRole("textbox", { name: "Duração do treino em minutos", exact: true }).fill("40");
     await page.getByRole("button", { name: "Intensidade do treino: Moderada", exact: true }).click();
+    await page.getByRole("button", { name: "Adicionar série em Agachamento teste", exact: true }).click();
+    await page.getByRole("textbox", { name: "Agachamento teste, série 3, carga em quilos", exact: true }).fill("25");
     await page.getByRole("button", { name: "Marcar todas as séries deste registro", exact: true }).click();
     await page.getByText(/kcal ativas estimadas/).waitFor();
     await page.getByRole("button", { name: "Confirmar registro de musculação", exact: true }).click();
     await page.getByText(/40 min · moderada · ≈/).waitFor();
     const manual = tables.workout_sessions.find(s => s.notes?.includes("Frequência"));
-    assert.ok(manual); assert.equal(manual.duration_minutes, 40); assert.equal(manual.sets_completed, 2); assert.ok(manual.active_calories > 0);
+    assert.ok(manual); assert.equal(manual.duration_minutes, 40); assert.equal(manual.sets_completed, 3); assert.ok(manual.active_calories > 0);
+    assert.equal(tables.workout_sets.find(s => s.session_id === manual.id && s.set_number === 3).weight_kg, 25);
     await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
     assert.deepEqual(errors, []);

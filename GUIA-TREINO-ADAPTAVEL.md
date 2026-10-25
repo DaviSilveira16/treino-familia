@@ -20,6 +20,8 @@ Exercícios avulsos ficam guardados com seu nome e valores no histórico. Para t
 
 Selecione a data e o plano. Confira as cargas sugeridas e marque as séries que realmente fez. É possível usar **Marcar todas as séries do plano como realizadas**, ou selecionar individualmente. Para editar valores já marcados, desmarque a série antes.
 
+Use também **Adicionar série** ou **Retirar esta série** se a quantidade realizada foi diferente do plano. Esses ajustes pertencem ao registro do calendário, preservando o plano salvo.
+
 Informe **duração em minutos**, **intensidade** e, se desejar, como se sentiu. A estimativa aparece antes da confirmação e fica salva com a sessão; a Frequência também exibe tempo, intensidade e calorias dos registros novos.
 
 Esse registro usa meio-dia como referência do calendário e a duração informada; não inventa uma leitura de cronômetro. Não altera as referências do plano. O app conserva a regra existente de um treino de musculação por dia e confere duplicidade antes do envio.

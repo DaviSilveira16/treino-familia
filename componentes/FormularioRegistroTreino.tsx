@@ -4,6 +4,7 @@ import { supabase } from "../supabase";
 import { CartaoExercicioTreino } from "./CartaoExercicioTreino";
 import ResumoRegistroTreino from "./ResumoRegistroTreino";
 import { guardarRegistroManual, montarRegistroManual } from "../servicos/registroTreinoManual";
+import { acrescentarSerie } from "../servicos/treinoAdaptavel";
 import type { PerfilCalculoTreino, IntensidadeTreino } from "../servicos/caloriasTreino";
 import type { EsforcoPercebido, PlanoExercicio, SerieRascunho } from "../servicos/treinoLocal";
 
@@ -26,7 +27,7 @@ export default function FormularioRegistroTreino({ usuarioId, planId, planName, 
         if (!base.length) throw new Error("Este plano ainda não tem exercícios. Cadastre os exercícios em Meus treinos.");
         const { data: referencias, error: erroCargas } = await supabase.from("exercise_load_defaults").select("exercise_id, set_number, reps, weight_kg").eq("user_id", usuarioId).in("exercise_id", base.map(e => e.id)).abortSignal(controller.signal);
         if (erroCargas) throw erroCargas;
-        const abertas: SerieRascunho[] = base.flatMap(e => Array.from({ length: Math.max(1, Math.min(20, Number(e.sets_goal) || 1)) }, (_, i) => {
+        const abertas: SerieRascunho[] = base.flatMap(e => Array.from({ length: Math.min(20, Math.max(1, Number(e.sets_goal) || 1, referencias?.filter(r => r.exercise_id === e.id).length ?? 0)) }, (_, i) => {
           const r = referencias?.find(r => r.exercise_id === e.id && Number(r.set_number) === i + 1);
           return { chave: `${e.id}:${i + 1}`, exercise_id: e.id, exercise_name: e.name, set_number: i + 1, reps: String(r?.reps ?? (e.reps_goal.match(/\d+/)?.[0] || "8")), weight_kg: String(r?.weight_kg ?? 0), concluida: false };
         }));
@@ -51,7 +52,9 @@ export default function FormularioRegistroTreino({ usuarioId, planId, planName, 
     <Text style={s.ajuda}>Confira o que realmente realizou. As cargas do plano são sugestões editáveis e só entram no histórico depois de você marcar as séries. Este registro não altera as referências do plano.</Text>
     {series.length ? <>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Marcar todas as séries deste registro" disabled={salvando} onPress={() => setSeries(atuais => atuais.map(s => ({ ...s, concluida: true })))} style={s.botao}><Text style={{ color: cor }}>Marcar todas as séries do plano como realizadas</Text></TouchableOpacity>
-      {exercicios.map(e => <CartaoExercicioTreino key={e.id} exercicio={e} series={series.filter(s => s.exercise_id === e.id)} cor={cor} bloqueado={salvando} chaveSalvando={null} onCopiar={() => {}} onCampo={(chave, campo, valor) => setSeries(atuais => atuais.map(s => s.chave === chave && !s.concluida ? { ...s, [campo]: valor } : s))} onAlternar={serie => setSeries(atuais => atuais.map(s => s.chave === serie.chave ? { ...s, concluida: !s.concluida } : s))} />)}
+      {exercicios.map(e => <CartaoExercicioTreino key={e.id} exercicio={e} series={series.filter(s => s.exercise_id === e.id)} cor={cor} bloqueado={salvando} chaveSalvando={null} onCopiar={() => {}} onCampo={(chave, campo, valor) => setSeries(atuais => atuais.map(s => s.chave === chave && !s.concluida ? { ...s, [campo]: valor } : s))} onAlternar={serie => setSeries(atuais => atuais.map(s => s.chave === serie.chave ? { ...s, concluida: !s.concluida } : s))}
+        onAdicionarSerie={() => setSeries(atuais => atuais.filter(s => s.exercise_id === e.id).length < 20 ? [...atuais, acrescentarSerie(e, atuais)] : atuais)}
+        onRetirarSerie={serie => setSeries(atuais => atuais.filter(s => s.exercise_id === e.id).length > 1 ? atuais.filter(s => s.chave !== serie.chave) : atuais)} />)}
       <ResumoRegistroTreino perfil={perfil} series={series.filter(s => s.concluida).map(s => ({ exercise_id: s.exercise_id, exercise_name: s.exercise_name, set_number: s.set_number, reps: Number(s.reps), weight_kg: Number(s.weight_kg.replace(",", ".")) }))} duracao={duracao} onDuracao={setDuracao} intensidade={intensidade} onIntensidade={setIntensidade} esforco={esforco} onEsforco={setEsforco} cor={cor} bloqueado={salvando} />
       <Text style={s.ajuda}>O calendário usa meio-dia como referência da data escolhida e guarda a duração informada. O horário não representa uma medição por cronômetro.</Text>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Confirmar registro de musculação" disabled={salvando} onPress={() => void salvar()} style={[s.botao, { backgroundColor: cor }]}><Text style={s.escuro}>{salvando ? "Guardando..." : "Confirmar treino realizado"}</Text></TouchableOpacity>
