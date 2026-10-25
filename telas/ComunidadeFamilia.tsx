@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -21,7 +21,9 @@ import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import { obterRevisaoDeDados } from "../servicos/revisaoDados";
 import { criarControleConsultas, filtroCursorDesc, unirPorId, type CursorData } from "../servicos/paginacaoHistorico";
 
-type Familia = { id: string; name: string; invite_code: string };
+import MinhasFamilias from "../componentes/MinhasFamilias";
+import { criarFamiliaComId, lerFamiliaPreferida, guardarFamiliaPreferida, selecionarFamiliaPermitida, somenteDaFamilia, fotoPertenceAFamilia, type Familia } from "../servicos/familias";
+import { novoIdSerie } from "../servicos/treinoLocal";
 type MembroResumo = {
   family_id: string;
   family_name: string;
@@ -183,7 +185,6 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [familias, setFamilias] = useState<Familia[]>([]);
   const [familiaAtivaId, setFamiliaAtivaId] = useState<string | null>(null);
   const familiaAtivaIdRef = useRef<string | null>(null);
-  const [nomeFamilia, setNomeFamilia] = useState("Minha família");
   const [codigoConvite, setCodigoConvite] = useState("");
   const [criandoFamilia, setCriandoFamilia] = useState(false);
   const [entrandoFamilia, setEntrandoFamilia] = useState(false);
@@ -202,8 +203,44 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [textoPublicacao, setTextoPublicacao] = useState("");
   const [fotoSelecionada, setFotoSelecionada] =
     useState<ImagePicker.ImagePickerAsset | null>(null);
+  useEffect(() => {
+    const uri = fotoSelecionada?.uri;
+    return () => { if (Platform.OS === "web" && uri?.startsWith("blob:") && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(uri); };
+  }, [fotoSelecionada]);
   const [planoSelecionado, setPlanoSelecionado] = useState("");
   const [publicando, setPublicando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+  const publicandoRef = useRef(false), mutandoFamiliaRef = useRef(false), excluindoRef = useRef(false);
+  const familiasRef = useRef<Familia[]>([]), familiaVerificadaRef = useRef<string | null>(null);
+  const tentativaCriacaoRef = useRef<{ usuarioId: string; nome: string; id: string } | null>(null);
+  type Rascunho = { tipo: TipoPublicacao; texto: string; plano: string };
+  const rascunhosRef = useRef(new Map<string, Rascunho>());
+  const rascunhoAtualRef = useRef<Rascunho>({ tipo: "texto", texto: "", plano: "" });
+  useEffect(() => { rascunhoAtualRef.current = { tipo: tipoPublicacao, texto: textoPublicacao, plano: planoSelecionado }; }, [tipoPublicacao, textoPublicacao, planoSelecionado]);
+  const mudarContextoFamilia = useCallback((id: string | null, detalhe?: Familia) => {
+    const anterior = familiaAtivaIdRef.current;
+    if (anterior !== id) {
+      if (anterior) rascunhosRef.current.set(anterior, { ...rascunhoAtualRef.current });
+      const rascunho = (id && rascunhosRef.current.get(id)) || { tipo: "texto" as const, texto: "", plano: "" };
+      rascunhoAtualRef.current = rascunho;
+      setTextoPublicacao(rascunho.texto); setTipoPublicacao(rascunho.tipo); setPlanoSelecionado(rascunho.plano); setFotoSelecionada(null);
+      familiaAtivaIdRef.current = id; setFamiliaAtivaId(id); familiaVerificadaRef.current = null;
+      setPublicacoes([]); setMembros([]); cursorPostsRef.current = null; setHaMaisPosts(false);
+    }
+    setFamilia(detalhe ?? familiasRef.current.find(f => f.id === id) ?? null);
+  }, []);
+  async function confirmarTrocaComFoto(): Promise<boolean> {
+    if (!fotoSelecionada) return true;
+    const mensagem = "A foto selecionada será descartada ao trocar de família. O texto fica separado no rascunho de cada família enquanto esta tela estiver aberta. Deseja continuar?";
+    if (Platform.OS === "web" && typeof window !== "undefined") return window.confirm(mensagem);
+    return new Promise(resolve => Alert.alert("Trocar de família?", mensagem, [{ text: "Cancelar", style: "cancel", onPress: () => resolve(false) }, { text: "Trocar", onPress: () => resolve(true) }]));
+  }
+  async function trocarFamilia(id: string) {
+    if (id === familiaAtivaIdRef.current || publicandoRef.current || mutandoFamiliaRef.current || excluindoRef.current || !familiasRef.current.some(f => f.id === id)) return;
+    if (!await confirmarTrocaComFoto()) return;
+    if (publicandoRef.current || mutandoFamiliaRef.current || excluindoRef.current) return;
+    void carregar(id);
+  }
 
   const ultimaConsultaRef = useRef(0);
   const ultimaRevisaoRef = useRef(-1);
@@ -212,13 +249,10 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
     const consulta = controleConsultas.current.iniciar();
     carregandoInicialRef.current = true;
     setCarregandoMaisPosts(false);
+    familiaVerificadaRef.current = null;
     if (idFamiliaSolicitada && idFamiliaSolicitada !== familiaAtivaIdRef.current) {
-      familiaAtivaIdRef.current = idFamiliaSolicitada;
-      setFamiliaAtivaId(idFamiliaSolicitada);
-      setPublicacoes([]);
-      setMembros([]);
-      cursorPostsRef.current = null;
-      setHaMaisPosts(false);
+      if (!familiasRef.current.some(f => f.id === idFamiliaSolicitada)) setCarregando(true);
+      mudarContextoFamilia(idFamiliaSolicitada);
       setAtualizando(true);
     }
     if (!dadosCarregadosRef.current) setCarregando(true);
@@ -263,10 +297,9 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       ) as string[];
 
       if (idsFamilias.length === 0) {
-        familiaAtivaIdRef.current = null;
-        setFamiliaAtivaId(null);
+        mudarContextoFamilia(null); familiasRef.current = [];
+        void guardarFamiliaPreferida(usuario.id, null).catch(() => {});
         setFamilias([]);
-        setFamilia(null);
         setMembros([]);
         setPublicacoes([]);
         setHaMaisPosts(false);
@@ -277,7 +310,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
 
       const { data: listaFamilias, error: erroListaFamilias } = await supabase
         .from("families")
-        .select("id, name, invite_code")
+        .select("id, name, invite_code, owner_user_id")
         .in("id", idsFamilias)
         .order("name", { ascending: true })
         .abortSignal(consulta.signal);
@@ -285,10 +318,9 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       if (erroListaFamilias) throw erroListaFamilias;
       const familiasDisponiveis = (listaFamilias ?? []) as Familia[];
       if (familiasDisponiveis.length === 0) {
-        familiaAtivaIdRef.current = null;
-        setFamiliaAtivaId(null);
+        mudarContextoFamilia(null); familiasRef.current = [];
+        void guardarFamiliaPreferida(usuario.id, null).catch(() => {});
         setFamilias([]);
-        setFamilia(null);
         setMembros([]);
         setPublicacoes([]);
         setHaMaisPosts(false);
@@ -297,14 +329,12 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         return;
       }
 
-      const idPreferido = idFamiliaSolicitada ?? familiaAtivaIdRef.current;
-      const familiaAtual =
-        familiasDisponiveis.find((item) => item.id === idPreferido) ??
-        familiasDisponiveis[0];
-      familiaAtivaIdRef.current = familiaAtual.id;
-      setFamiliaAtivaId(familiaAtual.id);
-      setFamilias(familiasDisponiveis);
-      setFamilia(familiaAtual);
+      const idPreferido = idFamiliaSolicitada ?? familiaAtivaIdRef.current ?? await lerFamiliaPreferida(usuario.id);
+      if (!consulta.atual()) return;
+      const familiaAtual = selecionarFamiliaPermitida(familiasDisponiveis, idPreferido)!;
+      familiasRef.current = familiasDisponiveis; setFamilias(familiasDisponiveis);
+      mudarContextoFamilia(familiaAtual.id, familiaAtual);
+      void guardarFamiliaPreferida(usuario.id, familiaAtual.id).catch(() => {});
 
       const [resumo, feed, listaPlanos] = await Promise.all([
         supabase.rpc("resumo_painel_familia_por_id", {
@@ -331,11 +361,11 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       if (resumo.error) throw resumo.error;
       if (feed.error) throw feed.error;
       if (listaPlanos.error) throw listaPlanos.error;
-      const listaPosts = (feed.data ?? []) as Publicacao[];
+      const listaPosts = somenteDaFamilia((feed.data ?? []) as Publicacao[], familiaAtual.id);
       const pagina = listaPosts.slice(0, 10);
       const urlsFotos = await obterFotosAssinadas(
         "community-photos",
-        pagina.map((post) => post.image_path),
+        pagina.map((post) => fotoPertenceAFamilia(post.image_path, familiaAtual.id) ? post.image_path : null),
         3600,
         usuario.id,
       );
@@ -346,7 +376,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           ? (urlsFotos.get(post.image_path) ?? null)
           : null,
       }));
-      setMembros((resumo.data ?? []) as MembroResumo[]);
+      setMembros(somenteDaFamilia((resumo.data ?? []) as MembroResumo[], familiaAtual.id));
+      familiaVerificadaRef.current = familiaAtual.id;
       setPlanos((listaPlanos.data ?? []) as Plano[]);
       setHaMaisPosts(listaPosts.length > 10);
       const ultimo = pagina[pagina.length - 1];
@@ -355,6 +386,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       ultimaConsultaRef.current = Date.now();
       ultimaRevisaoRef.current = obterRevisaoDeDados();
       dadosCarregadosRef.current = true;
+      return familiaAtual;
     } catch (problema) {
       if (!consulta.atual()) return;
       setErro(
@@ -369,7 +401,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         setAtualizando(false);
       }
     }
-  }, []);
+  }, [mudarContextoFamilia]);
 
   // Somente o feed é paginado: não recarrega membros, famílias e planos.
   async function carregarMaisPublicacoes() {
@@ -394,11 +426,11 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       if (!consulta.atual()) return;
       if (error) throw error;
       if (familiaAtivaIdRef.current !== idFamilia) return;
-      const listaPosts = (data ?? []) as Publicacao[];
+      const listaPosts = somenteDaFamilia((data ?? []) as Publicacao[], idFamilia);
       const pagina = listaPosts.slice(0, 10);
       const urlsFotos = await obterFotosAssinadas(
         "community-photos",
-        pagina.map((post) => post.image_path),
+        pagina.map((post) => fotoPertenceAFamilia(post.image_path, idFamilia) ? post.image_path : null),
         3600,
         usuarioId,
       );
@@ -429,6 +461,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   useFocusEffect(
     useCallback(() => {
       if (
+        !carregandoInicialRef.current &&
+        familiaVerificadaRef.current === familiaAtivaIdRef.current &&
         Date.now() - ultimaConsultaRef.current < 12000 &&
         ultimaRevisaoRef.current === obterRevisaoDeDados()
       )
@@ -443,41 +477,38 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
     }, [carregar]),
   );
 
-  async function criarFamilia() {
-    if (!nomeFamilia.trim()) {
-      avisar("Nome da família", "Informe um nome para criar o grupo.");
-      return;
-    }
-    setCriandoFamilia(true);
+  async function criarFamilia(nome: string): Promise<boolean> {
+    if (publicandoRef.current || mutandoFamiliaRef.current || excluindoRef.current) return false;
+    if (!nome.trim() || nome.trim().length > 70) { avisar("Nome da família", "Informe um nome com até 70 caracteres."); return false; }
+    mutandoFamiliaRef.current = true; setCriandoFamilia(true);
     try {
-      const { data: usuario } = await supabase.auth.getUser();
-      if (!usuario.user) throw new Error("Entre novamente na sua conta.");
-      const { error } = await supabase
-        .from("families")
-        .insert({ name: nomeFamilia.trim(), owner_user_id: usuario.user.id });
-      if (error) throw error;
-      await carregar();
-      avisar(
-        "Família criada",
-        "Compartilhe o código de convite com os familiares que deseja adicionar.",
-      );
-    } catch (problema) {
-      avisar(
-        "Não foi possível criar a família",
-        problema instanceof Error ? problema.message : "Tente novamente.",
-      );
-    } finally {
-      setCriandoFamilia(false);
-    }
+      if (!await confirmarTrocaComFoto()) return false;
+      const { data: usuario, error } = await supabase.auth.getUser();
+      if (error || !usuario.user) throw new Error("Entre novamente na sua conta.");
+      let tentativa = tentativaCriacaoRef.current;
+      if (!tentativa || tentativa.usuarioId !== usuario.user.id || tentativa.nome !== nome.trim()) {
+        tentativa = { id: novoIdSerie(), usuarioId: usuario.user.id, nome: nome.trim() }; tentativaCriacaoRef.current = tentativa;
+      }
+      const criada = await criarFamiliaComId(tentativa.usuarioId, tentativa.nome, tentativa.id);
+      tentativaCriacaoRef.current = null;
+      familiasRef.current = [...familiasRef.current.filter(f => f.id !== criada.id), criada];
+      setFamilias(familiasRef.current);
+      await carregar(criada.id);
+      avisar("Família criada", "A nova família tem seu próprio código e publicações. Compartilhe o convite com quem deseja adicionar.");
+      return true;
+    } catch (problema) { avisar("Não foi possível criar a família", mensagemErro(problema, "Tente novamente.")); return false; }
+    finally { mutandoFamiliaRef.current = false; setCriandoFamilia(false); }
   }
 
   async function entrarNaFamilia() {
+    if (publicandoRef.current || mutandoFamiliaRef.current || excluindoRef.current) return;
     if (!codigoConvite.trim()) {
       avisar("Código de convite", "Digite o código recebido de um familiar.");
       return;
     }
-    setEntrandoFamilia(true);
+    mutandoFamiliaRef.current = true; setEntrandoFamilia(true);
     try {
+      if (!await confirmarTrocaComFoto()) return;
       const { data, error } = await supabase.rpc(
         "entrar_na_familia_por_codigo",
         { p_codigo: codigoConvite.trim().toUpperCase() },
@@ -487,7 +518,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         throw new Error(
           "Não foi possível encontrar uma família com esse código.",
         );
-      const idFamiliaEntrou =
+      let idFamiliaEntrou =
         typeof data === "string"
           ? data
           : Array.isArray(data)
@@ -496,6 +527,11 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
               ? ((data as { family_id?: string; id?: string }).family_id ??
                 (data as { id?: string }).id)
               : undefined;
+      if (typeof idFamiliaEntrou !== "string") {
+        const { data: destino, error: erroDestino } = await supabase.from("families").select("id").eq("invite_code", codigoConvite.trim().toUpperCase()).maybeSingle();
+        if (erroDestino) throw erroDestino;
+        idFamiliaEntrou = destino?.id;
+      }
       setCodigoConvite("");
       await carregar(
         typeof idFamiliaEntrou === "string" ? idFamiliaEntrou : undefined,
@@ -512,18 +548,21 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           : "Confira o código e tente novamente.",
       );
     } finally {
+      mutandoFamiliaRef.current = false;
       setEntrandoFamilia(false);
     }
   }
 
   async function escolherFoto() {
+    if (publicandoRef.current || mutandoFamiliaRef.current || carregandoInicialRef.current) return;
+    const destino = familiaAtivaIdRef.current;
     const resultado = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsEditing: false,
       quality: 1,
       aspect: [4, 5],
     });
-    if (!resultado.canceled && resultado.assets[0])
+    if (destino === familiaAtivaIdRef.current && !resultado.canceled && resultado.assets[0])
       setFotoSelecionada(resultado.assets[0]);
   }
 
@@ -578,7 +617,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   }
 
   async function publicar() {
-    if (!familia || !usuarioId || publicando || carregandoInicialRef.current || familia.id !== familiaAtivaIdRef.current) return;
+    if (!familia || !usuarioId || publicandoRef.current || mutandoFamiliaRef.current || excluindoRef.current || carregandoInicialRef.current || familia.id !== familiaAtivaIdRef.current || familiaVerificadaRef.current !== familia.id) return;
+    const familiaDestino = familia.id;
     if (tipoPublicacao === "texto" && !textoPublicacao.trim()) {
       avisar("Publicação vazia", "Escreva uma mensagem antes de publicar.");
       return;
@@ -595,7 +635,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       avisar("Selecione um treino", "Escolha qual treino deseja compartilhar.");
       return;
     }
-    setPublicando(true);
+    publicandoRef.current = true; setPublicando(true);
     let caminhoFoto: string | null = null;
     try {
       let snapshot: ExercicioCompartilhado[] | null = null;
@@ -645,7 +685,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
             "A foto ultrapassa o limite de 10 MB. Escolha uma imagem menor.",
           );
         }
-        caminhoFoto = `${familia.id}/${usuarioId}/${Date.now()}-${Math.random()
+        caminhoFoto = `${familiaDestino}/${usuarioId}/${Date.now()}-${Math.random()
           .toString(36)
           .slice(2, 8)}.${extensoes[mime]}`;
         const { error } = await supabase.storage
@@ -658,7 +698,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         if (error) throw error;
       }
       const { error } = await supabase.from("community_posts").insert({
-        family_id: familia.id,
+        family_id: familiaDestino,
         user_id: usuarioId,
         author_name: nomeUsuario,
         author_avatar_url: avatarUsuario,
@@ -673,7 +713,9 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       setFotoSelecionada(null);
       setPlanoSelecionado("");
       setTipoPublicacao("texto");
-      await carregar();
+      rascunhosRef.current.delete(familiaDestino);
+      rascunhoAtualRef.current = { tipo: "texto", texto: "", plano: "" };
+      await carregar(familiaDestino);
     } catch (problema) {
       if (caminhoFoto) {
         try {
@@ -688,42 +730,25 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         ),
       );
     } finally {
+      publicandoRef.current = false;
       setPublicando(false);
     }
   }
 
   async function excluirPublicacao(post: Publicacao) {
-    let confirmado = false;
-    if (Platform.OS === "web" && typeof window !== "undefined")
-      confirmado = window.confirm(
-        "Excluir esta publicação? Esta ação não pode ser desfeita.",
-      );
-    else
-      confirmado = await new Promise<boolean>((resolve) =>
-        Alert.alert("Excluir publicação", "Deseja remover esta publicação?", [
-          { text: "Cancelar", style: "cancel", onPress: () => resolve(false) },
-          {
-            text: "Excluir",
-            style: "destructive",
-            onPress: () => resolve(true),
-          },
-        ]),
-      );
-    if (!confirmado) return;
-    const { error } = await supabase
-      .from("community_posts")
-      .delete()
-      .eq("id", post.id)
-      .eq("user_id", usuarioId);
-    if (error) avisar("Não foi possível excluir", error.message);
-    else {
-      if (post.image_path)
-        await supabase.storage
-          .from("community-photos")
-          .remove([post.image_path]);
-      setPublicacoes((lista) => lista.filter((item) => item.id !== post.id));
-    }
+    if (publicandoRef.current || mutandoFamiliaRef.current || excluindoRef.current || post.family_id !== familiaAtivaIdRef.current || post.user_id !== usuarioId) return;
+    excluindoRef.current = true; setExcluindo(true);
+    try {
+      const confirmado = Platform.OS === "web" && typeof window !== "undefined" ? window.confirm("Excluir esta publicação da família selecionada?") : await new Promise<boolean>(resolve => Alert.alert("Excluir publicação", "Deseja remover esta publicação?", [{ text: "Cancelar", style: "cancel", onPress: () => resolve(false) }, { text: "Excluir", style: "destructive", onPress: () => resolve(true) }]));
+      if (!confirmado || post.family_id !== familiaAtivaIdRef.current) return;
+      const { data, error } = await supabase.from("community_posts").delete().eq("id", post.id).eq("user_id", usuarioId).eq("family_id", post.family_id).select("id");
+      if (error) throw error;
+      if (data?.length && fotoPertenceAFamilia(post.image_path, post.family_id)) await supabase.storage.from("community-photos").remove([post.image_path!]);
+      setPublicacoes(lista => lista.filter(item => item.id !== post.id));
+    } catch (problema) { avisar("Não foi possível excluir", mensagemErro(problema, "Tente novamente.")); }
+    finally { excluindoRef.current = false; setExcluindo(false); }
   }
+  const gerenciadorFamilias = <MinhasFamilias familias={familias} ativaId={familiaAtivaId} usuarioId={usuarioId} cor={corTema} bloqueado={publicando || criandoFamilia || entrandoFamilia || excluindo} criando={criandoFamilia} onSelecionar={id => void trocarFamilia(id)} onCriar={criarFamilia} />;
 
   if (carregando)
     return (
@@ -743,28 +768,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           publicações ficam visíveis somente para integrantes desse grupo.
         </Text>
         {erro ? <Text style={estilos.erro}>{erro}</Text> : null}
-        <View style={estilos.cartao}>
-          <Text style={estilos.tituloCartao}>Criar uma família</Text>
-          <TextInput
-            value={nomeFamilia}
-            onChangeText={setNomeFamilia}
-            placeholder="Ex.: Família Silva"
-            placeholderTextColor="#758178"
-            style={estilos.input}
-            maxLength={70}
-          />
-          <TouchableOpacity
-            onPress={criarFamilia}
-            disabled={criandoFamilia}
-            style={[estilos.botao, { backgroundColor: corTema }]}
-          >
-            {criandoFamilia ? (
-              <ActivityIndicator color="#0C120E" />
-            ) : (
-              <Text style={estilos.textoBotaoEscuro}>Criar grupo familiar</Text>
-            )}
-          </TouchableOpacity>
-        </View>
+        {gerenciadorFamilias}
         <View style={estilos.cartao}>
           <Text style={estilos.tituloCartao}>Entrar em uma família</Text>
           <TextInput
@@ -777,8 +781,9 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
             maxLength={16}
           />
           <TouchableOpacity
+            accessibilityRole="button"
             onPress={entrarNaFamilia}
-            disabled={entrandoFamilia}
+            disabled={entrandoFamilia || criandoFamilia || publicando || excluindo}
             style={[estilos.botaoSecundario, { borderColor: corTema }]}
           >
             {entrandoFamilia ? (
@@ -826,49 +831,10 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           <Text style={{ color: corTema, fontSize: 22 }}>↻</Text>
         </TouchableOpacity>
       </View>
-      {familias.length > 1 ? (
-        <View style={estilos.cartaoFamilias}>
-          <Text style={estilos.tituloCartao}>Minhas famílias</Text>
-          <View style={estilos.gradeFamilias}>
-            {familias.map((item) => {
-              const selecionada = item.id === familiaAtivaId;
-              return (
-                <TouchableOpacity
-                  key={item.id}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: selecionada }}
-                  onPress={() => {
-                    if (item.id !== familiaAtivaId) void carregar(item.id);
-                  }}
-                  style={[
-                    estilos.opcaoFamilia,
-                    selecionada && {
-                      borderColor: corTema,
-                      backgroundColor: `${corTema}18`,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      estilos.nomeFamilia,
-                      selecionada && { color: corTema },
-                    ]}
-                  >
-                    {selecionada ? "✓ " : ""}
-                    {item.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-          <Text style={estilos.secundario}>
-            Selecione o grupo cujo progresso e publicações deseja visualizar.
-          </Text>
-        </View>
-      ) : null}
+      {gerenciadorFamilias}
       <View style={estilos.cartaoCodigo}>
         <View style={{ flex: 1, gap: 4 }}>
-          <Text style={estilos.rotulo}>CÓDIGO DE CONVITE</Text>
+          <Text style={estilos.rotulo}>CONVITE · {familia.name}</Text>
           <Text selectable style={[estilos.codigo, { color: corTema }]}>
             {familia.invite_code}
           </Text>
@@ -895,7 +861,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         />
         <TouchableOpacity
           onPress={entrarNaFamilia}
-          disabled={entrandoFamilia}
+          disabled={entrandoFamilia || criandoFamilia || publicando || excluindo}
           style={[estilos.botaoSecundario, { borderColor: corTema }]}
         >
           {entrandoFamilia ? (
@@ -958,9 +924,10 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           Ainda não há dados de progresso nesta semana.
         </Text>
       ) : null}
-      <Text style={estilos.tituloSecao}>Comunidade da família</Text>
+      <Text style={estilos.tituloSecao}>Publicações de {familia.name}</Text>
       <View style={estilos.cartaoPublicar}>
-        <Text style={estilos.tituloCartao}>Compartilhe sua evolução</Text>
+        <Text style={estilos.tituloCartao}>Publicar em {familia.name}</Text>
+        <Text style={estilos.secundario}>Esta publicação será compartilhada somente com os integrantes de {familia.name}.</Text>
         <View style={estilos.opcoesPublicacao}>
           {(
             [
@@ -971,6 +938,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           ).map(([valor, icone, rotulo]) => (
             <TouchableOpacity
               key={valor}
+              disabled={publicando || atualizando || criandoFamilia || entrandoFamilia}
               accessibilityRole="button"
               accessibilityLabel={
                 rotulo === "Treino" ? "Compartilhar treino" : rotulo
@@ -1003,6 +971,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           ))}
         </View>
         <TextInput
+          accessibilityLabel="Texto para a família selecionada"
+          editable={!publicando && !atualizando && !criandoFamilia && !entrandoFamilia}
           value={textoPublicacao}
           onChangeText={setTextoPublicacao}
           placeholder={
@@ -1019,6 +989,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           <View style={estilos.fotoArea}>
             <TouchableOpacity
               style={[estilos.botaoSecundario, { borderColor: corTema }]}
+              disabled={publicando || atualizando || criandoFamilia || entrandoFamilia}
               onPress={escolherFoto}
             >
               <Text style={{ color: corTema, fontWeight: "800" }}>
@@ -1040,6 +1011,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
               planos.map((plano) => (
                 <TouchableOpacity
                   key={plano.id}
+                  disabled={publicando || atualizando || criandoFamilia || entrandoFamilia}
                   onPress={() => setPlanoSelecionado(plano.id)}
                   style={[
                     estilos.plano,
@@ -1068,14 +1040,16 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           </View>
         ) : null}
         <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`Publicar em ${familia.name}`}
           onPress={publicar}
-          disabled={publicando || atualizando}
+          disabled={publicando || atualizando || criandoFamilia || entrandoFamilia || excluindo || Boolean(erro)}
           style={[estilos.botao, { backgroundColor: corTema, marginTop: 12 }]}
         >
           {publicando ? (
             <ActivityIndicator color="#0C120E" />
           ) : (
-            <Text style={estilos.textoBotaoEscuro}>Publicar na família</Text>
+            <Text style={estilos.textoBotaoEscuro}>Publicar em {familia.name}</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -1113,7 +1087,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
               </Text>
             </View>
             {post.user_id === usuarioId ? (
-              <TouchableOpacity onPress={() => void excluirPublicacao(post)}>
+              <TouchableOpacity disabled={publicando || criandoFamilia || entrandoFamilia || excluindo} onPress={() => void excluirPublicacao(post)}>
                 <Text style={estilos.excluir}>Excluir</Text>
               </TouchableOpacity>
             ) : null}
