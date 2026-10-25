@@ -20,6 +20,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabase";
 import { obterRevisaoDeDados } from "../servicos/revisaoDados";
+import { carregarTodasPorId, criarControleConsultas } from "../servicos/paginacaoHistorico";
 import {
   analisarHistorico,
   gerarSugestoes,
@@ -36,6 +37,7 @@ type Sessao = {
   notes?: string | null;
 };
 type Serie = {
+  id: string;
   session_id: string;
   exercise_id: string | null;
   exercise_name: string | null;
@@ -109,36 +111,45 @@ export default function EvolucaoTreinos({
   const ultimaConsultaRef = useRef(0);
   const ultimaRevisaoRef = useRef(-1);
   const dadosCarregadosRef = useRef(false);
+  const controleConsultas = useRef(criarControleConsultas());
   const carregar = useCallback(async (atualizacao = false) => {
+    const consulta = controleConsultas.current.iniciar();
     if (atualizacao) setAtualizando(true);
     else if (!dadosCarregadosRef.current) setCarregando(true);
     setErro("");
     try {
       const { data: usuarioData, error: erroUsuario } =
         await supabase.auth.getUser();
+      if (!consulta.atual()) return;
       if (erroUsuario || !usuarioData.user)
         throw new Error("Entre novamente na sua conta.");
       const idUsuario = usuarioData.user.id;
-      const [resultadoSessoes, resultadoSeries] = await Promise.all([
-        supabase
-          .from("workout_sessions")
-          .select("id, started_at, status, notes")
-          .eq("user_id", idUsuario)
-          .order("started_at", { ascending: true }),
-        supabase
-          .from("workout_sets")
-          .select(
-            "session_id, exercise_id, exercise_name, set_number, reps, weight_kg",
-          )
-          .eq("user_id", idUsuario)
-          .order("set_number", { ascending: true }),
+      // Chaves únicas evitam truncamento pelo limite REST e deslocamento de offsets.
+      // A análise reordena cronologicamente antes de calcular pontos e recordes.
+      const [sessoes, series] = await Promise.all([
+        carregarTodasPorId<Sessao>((cursor) => {
+          let pedido = supabase.from("workout_sessions")
+            .select("id, started_at, status, notes")
+            .eq("user_id", idUsuario)
+            .order("id", { ascending: true }).limit(500)
+            .abortSignal(consulta.signal);
+          if (cursor) pedido = pedido.gt("id", cursor);
+          return pedido;
+        }, consulta.signal),
+        carregarTodasPorId<Serie>((cursor) => {
+          let pedido = supabase.from("workout_sets")
+            .select("id, session_id, exercise_id, exercise_name, set_number, reps, weight_kg")
+            .eq("user_id", idUsuario)
+            .order("id", { ascending: true }).limit(500)
+            .abortSignal(consulta.signal);
+          if (cursor) pedido = pedido.gt("id", cursor);
+          return pedido;
+        }, consulta.signal),
       ]);
-      if (resultadoSessoes.error) throw resultadoSessoes.error;
-      if (resultadoSeries.error) throw resultadoSeries.error;
-      const sessoes = (resultadoSessoes.data ?? []) as Sessao[];
+      if (!consulta.atual()) return;
       const resultadoAnalise = analisarHistorico(
         sessoes,
-        (resultadoSeries.data ?? []) as Serie[],
+        series,
       );
       const porNome = resultadoAnalise.porExercicio;
       setAnalise(resultadoAnalise);
@@ -158,14 +169,17 @@ export default function EvolucaoTreinos({
       ultimaRevisaoRef.current = obterRevisaoDeDados();
       dadosCarregadosRef.current = true;
     } catch (e) {
+      if (!consulta.atual()) return;
       setErro(
         e instanceof Error
           ? e.message
           : "Não foi possível carregar a evolução dos exercícios.",
       );
     } finally {
-      setCarregando(false);
-      setAtualizando(false);
+      if (consulta.atual()) {
+        setCarregando(false);
+        setAtualizando(false);
+      }
     }
   }, []);
 
@@ -179,7 +193,10 @@ export default function EvolucaoTreinos({
       const espera = setTimeout(() => {
         void carregar();
       }, 80);
-      return () => clearTimeout(espera);
+      return () => {
+        clearTimeout(espera);
+        controleConsultas.current.cancelar();
+      };
     }, [carregar]),
   );
 

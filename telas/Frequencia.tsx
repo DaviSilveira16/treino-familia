@@ -190,23 +190,6 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       if (controlador.signal.aborted || consulta !== consultaAtivaRef.current)
         return;
       setUsuarioId(usuario.user.id);
-      const dadosCache = lerCache<{
-        treinos: Treino[];
-        sessoes: Sessao[];
-        modelosCardio: CardioModelo[];
-        sessoesCardio: SessaoCardio[];
-      }>(usuario.user.id, `frequencia:${chaveMes}`);
-      if (dadosCache) {
-        setTreinos(dadosCache.treinos);
-        setSessoes(dadosCache.sessoes);
-        setModelosCardio(dadosCache.modelosCardio);
-        setSessoesCardio(dadosCache.sessoesCardio);
-        dadosCarregadosRef.current = true;
-        mesCarregadoRef.current = chaveMes;
-        ultimaConsultaRef.current = Date.now();
-        ultimaRevisaoRef.current = obterRevisaoDeDados();
-        return;
-      }
       const metadados = usuario.user.user_metadata ?? {};
       const pesoPerfil = Number(metadados.peso_kg);
       const alturaPerfil = Number(metadados.altura_cm);
@@ -234,6 +217,23 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
           ? sexoPerfil
           : null,
       );
+      const dadosCache = lerCache<{
+        treinos: Treino[];
+        sessoes: Sessao[];
+        modelosCardio: CardioModelo[];
+        sessoesCardio: SessaoCardio[];
+      }>(usuario.user.id, `frequencia:${chaveMes}`);
+      if (dadosCache) {
+        setTreinos(dadosCache.treinos);
+        setSessoes(dadosCache.sessoes);
+        setModelosCardio(dadosCache.modelosCardio);
+        setSessoesCardio(dadosCache.sessoesCardio);
+        dadosCarregadosRef.current = true;
+        mesCarregadoRef.current = chaveMes;
+        ultimaConsultaRef.current = Date.now();
+        ultimaRevisaoRef.current = obterRevisaoDeDados();
+        return;
+      }
       const [
         resultadoTreinos,
         resultadoSessoes,

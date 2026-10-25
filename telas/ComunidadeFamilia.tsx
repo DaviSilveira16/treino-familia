@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   Image,
   Platform,
   ScrollView,
@@ -18,6 +19,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../supabase";
 import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import { obterRevisaoDeDados } from "../servicos/revisaoDados";
+import { criarControleConsultas, filtroCursorDesc, unirPorId, type CursorData } from "../servicos/paginacaoHistorico";
 
 type Familia = { id: string; name: string; invite_code: string };
 type MembroResumo = {
@@ -190,7 +192,9 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [erro, setErro] = useState("");
   const [membros, setMembros] = useState<MembroResumo[]>([]);
   const [publicacoes, setPublicacoes] = useState<Publicacao[]>([]);
-  const [limitePostsVisiveis, setLimitePostsVisiveis] = useState(10);
+  const cursorPostsRef = useRef<CursorData | null>(null);
+  const controleConsultas = useRef(criarControleConsultas());
+  const carregandoInicialRef = useRef(false);
   const [haMaisPosts, setHaMaisPosts] = useState(false);
   const [carregandoMaisPosts, setCarregandoMaisPosts] = useState(false);
   const [planos, setPlanos] = useState<Plano[]>([]);
@@ -205,12 +209,25 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const ultimaRevisaoRef = useRef(-1);
   const dadosCarregadosRef = useRef(false);
   const carregar = useCallback(async (idFamiliaSolicitada?: string) => {
+    const consulta = controleConsultas.current.iniciar();
+    carregandoInicialRef.current = true;
+    setCarregandoMaisPosts(false);
+    if (idFamiliaSolicitada && idFamiliaSolicitada !== familiaAtivaIdRef.current) {
+      familiaAtivaIdRef.current = idFamiliaSolicitada;
+      setFamiliaAtivaId(idFamiliaSolicitada);
+      setPublicacoes([]);
+      setMembros([]);
+      cursorPostsRef.current = null;
+      setHaMaisPosts(false);
+      setAtualizando(true);
+    }
     if (!dadosCarregadosRef.current) setCarregando(true);
     setErro("");
     try {
       const { data: respostaUsuario, error: erroUsuario } =
         await supabase.auth.getUser();
       const usuario = respostaUsuario.user;
+      if (!consulta.atual()) return;
       if (erroUsuario || !usuario)
         throw new Error("Sua sessão expirou. Entre novamente na sua conta.");
       setUsuarioId(usuario.id);
@@ -234,7 +251,9 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       const { data: associacoes, error: erroAssociacao } = await supabase
         .from("family_members")
         .select("family_id")
-        .eq("user_id", usuario.id);
+        .eq("user_id", usuario.id)
+        .abortSignal(consulta.signal);
+      if (!consulta.atual()) return;
       if (erroAssociacao) throw erroAssociacao;
 
       const idsFamilias = Array.from(
@@ -251,7 +270,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         setMembros([]);
         setPublicacoes([]);
         setHaMaisPosts(false);
-        setLimitePostsVisiveis(10);
+        cursorPostsRef.current = null;
         setPlanos([]);
         return;
       }
@@ -260,7 +279,9 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         .from("families")
         .select("id, name, invite_code")
         .in("id", idsFamilias)
-        .order("name", { ascending: true });
+        .order("name", { ascending: true })
+        .abortSignal(consulta.signal);
+      if (!consulta.atual()) return;
       if (erroListaFamilias) throw erroListaFamilias;
       const familiasDisponiveis = (listaFamilias ?? []) as Familia[];
       if (familiasDisponiveis.length === 0) {
@@ -271,7 +292,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         setMembros([]);
         setPublicacoes([]);
         setHaMaisPosts(false);
-        setLimitePostsVisiveis(10);
+        cursorPostsRef.current = null;
         setPlanos([]);
         return;
       }
@@ -288,7 +309,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       const [resumo, feed, listaPlanos] = await Promise.all([
         supabase.rpc("resumo_painel_familia_por_id", {
           p_family_id: familiaAtual.id,
-        }),
+        }).abortSignal(consulta.signal),
         supabase
           .from("community_posts")
           .select(
@@ -297,56 +318,68 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           .eq("family_id", familiaAtual.id)
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
-          .range(0, 10),
+          .limit(11)
+          .abortSignal(consulta.signal),
         supabase
           .from("workout_plans")
           .select("id, name")
           .eq("user_id", usuario.id)
-          .order("created_at", { ascending: true }),
+          .order("created_at", { ascending: true })
+          .abortSignal(consulta.signal),
       ]);
+      if (!consulta.atual()) return;
       if (resumo.error) throw resumo.error;
       if (feed.error) throw feed.error;
       if (listaPlanos.error) throw listaPlanos.error;
-      setMembros((resumo.data ?? []) as MembroResumo[]);
-      setPlanos((listaPlanos.data ?? []) as Plano[]);
       const listaPosts = (feed.data ?? []) as Publicacao[];
-      setHaMaisPosts(listaPosts.length > 10);
-      setLimitePostsVisiveis(10);
+      const pagina = listaPosts.slice(0, 10);
       const urlsFotos = await obterFotosAssinadas(
         "community-photos",
-        listaPosts.map((post) => post.image_path),
+        pagina.map((post) => post.image_path),
         3600,
         usuario.id,
       );
-      const postsComFotos = listaPosts.map((post) => ({
+      if (!consulta.atual()) return;
+      const postsComFotos = pagina.map((post) => ({
         ...post,
         image_url: post.image_path
           ? (urlsFotos.get(post.image_path) ?? null)
           : null,
       }));
-      setPublicacoes(postsComFotos.slice(0, 10));
+      setMembros((resumo.data ?? []) as MembroResumo[]);
+      setPlanos((listaPlanos.data ?? []) as Plano[]);
+      setHaMaisPosts(listaPosts.length > 10);
+      const ultimo = pagina[pagina.length - 1];
+      cursorPostsRef.current = ultimo ? { id: ultimo.id, data: ultimo.created_at } : null;
+      setPublicacoes(postsComFotos);
       ultimaConsultaRef.current = Date.now();
       ultimaRevisaoRef.current = obterRevisaoDeDados();
       dadosCarregadosRef.current = true;
     } catch (problema) {
+      if (!consulta.atual()) return;
       setErro(
         problema instanceof Error
           ? problema.message
           : "Não foi possível carregar a comunidade.",
       );
     } finally {
-      setCarregando(false);
-      setAtualizando(false);
+      if (consulta.atual()) {
+        carregandoInicialRef.current = false;
+        setCarregando(false);
+        setAtualizando(false);
+      }
     }
   }, []);
 
   // Somente o feed é paginado: não recarrega membros, famílias e planos.
   async function carregarMaisPublicacoes() {
     const idFamilia = familiaAtivaIdRef.current;
-    if (!idFamilia || !usuarioId || carregandoMaisPosts || !haMaisPosts) return;
+    const cursor = cursorPostsRef.current;
+    if (!idFamilia || !usuarioId || !cursor || carregandoInicialRef.current || !haMaisPosts) return;
+    const consulta = controleConsultas.current.iniciarPagina();
+    if (!consulta) return;
     setCarregandoMaisPosts(true);
     try {
-      const novoLimite = limitePostsVisiveis + 10;
       const { data, error } = await supabase
         .from("community_posts")
         .select(
@@ -355,34 +388,41 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         .eq("family_id", idFamilia)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
-        .range(0, novoLimite);
+        .or(filtroCursorDesc("created_at", cursor))
+        .limit(11)
+        .abortSignal(consulta.signal);
+      if (!consulta.atual()) return;
       if (error) throw error;
       if (familiaAtivaIdRef.current !== idFamilia) return;
       const listaPosts = (data ?? []) as Publicacao[];
+      const pagina = listaPosts.slice(0, 10);
       const urlsFotos = await obterFotosAssinadas(
         "community-photos",
-        listaPosts.map((post) => post.image_path),
+        pagina.map((post) => post.image_path),
         3600,
         usuarioId,
       );
-      if (familiaAtivaIdRef.current !== idFamilia) return;
+      if (!consulta.atual() || familiaAtivaIdRef.current !== idFamilia) return;
       setPublicacoes(
-        listaPosts.slice(0, novoLimite).map((post) => ({
+        (anteriores) => unirPorId(anteriores, pagina.map((post) => ({
           ...post,
           image_url: post.image_path
             ? (urlsFotos.get(post.image_path) ?? null)
             : null,
-        })),
+        }))),
       );
-      setLimitePostsVisiveis(novoLimite);
-      setHaMaisPosts(listaPosts.length > novoLimite);
+      const ultimo = pagina[pagina.length - 1];
+      if (ultimo) cursorPostsRef.current = { id: ultimo.id, data: ultimo.created_at };
+      setHaMaisPosts(listaPosts.length > 10);
     } catch (erro) {
+      if (!consulta.atual()) return;
       avisar(
         "Não foi possível carregar mais publicações",
         erro instanceof Error ? erro.message : "Tente novamente.",
       );
     } finally {
-      setCarregandoMaisPosts(false);
+      if (consulta.atual()) setCarregandoMaisPosts(false);
+      consulta.concluir();
     }
   }
 
@@ -396,7 +436,10 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       const espera = setTimeout(() => {
         void carregar();
       }, 80);
-      return () => clearTimeout(espera);
+      return () => {
+        clearTimeout(espera);
+        controleConsultas.current.cancelar();
+      };
     }, [carregar]),
   );
 
@@ -535,7 +578,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   }
 
   async function publicar() {
-    if (!familia || !usuarioId || publicando) return;
+    if (!familia || !usuarioId || publicando || carregandoInicialRef.current || familia.id !== familiaAtivaIdRef.current) return;
     if (tipoPublicacao === "texto" && !textoPublicacao.trim()) {
       avisar("Publicação vazia", "Escreva uma mensagem antes de publicar.");
       return;
@@ -754,7 +797,15 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
     );
 
   return (
-    <ScrollView style={estilos.tela} contentContainerStyle={estilos.conteudo}>
+    <FlatList
+      style={estilos.tela}
+      contentContainerStyle={estilos.conteudo}
+      data={publicacoes}
+      keyExtractor={(post) => post.id}
+      initialNumToRender={5}
+      maxToRenderPerBatch={5}
+      windowSize={5}
+      ListHeaderComponent={<View style={{ gap: 14 }}>
       <View style={estilos.topo}>
         <View style={{ flex: 1 }}>
           <Text style={[estilos.marca, { color: corTema }]}>
@@ -1018,7 +1069,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
         ) : null}
         <TouchableOpacity
           onPress={publicar}
-          disabled={publicando}
+          disabled={publicando || atualizando}
           style={[estilos.botao, { backgroundColor: corTema, marginTop: 12 }]}
         >
           {publicando ? (
@@ -1028,7 +1079,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           )}
         </TouchableOpacity>
       </View>
-      {publicacoes.slice(0, limitePostsVisiveis).map((post) => (
+      </View>}
+      renderItem={({ item: post }) => (
         <View key={post.id} style={estilos.cartaoPost}>
           <View style={estilos.cabecalhoPost}>
             <View
@@ -1040,6 +1092,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
               {post.author_avatar_url ? (
                 <ImagemLeve
                   uri={post.author_avatar_url}
+                  larguraPreview={96}
                   style={estilos.avatarImagem}
                 />
               ) : (
@@ -1101,37 +1154,37 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
                   ) : null}
                 </View>
               ))}
-              {haMaisPosts && (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  style={{ alignItems: "center", padding: 16 }}
-                  onPress={() => void carregarMaisPublicacoes()}
-                  disabled={carregandoMaisPosts}
-                >
-                  <Text style={{ color: corTema, fontWeight: "700" }}>
-                    {carregandoMaisPosts
-                      ? "Carregando publicações..."
-                      : "Ver mais publicações"}
-                  </Text>
-                </TouchableOpacity>
-              )}
             </View>
           ) : null}
         </View>
-      ))}
-      {publicacoes.length === 0 ? (
+      )}
+      ListEmptyComponent={
         <Text style={estilos.secundario}>
-          Ainda não há publicações. Seja a primeira pessoa a compartilhar uma
-          conquista!
+          Ainda não há publicações. Seja a primeira pessoa a compartilhar uma conquista!
         </Text>
-      ) : null}
-      {erro ? <Text style={estilos.erro}>{erro}</Text> : null}
-      {atualizando ? <ActivityIndicator color={corTema} /> : null}
-      <Text style={estilos.rodape}>
-        Publicações e estatísticas ficam visíveis apenas para integrantes deste
-        grupo familiar.
-      </Text>
-    </ScrollView>
+      }
+      ListFooterComponent={
+        <View style={{ gap: 14 }}>
+          {haMaisPosts ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={{ alignItems: "center", padding: 16 }}
+              onPress={() => void carregarMaisPublicacoes()}
+              disabled={carregandoMaisPosts || atualizando}
+            >
+              <Text style={{ color: corTema, fontWeight: "700" }}>
+                {carregandoMaisPosts ? "Carregando publicações..." : "Ver mais publicações"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          {erro ? <Text style={estilos.erro}>{erro}</Text> : null}
+          {atualizando ? <ActivityIndicator color={corTema} /> : null}
+          <Text style={estilos.rodape}>
+            Publicações e estatísticas ficam visíveis apenas para integrantes deste grupo familiar.
+          </Text>
+        </View>
+      }
+    />
   );
 }
 

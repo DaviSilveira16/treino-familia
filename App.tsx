@@ -1,7 +1,6 @@
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   BackHandler,
   AppState,
   Image,
@@ -32,6 +31,10 @@ import {
 } from "@react-navigation/stack";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import { Alert } from "./servicos/alerta";
+import { fecharModalAtivo } from "./servicos/voltarModal";
+import { prepararAuthAndroid, abrirGoogleAndroid, cancelarAuthAndroid, processarRetornoAndroid } from "./servicos/authAndroid";
+import BarraTreinoAtivo from "./telas/BarraTreinoAtivo";
 // Importado apenas quando o usuário abre a respectiva tela.
 const Perfil = React.lazy(() => import("./telas/Perfil"));
 // Importado apenas quando o usuário abre a respectiva tela.
@@ -186,6 +189,9 @@ function AppConteudo() {
   const [corTema, setCorTema] = useState(COR_PADRAO);
   const [rotaAtual, setRotaAtual] = useState<keyof Rotas>("Inicio");
   const [semInternet, setSemInternet] = useState(false);
+  const [redefinirSenha, setRedefinirSenha] = useState(false);
+  const [novaSenha, setNovaSenha] = useState("");
+  const [confirmarSenha, setConfirmarSenha] = useState("");
   const ultimaVoltaWeb = useRef(0);
 
   function atualizarRotaAtual() {
@@ -196,6 +202,7 @@ function AppConteudo() {
   // Volta pela pilha do app, sem acionar o histórico do Safari.
   // Uma proteção breve impede apenas dois eventos do MESMO gesto.
   function voltarComSeguranca() {
+    if (fecharModalAtivo()) return;
     const rota = referenciaNavegacao.getCurrentRoute()?.name;
     if (
       !referenciaNavegacao.isReady() ||
@@ -217,6 +224,24 @@ function AppConteudo() {
     setSessao(novaSessao);
     setCorTema(obterCorTema(novaSessao?.user.user_metadata?.tema_cor));
   }
+
+  // The existing APK emits this cancelable event before its compatibility fallback.
+  const tratarVoltaAndroid = useRef<() => boolean>(() => false);
+  useEffect(() => { tratarVoltaAndroid.current = () => {
+    if (fecharModalAtivo()) return true;
+    if (!sessao && modo !== "login") { setModo("login"); return true; }
+    if (!referenciaNavegacao.isReady()) return false;
+    if (referenciaNavegacao.canGoBack()) { voltarComSeguranca(); return true; }
+    const rota = referenciaNavegacao.getCurrentRoute()?.name;
+    if (rota && rota !== "Inicio") { referenciaNavegacao.navigate("Inicio"); return true; }
+    return false;
+  }; });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const voltar = (evento: Event) => { if (tratarVoltaAndroid.current()) evento.preventDefault(); };
+    window.addEventListener("treino-familia:android-back-v1", voltar);
+    return () => window.removeEventListener("treino-familia:android-back-v1", voltar);
+  }, []);
 
   // IMPORTANTE: não usar pushState/popstate para simular o botão Voltar
   // no iPhone. Ao arrastar, o Safari pode mostrar uma transição da página do
@@ -364,8 +389,9 @@ function AppConteudo() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_evento, novaSessao) => {
+    } = supabase.auth.onAuthStateChange((evento, novaSessao) => {
       atualizarSessao(novaSessao);
+      if (evento === "PASSWORD_RECOVERY") setRedefinirSenha(true);
       setCarregando(false);
     });
 
@@ -373,6 +399,15 @@ function AppConteudo() {
       componenteAtivo = false;
       subscription.unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof location === "undefined" || location.pathname !== "/auth/android/callback") return;
+    let ativo = true;
+    void processarRetornoAndroid().then((retorno) => { if (ativo && retorno.recovery) setRedefinirSenha(true); })
+      .catch((erro) => { if (ativo) Alert.alert("Retorno ao aplicativo", erro instanceof Error ? erro.message : "Inicie um novo pedido no app."); })
+      .finally(() => { if (ativo) history.replaceState(null, "", "/"); });
+    return () => { ativo = false; };
   }, []);
 
   useEffect(() => {
@@ -501,24 +536,29 @@ function AppConteudo() {
     setEnviando(true);
 
     try {
+      const pedido = await prepararAuthAndroid("google");
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: URL_APLICATIVO,
-          skipBrowserRedirect: Platform.OS !== "web",
+          redirectTo: pedido?.redirectTo ?? URL_APLICATIVO,
+          skipBrowserRedirect: !!pedido || Platform.OS !== "web",
         },
       });
 
       if (error) {
+        await cancelarAuthAndroid().catch(() => {});
         Alert.alert("Não foi possível entrar com Google", error.message);
         return;
       }
 
-      if (Platform.OS !== "web" && data.url) {
+      if (pedido && data.url) {
+        await abrirGoogleAndroid(data.url, pedido.state);
+      } else if (Platform.OS !== "web" && data.url) {
         await Linking.openURL(data.url);
       }
-    } catch {
-      Alert.alert("Erro", "Não foi possível iniciar o login com Google.");
+    } catch (erro) {
+      await cancelarAuthAndroid().catch(() => {});
+      Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível iniciar o login com Google.");
     } finally {
       setEnviando(false);
     }
@@ -543,11 +583,12 @@ function AppConteudo() {
     setEnviando(true);
 
     try {
+      const pedido = await prepararAuthAndroid("signup");
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password: senha,
         options: {
-          emailRedirectTo: URL_APLICATIVO,
+          emailRedirectTo: pedido?.redirectTo ?? URL_APLICATIVO,
           data: {
             nome: nome.trim(),
             tema_cor: COR_PADRAO,
@@ -556,11 +597,13 @@ function AppConteudo() {
       });
 
       if (error) {
+        await cancelarAuthAndroid().catch(() => {});
         Alert.alert("Não foi possível cadastrar", error.message);
         return;
       }
 
       if (data.session) {
+        await cancelarAuthAndroid().catch(() => {});
         Alert.alert("Cadastro realizado", "Sua conta foi criada com sucesso.");
       } else {
         setModo("login");
@@ -587,14 +630,16 @@ function AppConteudo() {
     setEnviando(true);
 
     try {
+      const pedido = await prepararAuthAndroid("recovery");
       const { error } = await supabase.auth.resetPasswordForEmail(
         email.trim(),
         {
-          redirectTo: URL_APLICATIVO,
+          redirectTo: pedido?.redirectTo ?? URL_APLICATIVO,
         },
       );
 
       if (error) {
+        await cancelarAuthAndroid().catch(() => {});
         Alert.alert("Não foi possível enviar", error.message);
         return;
       }
@@ -627,6 +672,20 @@ function AppConteudo() {
     setCorTema(COR_PADRAO);
   }
 
+  async function salvarNovaSenha() {
+    if (novaSenha.length < 8 || novaSenha !== confirmarSenha) {
+      Alert.alert("Confira a senha", "Use ao menos 8 caracteres e repita a mesma senha."); return;
+    }
+    setEnviando(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: novaSenha });
+      if (error) throw error;
+      setNovaSenha(""); setConfirmarSenha(""); setRedefinirSenha(false);
+      Alert.alert("Senha atualizada", "Sua nova senha foi salva.");
+    } catch { Alert.alert("Não foi possível alterar", "Tente novamente ou solicite outro link de recuperação."); }
+    finally { setEnviando(false); }
+  }
+
   if (carregando) {
     return (
       <View style={estilos.carregando}>
@@ -637,6 +696,18 @@ function AppConteudo() {
         </Text>
       </View>
     );
+  }
+
+  if (redefinirSenha && sessao) {
+    return <KeyboardAvoidingView style={estilos.carregando} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <View style={[estilos.cartaoAutenticacao, { width: "90%", maxWidth: 460 }]}>
+        <Text style={estilos.tituloFormulario}>Defina sua nova senha</Text>
+        <TextInput accessibilityLabel="Nova senha" style={estilos.input} placeholder="Ao menos 8 caracteres" placeholderTextColor="#828A85" secureTextEntry autoCapitalize="none" value={novaSenha} onChangeText={setNovaSenha} />
+        <TextInput accessibilityLabel="Confirme a nova senha" style={[estilos.input, { marginTop: 12 }]} placeholder="Repita a nova senha" placeholderTextColor="#828A85" secureTextEntry autoCapitalize="none" value={confirmarSenha} onChangeText={setConfirmarSenha} />
+        <TouchableOpacity accessibilityRole="button" style={[estilos.botaoPrincipal, { backgroundColor: corTema, marginTop: 16 }]} disabled={enviando} onPress={() => void salvarNovaSenha()}><Text style={estilos.textoBotaoPrincipal}>{enviando ? "Salvando..." : "Salvar nova senha"}</Text></TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" style={estilos.linkContainer} onPress={() => { setRedefinirSenha(false); void sair(); }}><Text style={[estilos.link, { color: corTema }]}>Cancelar e sair da conta</Text></TouchableOpacity>
+      </View>
+    </KeyboardAvoidingView>;
   }
 
   if (!sessao) {
@@ -961,7 +1032,7 @@ function AppConteudo() {
 
                   <TreinoDoDia
                     onAbrirProgramacao={() => navigation.navigate("frequencia")}
-                    onAbrirTreino={() => navigation.navigate("treinos")}
+                    onAbrirTreino={(plano) => plano ? navigation.navigate("treinoAtivo", plano) : navigation.navigate("treinos")}
                     corTema={corTema}
                   />
 
@@ -1165,10 +1236,11 @@ function AppConteudo() {
             )}
           </Pilha.Screen>
         </Pilha.Navigator>
+        {sessao ? <BarraTreinoAtivo key={sessao.user.id} usuarioId={sessao.user.id} corTema={corTema} visivel={rotaAtual !== "treinoAtivo"} onRetomar={plano => { if (referenciaNavegacao.isReady()) referenciaNavegacao.navigate("treinoAtivo", plano); }} /> : null}
         {semInternet ? (
           <View style={estilos.avisoSemInternet} accessibilityRole="alert">
             <Text style={estilos.textoSemInternet}>
-              Sem internet · os registros precisam de conexão para serem salvos.
+              Sem internet · alterações do treino ficam neste aparelho até sincronizar.
             </Text>
           </View>
         ) : null}

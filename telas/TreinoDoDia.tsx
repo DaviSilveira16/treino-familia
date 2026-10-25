@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   StyleSheet,
@@ -9,10 +9,11 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabase";
 import { obterRevisaoDeDados } from "../servicos/revisaoDados";
+import { assinarRascunhos, lerResumoTreinoAtivo } from "../servicos/treinoLocal";
 
 type Props = {
   onAbrirProgramacao: () => void;
-  onAbrirTreino: () => void;
+  onAbrirTreino: (plano?: { planId: string; planName: string }) => void;
   corTema?: string;
 };
 
@@ -20,6 +21,7 @@ type TreinoHoje = {
   nome: string;
   definido: boolean;
 };
+type TreinoContinuar = { planId: string; planName: string; finalizacaoPendente?: boolean; concluidas?: number; total?: number };
 
 function obterCorTransparente(cor: string, transparencia: string) {
   if (/^#[0-9A-Fa-f]{6}$/.test(cor)) {
@@ -49,20 +51,48 @@ export default function TreinoDoDia({
 }: Props) {
   const [treino, setTreino] = useState<TreinoHoje | null>(null);
   const [carregando, setCarregando] = useState(true);
+  const [continuar, setContinuar] = useState<TreinoContinuar | null>(null);
+  const usuarioRef = useRef("");
   const ultimaConsultaRef = useRef(0);
   const ultimaRevisaoRef = useRef(-1);
   const dadosCarregadosRef = useRef(false);
+
+  const atualizarLocal = useCallback(async () => {
+    const id = usuarioRef.current;
+    if (!id) return;
+    const resumo = await lerResumoTreinoAtivo(id);
+    if (usuarioRef.current !== id) return;
+    if (resumo) setContinuar({ planId: resumo.planId, planName: resumo.planName,
+      finalizacaoPendente: resumo.finalizacaoPendente, concluidas: resumo.seriesConcluidas, total: resumo.totalSeries });
+    else setContinuar((anterior) => anterior?.finalizacaoPendente ? null : anterior);
+  }, []);
+  useEffect(() => assinarRascunhos(() => { void atualizarLocal().catch(() => {}); }), [atualizarLocal]);
 
   const carregarTreinoHoje = useCallback(async () => {
     if (!dadosCarregadosRef.current) setCarregando(true);
 
     try {
-      const { data: usuarioData, error: erroUsuario } =
-        await supabase.auth.getUser();
+      const { data: autenticacao, error: erroUsuario } = await supabase.auth.getSession();
+      const usuarioData = { user: autenticacao.session?.user };
 
       if (erroUsuario || !usuarioData.user) {
         setTreino(null);
+        setContinuar(null);
+        usuarioRef.current = "";
         return;
+      }
+      usuarioRef.current = usuarioData.user.id;
+      await atualizarLocal();
+      const local = await lerResumoTreinoAtivo(usuarioData.user.id);
+      if (!local) {
+        const { data: ativa, error: erroAtiva } = await supabase.from("workout_sessions")
+          .select("id, plan_id").eq("user_id", usuarioData.user.id).eq("status", "em_andamento")
+          .order("started_at", { ascending: false }).limit(1).maybeSingle();
+        if (!erroAtiva && ativa?.plan_id) {
+          const { data: plano } = await supabase.from("workout_plans").select("name")
+            .eq("id", ativa.plan_id).eq("user_id", usuarioData.user.id).maybeSingle();
+          if (plano?.name) setContinuar({ planId: ativa.plan_id, planName: plano.name });
+        } else if (!erroAtiva) setContinuar(null);
       }
 
       const inicioDia = obterInicioDoDia();
@@ -120,10 +150,11 @@ export default function TreinoDoDia({
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [atualizarLocal]);
 
   useFocusEffect(
     useCallback(() => {
+      void atualizarLocal().catch(() => {});
       if (
         Date.now() - ultimaConsultaRef.current < 12000 &&
         ultimaRevisaoRef.current === obterRevisaoDeDados()
@@ -133,7 +164,7 @@ export default function TreinoDoDia({
         void carregarTreinoHoje();
       }, 80);
       return () => clearTimeout(espera);
-    }, [carregarTreinoHoje]),
+    }, [carregarTreinoHoje, atualizarLocal]),
   );
 
   const nomesDias = [
@@ -159,7 +190,7 @@ export default function TreinoDoDia({
       <View style={estilos.topo}>
         <View style={estilos.textos}>
           <Text style={[estilos.rotulo, { color: corTema }]}>
-            TREINO DE HOJE
+            {continuar ? "SEU TREINO" : "TREINO DE HOJE"}
           </Text>
 
           <Text style={estilos.dia}>{nomesDias[new Date().getDay()]}</Text>
@@ -168,7 +199,18 @@ export default function TreinoDoDia({
         <Text style={estilos.emoji}>{treino?.definido ? "💪" : "🏋️"}</Text>
       </View>
 
-      {carregando ? (
+      {continuar ? (
+        <>
+          <Text style={estilos.titulo}>{continuar.planName}</Text>
+          <Text style={estilos.descricao}>{continuar.finalizacaoPendente
+            ? "Treino encerrado neste aparelho. A conclusão e o horário original estão protegidos até a confirmação do envio."
+            : `Seu treino está em andamento${continuar.total ? ` · ${continuar.concluidas} de ${continuar.total} séries concluídas` : ""}. Continue de onde parou.`}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${continuar.finalizacaoPendente ? "Conferir envio de" : "Continuar"} ${continuar.planName}`} style={[estilos.botaoPrincipal, { backgroundColor: corTema }]}
+            onPress={() => onAbrirTreino({ planId: continuar.planId, planName: continuar.planName })} activeOpacity={0.8}>
+            <Text style={estilos.textoBotaoPrincipal}>{continuar.finalizacaoPendente ? "Conferir envio do treino" : "Continuar treino"}</Text>
+          </TouchableOpacity>
+        </>
+      ) : carregando ? (
         <ActivityIndicator color={corTema} style={estilos.carregando} />
       ) : treino?.definido ? (
         <>
@@ -180,7 +222,7 @@ export default function TreinoDoDia({
 
           <TouchableOpacity
             style={[estilos.botaoPrincipal, { backgroundColor: corTema }]}
-            onPress={onAbrirTreino}
+            onPress={() => onAbrirTreino()}
             activeOpacity={0.8}
           >
             <Text style={estilos.textoBotaoPrincipal}>Abrir meus treinos</Text>

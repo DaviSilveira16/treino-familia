@@ -4,10 +4,19 @@ type CacheFoto = { url: string; expiraEm: number };
 const cache = new Map<string, CacheFoto>();
 const MAXIMO_CACHE = 200;
 const MAXIMO_VALIDADE_CACHE_MS = 10 * 60 * 1000;
+let geracao = 0;
+let contaAtual: string | null = null;
+const pendentes = new Map<string, Promise<Map<string, string>>>();
 
 // Nunca manter URLs privadas de uma conta depois do logout.
-supabase.auth.onAuthStateChange((evento) => {
-  if (evento === "SIGNED_OUT") cache.clear();
+supabase.auth.onAuthStateChange((evento, sessao) => {
+  const conta = sessao?.user.id ?? null;
+  if (evento === "SIGNED_OUT" || conta !== contaAtual) {
+    geracao++;
+    cache.clear();
+    pendentes.clear();
+  }
+  contaAtual = conta;
 });
 
 /**
@@ -21,6 +30,25 @@ export async function obterFotosAssinadas(
   validadeSegundos: number,
   usuarioId: string,
 ): Promise<Map<string, string>> {
+  const chave = JSON.stringify([geracao, usuarioId, bucket, validadeSegundos, [...new Set(caminhos.filter(Boolean))].sort()]);
+  const existente = pendentes.get(chave);
+  if (existente) return existente;
+  const pedido = assinarFotos(bucket, caminhos, validadeSegundos, usuarioId);
+  pendentes.set(chave, pedido);
+  try {
+    return await pedido;
+  } finally {
+    if (pendentes.get(chave) === pedido) pendentes.delete(chave);
+  }
+}
+
+async function assinarFotos(
+  bucket: "exercise-photos" | "community-photos",
+  caminhos: Array<string | null | undefined>,
+  validadeSegundos: number,
+  usuarioId: string,
+): Promise<Map<string, string>> {
+  const versao = geracao;
   const unicos = [...new Set(caminhos.filter((c): c is string => Boolean(c)))];
   const urls = new Map<string, string>();
   if (!usuarioId || unicos.length === 0) return urls;
@@ -30,7 +58,11 @@ export async function obterFotosAssinadas(
   for (const caminho of unicos) {
     const chave = `${usuarioId}:${bucket}:${caminho}`;
     const salvo = cache.get(chave);
-    if (salvo && salvo.expiraEm > agora) urls.set(caminho, salvo.url);
+    if (salvo && salvo.expiraEm > agora) {
+      urls.set(caminho, salvo.url);
+      cache.delete(chave);
+      cache.set(chave, salvo);
+    }
     else {
       cache.delete(chave);
       faltantes.push(caminho);
@@ -42,6 +74,7 @@ export async function obterFotosAssinadas(
     const { data, error } = await supabase.storage
       .from(bucket)
       .createSignedUrls(lote, validadeSegundos);
+    if (versao !== geracao) return new Map();
     if (error) {
       if (__DEV__) console.warn(`Fotos de ${bucket}:`, error.message);
       continue;
