@@ -24,7 +24,9 @@ function query(table) {
     }).then(resolve, reject); },
   }; return q;
 }
-const sync = carregar("servicos/treinoSincronizacao.ts", { "../supabase": { supabase: { auth: { getUser: async () => ({ data: { user: { id: "u1" } }, error: null }) }, from: query } }, "./revisaoDados": { registrarMudancaDeDados() {} }, "./treinoLocal": local });
+const mockSupabase = { supabase: { auth: { getUser: async () => ({ data: { user: { id: "u1" } }, error: null }) }, from: query } };
+const modelos = carregar("servicos/salvarModeloTreino.ts", { "../supabase": mockSupabase });
+const sync = carregar("servicos/treinoSincronizacao.ts", { "../supabase": mockSupabase, "./revisaoDados": { registrarMudancaDeDados() {} }, "./treinoLocal": local, "./salvarModeloTreino": modelos });
 const serie = { chave: "e1:1", exercise_id: "e1", exercise_name: "Exercício", set_number: 1, reps: "10", weight_kg: "20", concluida: true, pendente: "salvar", registroId: "r1" };
 const draft = { versao: 1, usuarioId: "u1", planId: "p1", planName: "Plano", sessao: { id: "s1", plan_id: "p1", started_at: "2026-10-24T12:00:00Z" }, exercicios: [], series: [serie], intensidade: "moderada", esforco: "adequado", salvoEm: "2026-10-24T12:10:00Z" };
 (async () => {

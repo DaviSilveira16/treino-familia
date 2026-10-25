@@ -1,6 +1,7 @@
 import { supabase } from "../supabase";
 import { registrarMudancaDeDados } from "./revisaoDados";
 import { atualizarRascunho, lerRascunho, listarRascunhos, mesmaOperacao, type TreinoRascunho } from "./treinoLocal";
+import { salvarModeloDoTreino, ConflitoModeloTreino } from "./salvarModeloTreino";
 
 export type ResultadoSincronizacao = {
   rascunho: TreinoRascunho | null;
@@ -16,8 +17,10 @@ export function situacaoConclusao(
   sessao: { plan_id: string; status: string; finished_at?: string | null } | null,
   rascunho: Pick<TreinoRascunho, "planId" | "finalizacao">,
 ): "ativa" | "confirmada" | "conflito" {
-  if (!sessao || sessao.plan_id !== rascunho.planId) return "conflito";
-  if (sessao.status === "em_andamento") return "ativa";
+  if (!sessao) return "conflito";
+  const modelo = rascunho.finalizacao?.modelo;
+  if (sessao.plan_id !== rascunho.planId && !(modelo?.modo === "novo" && sessao.plan_id === modelo.planId)) return "conflito";
+  if (sessao.status === "em_andamento" && sessao.plan_id === rascunho.planId) return "ativa";
   if (sessao.status === "concluido" && rascunho.finalizacao
     && Date.parse(sessao.finished_at ?? "") === Date.parse(rascunho.finalizacao.finishedAt)) return "confirmada";
   return "conflito";
@@ -44,17 +47,32 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
   try {
     const { data: autenticado, error: erroAuth } = await supabase.auth.getUser();
     if (erroAuth || autenticado.user?.id !== usuarioId) throw new Error("Entre novamente na sua conta para sincronizar este treino.");
-    const { data: remota, error: erroSessao } = await supabase.from("workout_sessions")
+    let { data: remota, error: erroSessao } = await supabase.from("workout_sessions")
       .select("id, plan_id, status, finished_at").eq("id", sessaoId).eq("user_id", usuarioId).maybeSingle();
     if (erroSessao) throw erroSessao;
+    if (!remota && local.criacaoPendente) {
+      const data = new Date(local.sessao.started_at), inicio = new Date(data.getFullYear(), data.getMonth(), data.getDate()), fim = new Date(data.getFullYear(), data.getMonth(), data.getDate() + 1);
+      const { data: doDia, error: erroDia } = await supabase.from("workout_sessions").select("id, plan_id").eq("user_id", usuarioId).gte("started_at", inicio.toISOString()).lt("started_at", fim.toISOString()).limit(2);
+      if (erroDia) throw erroDia;
+      if (doDia?.some(s => s.id !== sessaoId && s.plan_id)) throw new ConflitoTreino("Já existe um treino nesta data. Seu registro local foi preservado; confira a Frequência antes de reenviar.");
+      const { data: ativas, error: erroAtivas } = await supabase.from("workout_sessions").select("id").eq("user_id", usuarioId).eq("status", "em_andamento").limit(1);
+      if (erroAtivas) throw erroAtivas;
+      if (ativas?.some(s => s.id !== sessaoId)) throw new Error("Conclua o treino em andamento antes de enviar o registro pela Frequência.");
+      const { data: criada, error } = await supabase.from("workout_sessions").insert({ id: sessaoId, user_id: usuarioId, plan_id: local.planId, started_at: local.sessao.started_at, status: "em_andamento" }).select("id, plan_id, status, finished_at").single();
+      if (error) throw error;
+      remota = criada;
+    }
     const situacao = situacaoConclusao(remota, local);
     if (situacao === "conflito") throw new ConflitoTreino("Esta sessão foi encerrada ou alterada em outro aparelho. O rascunho e sua conclusão pendente foram preservados para conferência.");
     if (situacao === "confirmada" && local.series.some((serie) => serie.pendente)) throw new ConflitoTreino("O servidor já encerrou esta sessão, mas ainda existem séries locais pendentes. Os dados foram preservados para conferência.");
 
     for (const item of local.series.filter((serie) => serie.pendente)) {
-      const { data: existentes, error: erroBusca } = await supabase.from("workout_sets")
-        .select("id, reps, weight_kg").eq("user_id", usuarioId).eq("session_id", sessaoId)
-        .eq("exercise_id", item.exercise_id).eq("set_number", item.set_number).limit(2);
+      let busca = supabase.from("workout_sets").select("id, reps, weight_kg").eq("user_id", usuarioId).eq("session_id", sessaoId);
+      if (item.avulsa) {
+        if (!item.registroId) throw new Error("Exercício da sessão sem identificador local. Reabra o treino para conferir.");
+        busca = busca.eq("id", item.registroId);
+      } else busca = busca.eq("exercise_id", item.exercise_id).eq("set_number", item.set_number);
+      const { data: existentes, error: erroBusca } = await busca.limit(2);
       if (erroBusca) throw erroBusca;
       if ((existentes ?? []).length > 1) throw new ConflitoTreino("Há séries duplicadas no servidor. Seu rascunho foi preservado para conferência.");
       const existente = existentes?.[0];
@@ -77,7 +95,7 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
         if (!Number.isInteger(reps) || reps < 1 || reps > 1000 || !Number.isFinite(peso) || peso < 0 || peso > 2000) {
           throw new Error(`Valores inválidos na série ${item.set_number} de ${item.exercise_name}.`);
         }
-        const dados = { user_id: usuarioId, session_id: sessaoId, exercise_id: item.exercise_id, exercise_name: item.exercise_name, set_number: item.set_number, reps, weight_kg: peso };
+        const dados = { user_id: usuarioId, session_id: sessaoId, exercise_id: item.avulsa ? null : item.exercise_id, exercise_name: item.exercise_name, set_number: item.set_number, reps, weight_kg: peso };
         const iguais = existente && Number(existente.reps) === reps && Number(existente.weight_kg) === peso;
         if (iguais) registroId = existente.id;
         else if (existente) {
@@ -125,6 +143,7 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
         .select("id").maybeSingle();
       if (erroDetalhes) throw new Error("O encerramento foi enviado. Os detalhes permanecem guardados até a próxima sincronização.");
       if (!detalhes) throw new ConflitoTreino("O encerramento remoto mudou. Seus detalhes locais continuam preservados.");
+      await salvarModeloDoTreino(local);
       await atualizarRascunho(usuarioId, planId, (atual) => atual.sessao.id === sessaoId
         && atual.finalizacao?.finishedAt === finalizacao.finishedAt && !atual.series.some((serie) => serie.pendente) ? null : atual);
       registrarMudancaDeDados();
@@ -134,7 +153,7 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
     return { rascunho: local, concluido: false };
   } catch (erro) {
     const mensagem = erro instanceof Error ? erro.message : "Não foi possível sincronizar. Seus dados continuam guardados neste aparelho.";
-    const conflito = erro instanceof ConflitoTreino;
+    const conflito = erro instanceof ConflitoTreino || erro instanceof ConflitoModeloTreino;
     local = await atualizarRascunho(usuarioId, planId, (atual) => atual.sessao.id !== sessaoId ? atual : { ...atual, erroSincronizacao: mensagem, conflitoSincronizacao: conflito });
     return { rascunho: local, concluido: false, erro: mensagem, conflito };
   }

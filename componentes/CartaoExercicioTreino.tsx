@@ -8,6 +8,8 @@ type Props = {
   cor: string; proximaChave?: string; bloqueado: boolean; chaveSalvando: string | null;
   onCampo: (chave: string, campo: "reps" | "weight_kg", valor: string) => void;
   onAlternar: (serie: SerieRascunho) => void; onCopiar: (id: string) => void;
+  onEditar?: (id: string) => void; onRetirar?: (id: string) => void;
+  onAdicionarSerie?: (id: string) => void; onRetirarSerie?: (serie: SerieRascunho) => void;
 };
 
 const ControleSerie = memo(function ControleSerie({ serie, cor, proxima, bloqueado, salvando, onCampo, onAlternar }: {
@@ -34,9 +36,14 @@ const ControleSerie = memo(function ControleSerie({ serie, cor, proxima, bloquea
   </View>;
 });
 
-export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({ exercicio, series, anterior, cor, proximaChave, bloqueado, chaveSalvando, onCampo, onAlternar, onCopiar }: Props) {
+export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({ exercicio, series, anterior, cor, proximaChave, bloqueado, chaveSalvando, onCampo, onAlternar, onCopiar, onEditar, onRetirar, onAdicionarSerie, onRetirarSerie }: Props) {
   return <View style={estilos.cartao}>
     <Text style={estilos.titulo}>{exercicio.name}</Text>
+    {exercicio.avulso ? <Text style={[estilos.ajuda, { color: cor }]}>Adaptado nesta sessão</Text> : null}
+    {onEditar || onRetirar ? <View style={estilos.campos}>
+      {onEditar ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Editar ${exercicio.name}`} disabled={bloqueado} onPress={() => onEditar(exercicio.id)} style={estilos.copiar}><Text style={{ color: cor }}>Editar exercício</Text></TouchableOpacity> : null}
+      {onRetirar ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Retirar ${exercicio.name} desta sessão`} disabled={bloqueado} onPress={() => onRetirar(exercicio.id)} style={estilos.copiar}><Text style={{ color: "#FCA5A5" }}>Retirar da sessão</Text></TouchableOpacity> : null}
+    </View> : null}
     <Text style={estilos.ajuda}>{series.filter((serie) => serie.concluida).length}/{series.length} séries concluídas · {exercicio.reps_goal} repetições previstas</Text>
     {anterior ? <View style={estilos.referencia}>
       <Text style={estilos.texto}>Última sessão · {new Date(anterior.data).toLocaleDateString("pt-BR")}</Text>
@@ -44,7 +51,8 @@ export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({ exerc
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Usar última sessão de ${exercicio.name} nas séries não concluídas`} disabled={bloqueado || !series.some((serie) => !serie.concluida && !serie.pendente)} style={estilos.copiar} onPress={() => onCopiar(exercicio.id)}><Text style={{ color: cor, fontWeight: "800" }}>Usar nas séries não concluídas</Text></TouchableOpacity>
       <Text style={estilos.ajuda}>A cópia substitui apenas os campos das séries abertas deste rascunho. Suas cargas de referência permanecem salvas.</Text>
     </View> : null}
-    {series.map((serie) => <ControleSerie key={serie.chave} serie={serie} cor={cor} proxima={proximaChave === serie.chave} bloqueado={bloqueado || chaveSalvando !== null} salvando={chaveSalvando === serie.chave} onCampo={onCampo} onAlternar={onAlternar} />)}
+    {series.map((serie) => <View key={serie.chave}><ControleSerie serie={serie} cor={cor} proxima={proximaChave === serie.chave} bloqueado={bloqueado || chaveSalvando !== null} salvando={chaveSalvando === serie.chave} onCampo={onCampo} onAlternar={onAlternar} />{onRetirarSerie ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Retirar série ${serie.set_number} de ${exercicio.name}`} disabled={bloqueado || series.length <= 1} style={estilos.copiar} onPress={() => onRetirarSerie(serie)}><Text style={estilos.ajuda}>Retirar esta série</Text></TouchableOpacity> : null}</View>)}
+    {onAdicionarSerie ? <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Adicionar série em ${exercicio.name}`} disabled={bloqueado || series.length >= 20} style={estilos.copiar} onPress={() => onAdicionarSerie(exercicio.id)}><Text style={{ color: cor, fontWeight: "800" }}>+ Adicionar série</Text></TouchableOpacity> : null}
   </View>;
 });
 const estilos = StyleSheet.create({
