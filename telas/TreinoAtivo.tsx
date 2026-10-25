@@ -6,10 +6,12 @@ import React, {
   useState,
 } from "react";
 import { useIsFocused } from "@react-navigation/native";
-import { registrarMudancaDeDados } from "../servicos/revisaoDados";
+
 import {
   ActivityIndicator,
   Platform,
+  Modal,
+  TextInput,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -34,37 +36,35 @@ import {
   type SerieRascunho,
   type EsforcoPercebido,
   type TreinoRascunho,
+  type PlanoExercicio,
 } from "../servicos/treinoLocal";
 import {
-  estimarCaloriasAtivasTreino,
-  type DadosCalculoTreino,
+  metricasRegistroTreino,
+  lerPerfilTreino,
+  type PerfilCalculoTreino,
   type IntensidadeTreino,
   type SerieCalculoTreino,
-  type SexoTreino,
 } from "../servicos/caloriasTreino";
 
-const CHAVE_PREFERENCIA_DESCANSO = "@treino-familia:descanso-segundos:v1";
 import { CronometroTreino, PainelDescanso, OPCOES_DESCANSO } from "../componentes/ContadoresTreino";
 import { CartaoExercicioTreino } from "../componentes/CartaoExercicioTreino";
 import { sincronizarRascunho } from "../servicos/treinoSincronizacao";
 import { carregarUltimasSeries, type UltimoExercicio } from "../servicos/ultimasSeriesTreino";
+import EditorExercicioSessao, { type DadosEditorExercicio } from "../componentes/EditorExercicioSessao";
+import ResumoRegistroTreino from "../componentes/ResumoRegistroTreino";
+import { criarExercicioSessao, acrescentarSerie, retirarSerie, prepararModeloTreino } from "../servicos/treinoAdaptavel";
+import { useVoltarDoModal } from "../servicos/voltarModal";
 
-type PerfilTreino = Pick<
-  DadosCalculoTreino,
-  "pesoKg" | "alturaCm" | "idade" | "sexo"
->;
+const CHAVE_PREFERENCIA_DESCANSO = "@treino-familia:descanso-segundos:v1";
+
+type PerfilTreino = PerfilCalculoTreino;
 
 type Props = {
   route: { params: { planId: string; planName: string } };
   onVoltar: () => void;
   corTema?: string;
 };
-type ExercicioBase = {
-  id: string;
-  name: string;
-  sets_goal: number;
-  reps_goal: string;
-};
+type ExercicioBase = PlanoExercicio;
 type SerieAtiva = SerieRascunho;
 type SessaoAtiva = { id: string; plan_id: string; started_at: string };
 type RegistroSalvo = {
@@ -91,35 +91,15 @@ function confirmar(titulo: string, mensagem: string): Promise<boolean> {
   return new Promise((resolver) => {
     Alert.alert(titulo, mensagem, [
       {
-        text: "Continuar treinando",
+        text: "Cancelar",
         style: "cancel",
         onPress: () => resolver(false),
       },
-      { text: "Finalizar", onPress: () => resolver(true) },
+      { text: "Confirmar", onPress: () => resolver(true) },
     ]);
   });
 }
 
-function lerPerfil(metadados: Record<string, unknown>): PerfilTreino | null {
-  const pesoKg = Number(metadados.peso_kg);
-  const alturaCm = Number(metadados.altura_cm);
-  const idade = Number(metadados.idade);
-  const sexo = metadados.sexo;
-  if (
-    !Number.isFinite(pesoKg) ||
-    pesoKg < 20 ||
-    pesoKg > 400 ||
-    !Number.isFinite(alturaCm) ||
-    alturaCm < 100 ||
-    alturaCm > 250 ||
-    !Number.isInteger(idade) ||
-    idade < 18 ||
-    idade > 110 ||
-    (sexo !== "masculino" && sexo !== "feminino")
-  )
-    return null;
-  return { pesoKg, alturaCm, idade, sexo: sexo as SexoTreino };
-}
 
 export default function TreinoAtivo({
   route,
@@ -152,6 +132,15 @@ export default function TreinoAtivo({
   const [conflitoRemoto, setConflitoRemoto] = useState(false);
   const [bloqueioSessao, setBloqueioSessao] = useState(false);
   const [online, setOnline] = useState(true);
+  const [editorId, setEditorId] = useState<string | null>(null);
+  const [revisaoFim, setRevisaoFim] = useState<string | null>(null);
+  const [duracaoFinal, setDuracaoFinal] = useState("");
+  const [destinoModelo, setDestinoModelo] = useState<"sessao" | "novo" | "adicionar">("sessao");
+  const [nomeNovoPlano, setNomeNovoPlano] = useState("");
+  const [erroConclusao, setErroConclusao] = useState("");
+  const criacaoPendenteRef = useRef(false);
+  useVoltarDoModal(editorId !== null, () => setEditorId(null));
+  useVoltarDoModal(revisaoFim !== null, () => { if (!salvando) setRevisaoFim(null); });
   const prontoRef = useRef(false);
   const sincronizandoRef = useRef(false);
   const seriesRef = useRef(series);
@@ -199,6 +188,7 @@ export default function TreinoAtivo({
         esforco: esforcoRef.current,
         descanso: descansoRef.current,
         finalizacao: finalizacaoRef.current,
+        criacaoPendente: criacaoPendenteRef.current,
         salvoEm: new Date().toISOString(),
       };
     },
@@ -305,11 +295,12 @@ export default function TreinoAtivo({
         );
       const idUsuario = usuarioEmCache.id;
       const local = await lerRascunho(idUsuario, planId);
+      criacaoPendenteRef.current = Boolean(local?.criacaoPendente);
       usuarioRef.current = idUsuario;
       const sessaoUsuario = { user: usuarioEmCache };
       setUsuarioId(idUsuario);
       setPerfil(
-        lerPerfil(
+        lerPerfilTreino(
           (sessaoUsuario.user.user_metadata ?? {}) as Record<string, unknown>,
         ),
       );
@@ -479,13 +470,14 @@ export default function TreinoAtivo({
       if (erroSalvas) throw erroSalvas;
       const registros = (salvas ?? []) as RegistroSalvo[];
       const mescladas = mesclarSeries(
-        listas,
+        local?.sessao.id === ativa.id ? local.series : listas,
         registros,
         local?.sessao.id === ativa.id ? local : null,
       );
       setSeries(mescladas);
       seriesRef.current = mescladas;
       if (local?.sessao.id === ativa.id) {
+        setExercicios(local.exercicios); exerciciosRef.current = local.exercicios;
         setIntensidade(local.intensidade);
         setEsforco(local.esforco ?? "nao_informado");
           if (local.descanso) { setDescanso(local.descanso); descansoRef.current = local.descanso; }
@@ -505,6 +497,7 @@ export default function TreinoAtivo({
         const id = data.session?.user.id;
         const local = id ? await lerRascunho(id, planId) : null;
         if (id && local) {
+          criacaoPendenteRef.current = Boolean(local.criacaoPendente);
           setUsuarioId(id);
           usuarioRef.current = id;
           setExercicios(local.exercicios);
@@ -562,7 +555,7 @@ export default function TreinoAtivo({
   useEffect(() => {
     if (!usuarioId || !exercicios.length) return;
     let ativo = true; setErroReferencia("");
-    carregarUltimasSeries(usuarioId, exercicios.map((exercicio) => exercicio.id))
+    carregarUltimasSeries(usuarioId, exercicios.filter(e => !e.avulso && !e.removido).map((exercicio) => exercicio.id))
       .then((referencias) => { if (ativo) setUltimasSeries(referencias); })
       .catch(() => { if (ativo) setErroReferencia("Não foi possível consultar a última sessão. Seus campos atuais continuam disponíveis."); });
     return () => { ativo = false; };
@@ -570,6 +563,7 @@ export default function TreinoAtivo({
   const seriesPorExercicio = useMemo(() => {
     const grupos = new Map<string, SerieAtiva[]>();
     for (const serie of series) {
+      if (serie.excluida) continue;
       const grupo = grupos.get(serie.exercise_id);
       if (grupo) grupo.push(serie); else grupos.set(serie.exercise_id, [serie]);
     }
@@ -577,15 +571,16 @@ export default function TreinoAtivo({
   }, [series]);
 
   const proximaSerie = useMemo(
-    () => series.find((item) => !item.concluida) ?? null,
+    () => series.find((item) => !item.excluida && !item.concluida) ?? null,
     [series],
   );
   const totalSeriesConcluidas = useMemo(
     () => series.filter((item) => item.concluida).length,
     [series],
   );
-  const progressoPercentual = series.length
-    ? Math.round((totalSeriesConcluidas / series.length) * 100)
+  const totalSeriesVisiveis = series.filter(s => !s.excluida).length;
+  const progressoPercentual = totalSeriesVisiveis
+    ? Math.round((totalSeriesConcluidas / totalSeriesVisiveis) * 100)
     : 0;
   const volumeTotal = useMemo(
     () =>
@@ -593,12 +588,13 @@ export default function TreinoAtivo({
         .filter((item) => item.concluida)
         .reduce(
           (total, item) =>
-            total + Number(item.reps || 0) * Number(item.weight_kg || 0),
+            total + Number(item.reps || 0) * Number((item.weight_kg || "0").replace(",", ".")),
           0,
         ),
     [series],
   );
   async function iniciarSessao() {
+    criacaoPendenteRef.current = false;
     if (!usuarioId || !exercicios.length) return;
     setSalvando(true);
     try {
@@ -691,7 +687,7 @@ export default function TreinoAtivo({
 
   const atualizarCampo = useCallback((chave: string, campo: "reps" | "weight_kg", valor: string) => {
     if (finalizacaoRef.current || bloqueioRef.current || salvandoRef.current || chaveSalvandoRef.current) return;
-    const atualizadas = seriesRef.current.map((item) => item.chave === chave && !item.concluida && !item.pendente ? { ...item, [campo]: valor } : item);
+    const atualizadas = seriesRef.current.map((item) => item.chave === chave && !item.excluida && !item.concluida && item.pendente !== "salvar" ? { ...item, [campo]: valor } : item);
     seriesRef.current = atualizadas; setSeries(atualizadas);
   }, []);
   const alterarDescanso = useCallback((valor: DescansoTreino) => {
@@ -717,7 +713,7 @@ export default function TreinoAtivo({
   }, [ultimasSeries]);
 
   const alternarSerie = useCallback(async (serie: SerieAtiva) => {
-    if (finalizacaoRef.current || salvandoRef.current || chaveSalvandoRef.current) return;
+    if (serie.excluida || finalizacaoRef.current || salvandoRef.current || chaveSalvandoRef.current) return;
     if (!sessaoRef.current || !usuarioRef.current || bloqueioRef.current) {
       avisar(
         "Treino indisponível",
@@ -746,12 +742,7 @@ export default function TreinoAtivo({
     chaveSalvandoRef.current = serie.chave;
     setChaveEmSalvamento(serie.chave);
     const proximo: SerieAtiva = serie.concluida
-      ? {
-          ...serie,
-          concluida: false,
-          pendente: serie.registroId ? "remover" : undefined,
-          registroId: serie.registroId,
-        }
+      ? { ...retirarSerie(serie), excluida: false }
       : {
           ...serie,
           reps: String(reps),
@@ -790,96 +781,88 @@ export default function TreinoAtivo({
     void sincronizar();
   }, [iniciarDescanso, salvarLocal, sincronizar]);
 
-  async function finalizarSessao() {
-    if (!sessao || !usuarioId || bloqueioSessao) return;
-    if (sincronizandoRef.current || finalizacaoRef.current) return;
-    if (totalSeriesConcluidas === 0) {
-      avisar(
-        "Nenhuma série concluída",
-        "Marque ao menos uma série como concluída antes de finalizar o treino.",
-      );
-      return;
+  const podeAdaptar = () => !finalizacaoRef.current && !bloqueioRef.current && !salvandoRef.current && !chaveSalvandoRef.current && !sincronizandoRef.current && !!sessaoRef.current;
+  async function guardarAdaptacao(novosExercicios: PlanoExercicio[], novasSeries: SerieAtiva[]) {
+    salvandoRef.current = true; setSalvando(true);
+    const antigosExercicios = exerciciosRef.current, antigasSeries = seriesRef.current;
+    exerciciosRef.current = novosExercicios; seriesRef.current = novasSeries;
+    try { await salvarLocal(novasSeries); }
+    catch (erro) { exerciciosRef.current = antigosExercicios; seriesRef.current = antigasSeries; throw erro; }
+    finally { salvandoRef.current = false; setSalvando(false); }
+    // A render caused by the saving indicator may have restored the previous refs.
+    exerciciosRef.current = novosExercicios; seriesRef.current = novasSeries;
+    setExercicios(novosExercicios); setSeries(novasSeries);
+    setMensagem("Adaptação guardada nesta sessão. O plano original permanece salvo.");
+    void sincronizar();
+  }
+  async function salvarExercicio(dados: DadosEditorExercicio) {
+    if (!podeAdaptar()) throw new Error("Aguarde o envio atual antes de editar o exercício.");
+    const novo = criarExercicioSessao(dados.nome, Number(dados.series), Number(dados.repeticoes), dados.peso.trim() ? Number(dados.peso.replace(",", ".")) : Number.NaN);
+    const anterior = exerciciosRef.current.find(e => e.id === editorId);
+    if (!anterior) {
+      if (exerciciosRef.current.filter(e => !e.removido).length >= 60) throw new Error("Use no máximo 60 exercícios nesta sessão.");
+      await guardarAdaptacao([...exerciciosRef.current, novo.exercicio], [...seriesRef.current, ...novo.series]);
+    } else {
+      const atuais = seriesRef.current.filter(s => s.exercise_id === anterior.id && !s.excluida);
+      if (anterior.name !== novo.exercicio.name) {
+        if (atuais.some(s => s.concluida || s.pendente)) throw new Error("Mantenha as séries já registradas e adicione outro exercício para trocar o aparelho.");
+        await guardarAdaptacao(exerciciosRef.current.map(e => e.id === anterior.id ? { ...e, removido: true } : e).concat(novo.exercicio), seriesRef.current.map(s => s.exercise_id === anterior.id ? retirarSerie(s) : s).concat(novo.series));
+      } else {
+        const quantidade = novo.series.length;
+        if (atuais.slice(quantidade).some(s => s.concluida || s.pendente)) throw new Error("Para retirar séries já registradas, use Retirar esta série e confirme a alteração.");
+        const retirar = new Set(atuais.slice(quantidade).map(s => s.chave));
+        let novas = seriesRef.current.map(s => retirar.has(s.chave) ? retirarSerie(s) : s.exercise_id === anterior.id && !s.excluida && !s.concluida && !s.pendente ? { ...s, reps: dados.repeticoes, weight_kg: dados.peso } : s);
+        for (let i = atuais.length; i < quantidade; i++) novas = [...novas, acrescentarSerie(anterior, novas)];
+        await guardarAdaptacao(exerciciosRef.current.map(e => e.id === anterior.id ? { ...e, sets_goal: quantidade, reps_goal: dados.repeticoes } : e), novas);
+      }
     }
-    const confirmou = await confirmar(
-      "Finalizar treino?",
-      `Você concluiu ${totalSeriesConcluidas} série(s). Deseja salvar o encerramento da sessão?`,
-    );
-    if (!confirmou) return;
-
-    setSalvando(true);
+    setEditorId(null);
+  }
+  const editarExercicio = (id: string) => { if (podeAdaptar()) setEditorId(id); };
+  const removerExercicio = async (id: string) => {
+    if (!podeAdaptar()) return;
+    const exercicio = exerciciosRef.current.find(e => e.id === id); if (!exercicio) return;
+    const feitas = seriesRef.current.filter(s => s.exercise_id === id && s.concluida).length;
+    if (!await confirmar("Retirar exercício desta sessão?", exercicio.name + (feitas ? ": as " + feitas + " séries já concluídas também serão retiradas deste registro." : ": retirar os campos deste treino?") + " O plano original não será excluído.")) return;
+    if (!podeAdaptar()) return;
+    try { await guardarAdaptacao(exerciciosRef.current.map(e => e.id === id ? { ...e, removido: true } : e), seriesRef.current.map(s => s.exercise_id === id ? retirarSerie(s) : s)); }
+    catch { avisar("Não foi possível retirar", "Confira o armazenamento e tente novamente."); }
+  };
+  const adicionarSerie = async (id: string) => {
+    if (!podeAdaptar()) return; const exercicio = exerciciosRef.current.find(e => e.id === id && !e.removido); if (!exercicio) return;
+    try { await guardarAdaptacao(exerciciosRef.current, [...seriesRef.current, acrescentarSerie(exercicio, seriesRef.current)]); }
+    catch (erro) { avisar("Série", erro instanceof Error ? erro.message : "Não foi possível adicionar."); }
+  };
+  const removerSerie = async (serie: SerieAtiva) => {
+    if (!podeAdaptar() || seriesRef.current.filter(s => s.exercise_id === serie.exercise_id && !s.excluida).length <= 1) return;
+    if ((serie.concluida || serie.registroId) && !await confirmar("Retirar série já registrada?", "Esta série será removida somente desta sessão. As outras séries e o plano original serão preservados.")) return;
+    if (!podeAdaptar()) return;
+    try { await guardarAdaptacao(exerciciosRef.current, seriesRef.current.map(s => s.chave === serie.chave ? retirarSerie(s) : s)); }
+    catch { avisar("Não foi possível retirar", "Confira o armazenamento e tente novamente."); }
+  };
+  const seriesDoResumo: SerieCalculoTreino[] = series.filter(s => s.concluida && !s.excluida).map(s => ({ exercise_id: s.exercise_id, exercise_name: s.exercise_name, set_number: s.set_number, reps: Number(s.reps), weight_kg: Number(s.weight_kg.replace(",", ".")) }));
+  function finalizarSessao() {
+    if (!podeAdaptar()) return;
+    if (!seriesDoResumo.length) { avisar("Nenhuma série concluída", "Marque ao menos uma série como concluída antes de finalizar o treino."); return; }
+    const fim = new Date().toISOString();
+    setDuracaoFinal(String(Math.max(0.5, Math.round((Date.parse(fim) - Date.parse(sessaoRef.current!.started_at)) / 600) / 100)));
+    setRevisaoFim(fim); setDestinoModelo("sessao"); setNomeNovoPlano(""); setErroConclusao("");
+  }
+  async function confirmarConclusao() {
+    if (!sessao || !usuarioId || !revisaoFim || finalizacaoRef.current || salvandoRef.current) return;
+    setSalvando(true); salvandoRef.current = true; setErroConclusao("");
     try {
-      const final = new Date();
-      const duracaoMinutos = Math.max(
-        0.5,
-        Math.round(
-          ((final.getTime() - new Date(sessao.started_at).getTime()) / 60000) *
-            100,
-        ) / 100,
-      );
-      const seriesFeitas = series.filter((item) => item.concluida);
-      const exerciciosFeitos = new Set(
-        seriesFeitas.map((item) => item.exercise_id),
-      );
-      const seriesCalculo: SerieCalculoTreino[] = seriesFeitas.map((serie) => ({
-        exercise_id: serie.exercise_id,
-        exercise_name: serie.exercise_name,
-        set_number: serie.set_number,
-        reps: Number(serie.reps),
-        weight_kg: Number(serie.weight_kg.replace(",", ".")),
-      }));
-      const estimativa = perfil
-        ? estimarCaloriasAtivasTreino({
-            ...perfil,
-            duracaoMinutos,
-            intensidade,
-            series: seriesCalculo,
-          })
-        : null;
-
-      const conclusao: FinalizacaoTreino = {
-        finishedAt: final.toISOString(),
-        notes: "Treino concluído no modo ativo" + (esforco !== "nao_informado" ? ";esforco_percebido=" + esforco : ""),
-        metricas: {
-          duration_minutes: duracaoMinutos,
-          intensity: intensidade,
-          active_calories: estimativa?.caloriasAtivas ?? null,
-          weight_kg_snapshot: perfil?.pesoKg ?? null,
-          height_cm_snapshot: perfil?.alturaCm ?? null,
-          age_snapshot: perfil?.idade ?? null,
-          sex_snapshot: perfil?.sexo ?? null,
-          met_value: estimativa?.met ?? null,
-          volume_kg:
-            estimativa?.volumeCargaKg ?? Math.round(volumeTotal * 100) / 100,
-          exercises_count:
-            estimativa?.quantidadeExercicios ?? exerciciosFeitos.size,
-          sets_completed: estimativa?.quantidadeSeries ?? totalSeriesConcluidas,
-          reps_completed:
-            estimativa?.repeticoesTotais ??
-            seriesFeitas.reduce(
-              (soma, serie) => soma + (Number(serie.reps) || 0),
-              0,
-            ),
-        },
-      };
-      const anterior = finalizacaoRef.current;
+      const metricas = metricasRegistroTreino(perfil, Number(duracaoFinal.replace(",", ".")), intensidade, seriesDoResumo);
+      const modelo = destinoModelo === "sessao" ? undefined : prepararModeloTreino(destinoModelo, destinoModelo === "novo" ? nomeNovoPlano : planName, planId, exerciciosRef.current, seriesRef.current);
+      const conclusao: FinalizacaoTreino = { finishedAt: revisaoFim, notes: "Treino concluído no modo ativo;esforco_percebido=" + esforco + ";modelo=" + destinoModelo, metricas, modelo };
       finalizacaoRef.current = conclusao;
-      const rascunho = montarRascunho();
-      if (!rascunho) throw new Error("Não foi possível preparar a conclusão local.");
-      try { await gravarRascunho(rascunho); }
-      catch (erro) { finalizacaoRef.current = anterior; throw erro; }
-      setFinalizacao(conclusao);
-      setMensagem("Encerramento protegido no aparelho. O treino aguarda confirmação do servidor e manterá este horário, mesmo offline.");
+      const rascunho = montarRascunho(); if (!rascunho) throw new Error("Não foi possível preparar a conclusão local.");
+      try { await gravarRascunho(rascunho); } catch (erro) { finalizacaoRef.current = undefined; throw erro; }
+      setFinalizacao(conclusao); setRevisaoFim(null);
+      setMensagem("Encerramento e escolha de treino guardados. O horário real será preservado, mesmo sem internet.");
       void sincronizar();
-    } catch (erro) {
-      avisar(
-        "Erro ao finalizar",
-        erro instanceof Error
-          ? erro.message
-          : "Não foi possível proteger o encerramento neste aparelho. Tente novamente.",
-      );
-    } finally {
-      setSalvando(false);
-    }
+    } catch (erro) { finalizacaoRef.current = undefined; setErroConclusao(erro instanceof Error ? erro.message : "Não foi possível guardar a conclusão."); }
+    finally { setSalvando(false); salvandoRef.current = false; }
   }
 
   if (carregando)
@@ -920,7 +903,7 @@ export default function TreinoAtivo({
               ↻ {restaurado ? "Treino recuperado" : "Proteção do treino"}
             </Text>
             <Text style={estilos.secundario}>
-              {totalSeriesConcluidas} de {series.length} séries concluídas ·{" "}
+              {totalSeriesConcluidas} de {totalSeriesVisiveis} séries concluídas ·{" "}
               {progressoPercentual}%
             </Text>
             <Text style={estilos.secundario}>
@@ -1053,7 +1036,7 @@ export default function TreinoAtivo({
           <>
             <View style={[estilos.cartaoResumo, { borderColor: corTema }]}>
               <Text style={estilos.rotulo}>TEMPO DE TREINO</Text>
-              <CronometroTreino inicio={sessao.started_at} fim={finalizacao?.finishedAt} ativo={estaEmFoco} cor={corTema} />
+              <CronometroTreino inicio={sessao.started_at} fim={finalizacao?.finishedAt ?? revisaoFim ?? undefined} ativo={estaEmFoco} cor={corTema} />
               <Text style={estilos.progressoTexto}>
                 {totalSeriesConcluidas} de {series.length} séries ·{" "}
                 {progressoPercentual}% concluído
@@ -1103,85 +1086,16 @@ export default function TreinoAtivo({
               </View>
             </View>
             <PainelDescanso descanso={descanso} ativo={estaEmFoco} bloqueado={Boolean(finalizacao) || bloqueioSessao} cor={corTema} onAlterar={alterarDescanso} onPreferencia={mudarPreferenciaDescanso} />
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Adicionar exercício durante o treino" disabled={salvando || sincronizando || bloqueioSessao || Boolean(finalizacao)} style={[estilos.botaoSecundario, { borderColor: corTema }]} onPress={() => setEditorId("novo")}><Text style={{ color: corTema, fontWeight: "800" }}>+ Adicionar exercício</Text></TouchableOpacity>
             <Text style={estilos.tituloSecao}>Séries do treino</Text>
             {erroReferencia ? <Text style={estilos.secundario}>{erroReferencia}</Text> : null}
-            {exercicios.map((exercicio) => <CartaoExercicioTreino key={exercicio.id} exercicio={exercicio}
+            {exercicios.filter(e => !e.removido).map((exercicio) => <CartaoExercicioTreino key={exercicio.id} exercicio={exercicio}
               series={seriesPorExercicio.get(exercicio.id) ?? []} anterior={ultimasSeries[exercicio.id]}
               cor={corTema} proximaChave={proximaSerie?.chave} bloqueado={salvando || sincronizando || bloqueioSessao || Boolean(finalizacao)}
-              chaveSalvando={chaveEmSalvamento} onCampo={atualizarCampo} onAlternar={alternarSerie} onCopiar={copiarUltimaSessao} />)}
+              chaveSalvando={chaveEmSalvamento} onCampo={atualizarCampo} onAlternar={alternarSerie} onCopiar={copiarUltimaSessao} onEditar={editarExercicio} onRetirar={id => void removerExercicio(id)} onAdicionarSerie={id => void adicionarSerie(id)} onRetirarSerie={s => void removerSerie(s)} />)}
             <View style={estilos.cartao}>
-              <Text style={estilos.tituloCartao}>Intensidade da sessão</Text>
-              <Text style={estilos.secundario}>
-                A intensidade ajuda a escolher o MET para estimar calorias
-                ativas. Não é uma medição exata.
-              </Text>
-              <View style={estilos.opcoesDescanso}>
-                {(
-                  [
-                    ["leve", "Leve"],
-                    ["moderada", "Moderada"],
-                    ["intensa", "Intensa"],
-                  ] as [IntensidadeTreino, string][]
-                ).map(([valor, rotulo]) => (
-                  <TouchableOpacity
-                    key={valor}
-                    disabled={Boolean(finalizacao)}
-                    onPress={() => setIntensidade(valor)}
-                    style={[
-                      estilos.opcaoDescanso,
-                      intensidade === valor && {
-                        borderColor: corTema,
-                        backgroundColor: `${corTema}20`,
-                      },
-                    ]}
-                  >
-                    <Text style={estilos.textoOpcao}>{rotulo}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              {!perfil ? (
-                <Text style={estilos.aviso}>
-                  Complete peso, altura, idade e sexo em Meu Perfil para estimar
-                  as calorias. Você ainda poderá salvar o treino.
-                </Text>
-              ) : (
-                <Text style={estilos.secundario}>
-                  Perfil de cálculo disponível. As calorias serão calculadas ao
-                  finalizar.
-                </Text>
-              )}
-              <Text style={estilos.tituloCartao}>
-                Como foi seu esforço? (opcional)
-              </Text>
-              <Text style={estilos.secundario}>
-                Ajuda a personalizar sugestões futuras. Não há metas nem
-                cobranças.
-              </Text>
-              <View style={estilos.opcoesDescanso}>
-                {(
-                  [
-                    ["nao_informado", "Pular"],
-                    ["leve", "Leve"],
-                    ["adequado", "Adequado"],
-                    ["intenso", "Intenso"],
-                  ] as [EsforcoPercebido, string][]
-                ).map(([valor, rotulo]) => (
-                  <TouchableOpacity
-                    key={valor}
-                    disabled={Boolean(finalizacao)}
-                    onPress={() => setEsforco(valor)}
-                    style={[
-                      estilos.opcaoDescanso,
-                      esforco === valor && {
-                        borderColor: corTema,
-                        backgroundColor: `${corTema}20`,
-                      },
-                    ]}
-                  >
-                    <Text style={estilos.textoOpcao}>{rotulo}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <Text style={estilos.tituloCartao}>Encerrar e revisar</Text>
+              <Text style={estilos.secundario}>Confira duração, intensidade, calorias estimadas e escolha se deseja salvar esta adaptação como treino.</Text>
               <TouchableOpacity
                 disabled={
                   salvando ||
@@ -1203,6 +1117,23 @@ export default function TreinoAtivo({
           </>
         )}
       </ScrollView>
+      {editorId !== null ? <EditorExercicioSessao key={editorId} editando={editorId !== "novo"} nomeBloqueado={series.some(s => s.exercise_id === editorId && (s.concluida || s.pendente))} cor={corTema} onFechar={() => setEditorId(null)} onSalvar={salvarExercicio} inicial={(() => {
+        const exercicio = exercicios.find(e => e.id === editorId), abertas = series.filter(s => s.exercise_id === editorId && !s.excluida);
+        return { nome: exercicio?.name ?? "", series: String(abertas.length || 3), repeticoes: abertas[0]?.reps ?? "10", peso: abertas[0]?.weight_kg ?? "0" };
+      })()} /> : null}
+      <Modal transparent animationType="fade" visible={revisaoFim !== null} onRequestClose={() => { if (!salvando) setRevisaoFim(null); }}>
+        <View style={{ flex: 1, backgroundColor: "#000B" }}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 18 }}><View style={[estilos.cartao, { width: "100%", maxWidth: 560, alignSelf: "center", gap: 16 }]}>
+          <Text style={estilos.tituloCartao}>Revisar e concluir treino</Text>
+          <ResumoRegistroTreino perfil={perfil} series={seriesDoResumo} duracao={duracaoFinal} onDuracao={setDuracaoFinal} intensidade={intensidade} onIntensidade={setIntensidade} esforco={esforco} onEsforco={setEsforco} cor={corTema} bloqueado={salvando} />
+          <Text style={estilos.tituloCartao}>Como guardar este treino?</Text>
+          {([["novo", "Criar novo treino"], ["adicionar", "Adicionar novos exercícios ao original"], ["sessao", "Usar só nesta sessão"]] as const).map(([modo, titulo]) => <TouchableOpacity key={modo} accessibilityRole="button" accessibilityLabel={titulo} accessibilityState={{ selected: destinoModelo === modo }} disabled={salvando || (modo === "adicionar" && !exercicios.some(e => e.avulso && !e.removido))} onPress={() => setDestinoModelo(modo)} style={[estilos.botaoSecundario, { borderColor: destinoModelo === modo ? corTema : "#45544A" }]}><Text style={estilos.textoOpcao}>{destinoModelo === modo ? "✓ " : ""}{titulo}</Text></TouchableOpacity>)}
+          {destinoModelo === "novo" ? <TextInput accessibilityLabel="Nome do novo treino" placeholder="Ex.: Treino academia da viagem" placeholderTextColor="#828A85" value={nomeNovoPlano} onChangeText={setNomeNovoPlano} maxLength={100} editable={!salvando} style={{ borderWidth: 1, borderColor: corTema, borderRadius: 10, padding: 12, color: "#F0F4F1" }} /> : null}
+          <Text style={estilos.secundario}>{destinoModelo === "novo" ? "Cria um plano com os exercícios e cargas desta sessão e vincula esta conclusão a ele. O original é preservado." : destinoModelo === "adicionar" ? "Acrescenta somente exercícios novos. Não exclui exercícios nem troca as cargas de referência que já existiam no original." : "Guarda o que você realizou no histórico, sem mudar nenhum plano."}</Text>
+          {erroConclusao ? <Text accessibilityRole="alert" style={estilos.aviso}>{erroConclusao}</Text> : null}
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Confirmar conclusão do treino" disabled={salvando || sincronizando} onPress={() => void confirmarConclusao()} style={[estilos.botaoPrimario, { backgroundColor: corTema }]}><Text style={estilos.textoPrimario}>{salvando ? "Guardando..." : "Confirmar conclusão do treino"}</Text></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" disabled={salvando} onPress={() => setRevisaoFim(null)} style={estilos.botaoSecundario}><Text style={estilos.textoOpcao}>Continuar treinando</Text></TouchableOpacity>
+        </View></ScrollView></View>
+      </Modal>
     </View>
   );
 }

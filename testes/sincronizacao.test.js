@@ -24,7 +24,9 @@ function query(table) {
     }).then(resolve, reject); },
   }; return q;
 }
-const sync = carregar("servicos/treinoSincronizacao.ts", { "../supabase": { supabase: { auth: { getUser: async () => ({ data: { user: { id: "u1" } }, error: null }) }, from: query } }, "./revisaoDados": { registrarMudancaDeDados() {} }, "./treinoLocal": local });
+const mockSupabase = { supabase: { auth: { getUser: async () => ({ data: { user: { id: "u1" } }, error: null }) }, from: query } };
+const modelos = carregar("servicos/salvarModeloTreino.ts", { "../supabase": mockSupabase });
+const sync = carregar("servicos/treinoSincronizacao.ts", { "../supabase": mockSupabase, "./revisaoDados": { registrarMudancaDeDados() {} }, "./treinoLocal": local, "./salvarModeloTreino": modelos });
 const serie = { chave: "e1:1", exercise_id: "e1", exercise_name: "Exercício", set_number: 1, reps: "10", weight_kg: "20", concluida: true, pendente: "salvar", registroId: "r1" };
 const draft = { versao: 1, usuarioId: "u1", planId: "p1", planName: "Plano", sessao: { id: "s1", plan_id: "p1", started_at: "2026-10-24T12:00:00Z" }, exercicios: [], series: [serie], intensidade: "moderada", esforco: "adequado", salvoEm: "2026-10-24T12:10:00Z" };
 (async () => {
@@ -45,5 +47,10 @@ const draft = { versao: 1, usuarioId: "u1", planId: "p1", planName: "Plano", ses
   await local.gravarRascunho({ ...draft, series: [{ ...serie, weight_kg: "25" }] });
   const conflito = await sync.sincronizarRascunho("u1", "p1");
   assert.equal(conflito.conflito, true); assert.equal(state.sets[0].weight_kg, 20); assert.equal((await local.lerRascunho("u1", "p1")).series[0].weight_kg, "25");
+  await local.gravarRascunho({ ...draft, series: [{ ...serie, weight_kg: "25", baseRemota: { id: "r1", reps: 10, weight_kg: 20 } }] });
+  const correcao = await sync.sincronizarRascunho("u1", "p1"); assert.equal(correcao.conflito, undefined); assert.equal(state.sets[0].weight_kg, 25, "Correção explícita aplica somente sobre a base conhecida");
+  state.sets[0].weight_kg = 30;
+  await local.gravarRascunho({ ...draft, series: [{ ...serie, weight_kg: "35", baseRemota: { id: "r1", reps: 10, weight_kg: 25 } }] });
+  assert.equal((await sync.sincronizarRascunho("u1", "p1")).conflito, true); assert.equal(state.sets[0].weight_kg, 30, "Mudança concorrente não é sobrescrita");
   console.log("OK — resposta perdida, reenvio idempotente, conclusão offline e conflito preservado");
 })().catch(error => { console.error(error); process.exitCode = 1; });

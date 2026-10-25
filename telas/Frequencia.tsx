@@ -19,6 +19,7 @@ import {
 } from "../servicos/revisaoDados";
 import { lerCache, salvarCache } from "../servicos/cacheConsultas";
 import { medir } from "../servicos/performance";
+import FormularioRegistroTreino from "../componentes/FormularioRegistroTreino";
 import {
   categoriaDoCardio,
   estimarCaloriasAtivas,
@@ -37,6 +38,9 @@ type Sessao = {
   started_at: string;
   notes: string | null;
   status?: string | null;
+  duration_minutes?: number | null;
+  intensity?: string | null;
+  active_calories?: number | null;
 };
 
 type CardioModelo = {
@@ -105,13 +109,6 @@ function lerNumero(valor: string): number | null {
   if (!valor.trim()) return null;
   const numero = Number(valor.replace(",", "."));
   return Number.isFinite(numero) ? numero : Number.NaN;
-}
-
-function textoTipo(tipo: string) {
-  return tipo
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
 }
 
 export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
@@ -249,7 +246,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
             .abortSignal(controlador.signal),
           supabase
             .from("workout_sessions")
-            .select("id, plan_id, started_at, notes, status")
+            .select("id, plan_id, started_at, notes, status, duration_minutes, intensity, active_calories")
             .eq("user_id", usuario.user.id)
             .gte("started_at", inicioMes)
             .lt("started_at", fimMes)
@@ -449,197 +446,10 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     // O dia selecionado deve sempre corresponder ao mês apresentado.
     setDataSelecionada(dataLocal(novoMes));
   }
-  async function registrarTreino() {
-    if (!usuarioId || !treinoSelecionado || !dataSelecionada) {
-      Alert.alert("Atenção", "Selecione um treino para registrar.");
-      return;
-    }
-    if (dataSelecionada > dataLocal(new Date())) {
-      Alert.alert(
-        "Data inválida",
-        "Você não pode registrar um treino em uma data futura.",
-      );
-      return;
-    }
-    setSalvando(true);
-    try {
-      const [anoSelecionado, mesSelecionado, diaSelecionado] = dataSelecionada
-        .split("-")
-        .map(Number);
-      const inicioDia = new Date(
-        anoSelecionado,
-        mesSelecionado - 1,
-        diaSelecionado,
-        0,
-        0,
-        0,
-        0,
-      ).toISOString();
-      const fimDia = new Date(
-        anoSelecionado,
-        mesSelecionado - 1,
-        diaSelecionado + 1,
-        0,
-        0,
-        0,
-        0,
-      ).toISOString();
-      const { data: sessoesExistentes, error: erroConsulta } = await supabase
-        .from("workout_sessions")
-        .select("id, plan_id, started_at")
-        .eq("user_id", usuarioId)
-        .gte("started_at", inicioDia)
-        .lt("started_at", fimDia);
-      if (erroConsulta) {
-        Alert.alert(
-          "Erro ao verificar treino",
-          "Não foi possível confirmar se esse treino já foi registrado. Tente novamente.",
-        );
-        return;
-      }
-      const existeTreinoNoDia = (sessoesExistentes ?? []).some(
-        (sessao) => sessao.plan_id !== null,
-      );
-
-      if (existeTreinoNoDia) {
-        await carregarDados();
-        Alert.alert(
-          "Treino já registrado",
-          "Já existe um treino registrado nessa data. Para trocar, exclua somente o treino desejado na lista abaixo.",
-        );
-        return;
-      }
-      const dataRegistro = new Date(
-        anoSelecionado,
-        mesSelecionado - 1,
-        diaSelecionado,
-        12,
-        0,
-        0,
-        0,
-      ).toISOString();
-      const { data: novaSessao, error } = await supabase
-        .from("workout_sessions")
-        .insert({
-          user_id: usuarioId,
-          plan_id: treinoSelecionado,
-          started_at: dataRegistro,
-          finished_at: dataRegistro,
-          notes: "Treino registrado pelo calendário",
-        })
-        .select("id")
-        .single();
-      if (error || !novaSessao) {
-        Alert.alert(
-          "Erro ao registrar",
-          error?.message ?? "Não foi possível criar a sessão.",
-        );
-        return;
-      }
-
-      const { data: exercicios, error: erroExercicios } = await supabase
-        .from("exercises")
-        .select("id, name, sets_goal, reps_goal")
-        .eq("user_id", usuarioId)
-        .eq("plan_id", treinoSelecionado)
-        .order("position", { ascending: true });
-      if (erroExercicios) {
-        await supabase
-          .from("workout_sessions")
-          .delete()
-          .eq("id", novaSessao.id)
-          .eq("user_id", usuarioId);
-        Alert.alert(
-          "Erro ao registrar",
-          `Não foi possível carregar os exercícios do treino: ${erroExercicios.message}`,
-        );
-        return;
-      }
-
-      const listaExercicios = exercicios ?? [];
-      const { data: referencias, error: erroReferencias } =
-        listaExercicios.length > 0
-          ? await supabase
-              .from("exercise_load_defaults")
-              .select("exercise_id, set_number, reps, weight_kg")
-              .eq("user_id", usuarioId)
-              .in(
-                "exercise_id",
-                listaExercicios.map((exercicio) => exercicio.id),
-              )
-              .order("set_number", { ascending: true })
-          : { data: [], error: null };
-      if (erroReferencias) {
-        await supabase
-          .from("workout_sessions")
-          .delete()
-          .eq("id", novaSessao.id)
-          .eq("user_id", usuarioId);
-        Alert.alert(
-          "Erro ao registrar",
-          `Não foi possível carregar as cargas salvas: ${erroReferencias.message}`,
-        );
-        return;
-      }
-
-      const seriesDaSessao = listaExercicios.flatMap((exercicio) => {
-        const seriesSalvas = (referencias ?? []).filter(
-          (item) => item.exercise_id === exercicio.id,
-        );
-        const quantidade = Math.max(
-          Number(exercicio.sets_goal) || 1,
-          seriesSalvas.length,
-          1,
-        );
-        const repeticoesPadrao =
-          Number(String(exercicio.reps_goal ?? "8").match(/\d+/)?.[0] ?? 8) ||
-          8;
-        return Array.from({ length: quantidade }, (_, indice) => {
-          const serie = seriesSalvas.find(
-            (item) => Number(item.set_number) === indice + 1,
-          );
-          return {
-            user_id: usuarioId,
-            session_id: novaSessao.id,
-            exercise_id: exercicio.id,
-            exercise_name: exercicio.name,
-            set_number: indice + 1,
-            reps: Number(serie?.reps ?? repeticoesPadrao),
-            weight_kg: Number(serie?.weight_kg ?? 0),
-          };
-        });
-      });
-
-      if (seriesDaSessao.length > 0) {
-        const { error: erroSnapshot } = await supabase
-          .from("workout_sets")
-          .insert(seriesDaSessao);
-        if (erroSnapshot) {
-          await supabase
-            .from("workout_sessions")
-            .delete()
-            .eq("id", novaSessao.id)
-            .eq("user_id", usuarioId);
-          Alert.alert(
-            "Erro ao registrar",
-            `O treino não foi concluído porque não foi possível salvar as cargas no histórico: ${erroSnapshot.message}`,
-          );
-          return;
-        }
-      }
-
-      registrarMudancaDeDados();
-      await carregarDados();
-      setTreinoSelecionado("");
-      Alert.alert(
-        "Treino registrado",
-        "O treino e uma cópia das cargas e exercícios foram salvos no histórico.",
-      );
-    } catch {
-      Alert.alert("Erro", "Não foi possível registrar o treino.");
-    } finally {
-      setSalvando(false);
-    }
+  async function aoRegistrarTreino(pendente: boolean, mensagem?: string) {
+    registrarMudancaDeDados(); setTreinoSelecionado("");
+    await carregarDados();
+    Alert.alert(pendente ? "Registro guardado neste aparelho" : "Treino registrado", pendente ? (mensagem ?? "O envio será retomado com o aplicativo aberto e conexão disponível.") : "Séries realizadas, duração, intensidade e estimativa calórica foram salvas no histórico.");
   }
   function selecionarCardio(modelo: CardioModelo) {
     const categoria = categoriaDoCardio(modelo.tipo);
@@ -1126,21 +936,8 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                   </TouchableOpacity>
                 );
               })}
-              <TouchableOpacity
-                style={[
-                  estilos.botaoSalvar,
-                  { backgroundColor: corTema },
-                  (salvando || !treinoSelecionado) && estilos.botaoDesabilitado,
-                ]}
-                onPress={registrarTreino}
-                disabled={salvando || !treinoSelecionado}
-              >
-                {salvando ? (
-                  <ActivityIndicator color="#101312" />
-                ) : (
-                  <Text style={estilos.textoBotaoSalvar}>Confirmar treino</Text>
-                )}
-              </TouchableOpacity>
+              {treinoSelecionado ? <FormularioRegistroTreino key={usuarioId + ":" + treinoSelecionado + ":" + dataSelecionada} usuarioId={usuarioId} planId={treinoSelecionado} planName={treinos.find(t => t.id === treinoSelecionado)?.name ?? "Treino"} dia={dataSelecionada}
+                perfil={pesoUsuario !== null && alturaUsuario !== null && idadeUsuario !== null && sexoUsuario !== null ? { pesoKg: pesoUsuario, alturaCm: alturaUsuario, idade: idadeUsuario, sexo: sexoUsuario } : null} cor={corTema} onSalvo={aoRegistrarTreino} /> : null}
             </>
           )}
         </View>
@@ -1165,6 +962,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                         >
                           ✓ {nomeTreino}
                         </Text>
+                        {sessao.duration_minutes != null ? <Text style={estilos.textoSecundario}>{sessao.duration_minutes} min · {sessao.intensity ?? "intensidade não informada"}{sessao.active_calories != null ? " · ≈ " + sessao.active_calories + " kcal ativas" : " · calorias não estimadas"}</Text> : null}
                         <Text style={estilos.textoSecundario}>
                           {new Date(sessao.started_at).toLocaleTimeString(
                             "pt-BR",

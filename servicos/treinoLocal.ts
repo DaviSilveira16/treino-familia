@@ -21,12 +21,17 @@ export type SerieRascunho = {
   registroId?: string;
   pendente?: AcaoPendente;
   baseRemota?: { id: string; reps: number; weight_kg: number };
+  /** Exercício criado nesta sessão; no histórico usa snapshot sem FK de plano. */
+  avulsa?: boolean;
+  excluida?: boolean;
 };
 export type PlanoExercicio = {
   id: string;
   name: string;
   sets_goal: number;
   reps_goal: string;
+  avulso?: boolean;
+  removido?: boolean;
 };
 export type SessaoRascunho = {
   id: string;
@@ -48,6 +53,7 @@ export type TreinoRascunho = {
   finalizacao?: FinalizacaoTreino;
   erroSincronizacao?: string;
   conflitoSincronizacao?: boolean;
+  criacaoPendente?: boolean;
 };
 
 export type DescansoTreino = {
@@ -61,6 +67,16 @@ export type FinalizacaoTreino = {
   finishedAt: string;
   notes: string;
   metricas: Record<string, string | number | null>;
+  modelo?: ModeloTreinoPendente;
+};
+export type ModeloTreinoPendente = {
+  modo: "novo" | "adicionar";
+  planId: string;
+  nome: string;
+  exercicios: {
+    id: string; origemId: string; name: string; sets_goal: number; reps_goal: string;
+    series: { set_number: number; reps: number; weight_kg: number }[];
+  }[];
 };
 export type ResumoTreinoAtivo = {
   planId: string;
@@ -167,7 +183,7 @@ export async function lerResumoTreinoAtivo(usuarioId: string): Promise<ResumoTre
     planId: rascunho.planId, planName: rascunho.planName,
     sessaoId: rascunho.sessao.id, startedAt: rascunho.sessao.started_at,
     seriesConcluidas: rascunho.series.filter((serie) => serie.concluida).length,
-    totalSeries: rascunho.series.length, descanso: rascunho.descanso,
+    totalSeries: rascunho.series.filter((serie) => !serie.excluida).length, descanso: rascunho.descanso,
     finalizacaoPendente: Boolean(rascunho.finalizacao),
     pendencias: rascunho.series.filter((serie) => serie.pendente).length + Number(Boolean(rascunho.finalizacao)),
     conflito: Boolean(rascunho.conflitoSincronizacao),
@@ -182,7 +198,8 @@ export function segundosDeDescanso(descanso?: DescansoTreino, agora = Date.now()
 
 export function mesmaOperacao(a: SerieRascunho, b: SerieRascunho): boolean {
   return a.chave === b.chave && a.pendente === b.pendente && a.registroId === b.registroId
-    && a.reps === b.reps && a.weight_kg === b.weight_kg && a.concluida === b.concluida;
+    && a.reps === b.reps && a.weight_kg === b.weight_kg && a.concluida === b.concluida
+    && a.avulsa === b.avulsa && a.excluida === b.excluida;
 }
 
 export type SerieAnterior = { exercise_id: string; set_number: number; reps: number; weight_kg: number };
@@ -191,7 +208,7 @@ export function copiarSeriesAnteriores<T extends SerieRascunho>(series: T[], ant
   const porNumero = new Map(anteriores.filter((serie) => serie.exercise_id === exercicioId).map((serie) => [serie.set_number, serie]));
   return series.map((serie) => {
     const anterior = porNumero.get(serie.set_number);
-    if (serie.exercise_id !== exercicioId || serie.concluida || serie.pendente || !anterior
+    if (serie.exercise_id !== exercicioId || serie.excluida || serie.concluida || serie.pendente || !anterior
       || !Number.isInteger(anterior.reps) || anterior.reps < 1 || anterior.reps > 1000
       || !Number.isFinite(anterior.weight_kg) || anterior.weight_kg < 0 || anterior.weight_kg > 2000) return serie;
     return { ...serie, reps: String(anterior.reps), weight_kg: String(anterior.weight_kg) };
@@ -233,9 +250,11 @@ export function mesclarSeries<T extends SerieRascunho>(
   const doAparelho = new Map(
     (local?.series ?? []).map((item) => [item.chave, item]),
   );
+  const porId = new Map(remotas.map((item) => [item.id, item]));
   return padrao.map((padraoItem) => {
     const localItem = doAparelho.get(padraoItem.chave);
-    const remoto = doServidor.get(padraoItem.chave);
+    const remoto = localItem?.avulsa && localItem.registroId ? porId.get(localItem.registroId) : doServidor.get(padraoItem.chave);
+    if (localItem?.excluida) return { ...padraoItem, ...localItem };
     if (localItem?.pendente === "salvar")
       return { ...padraoItem, ...localItem };
     if (localItem?.pendente === "remover")

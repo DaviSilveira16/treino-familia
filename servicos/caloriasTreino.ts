@@ -18,6 +18,23 @@ export type DadosCalculoTreino = {
   intensidade: IntensidadeTreino;
   series: SerieCalculoTreino[];
 };
+export type PerfilCalculoTreino = Pick<DadosCalculoTreino, "pesoKg" | "alturaCm" | "idade" | "sexo">;
+export function lerPerfilTreino(metadados: Record<string, unknown>): PerfilCalculoTreino | null {
+  const pesoKg = Number(metadados.peso_kg), alturaCm = Number(metadados.altura_cm), idade = Number(metadados.idade), sexo = metadados.sexo;
+  if (!Number.isFinite(pesoKg) || pesoKg < 20 || pesoKg > 400 || !Number.isFinite(alturaCm) || alturaCm < 100 || alturaCm > 250
+    || !Number.isInteger(idade) || idade < 18 || idade > 110 || (sexo !== "masculino" && sexo !== "feminino")) return null;
+  return { pesoKg, alturaCm, idade, sexo };
+}
+export function metricasRegistroTreino(perfil: PerfilCalculoTreino | null, duracaoMinutos: number, intensidade: IntensidadeTreino, series: SerieCalculoTreino[]): Record<string, string | number | null> {
+  if (!Number.isFinite(duracaoMinutos) || duracaoMinutos < 0.5 || duracaoMinutos > 600 || !["leve", "moderada", "intensa"].includes(intensidade)) throw new Error("Informe a intensidade e uma duração entre 0,5 e 600 minutos.");
+  if (!series.length || series.some(s => !Number.isInteger(s.reps) || s.reps < 1 || s.reps > 1000 || !Number.isFinite(s.weight_kg) || s.weight_kg < 0 || s.weight_kg > 2000)) throw new Error("Confira as séries, repetições e cargas realizadas.");
+  const estimativa = perfil ? estimarCaloriasAtivasTreino({ ...perfil, duracaoMinutos, intensidade, series }) : null;
+  return { duration_minutes: duracaoMinutos, intensity: intensidade, active_calories: estimativa?.caloriasAtivas ?? null,
+    weight_kg_snapshot: perfil?.pesoKg ?? null, height_cm_snapshot: perfil?.alturaCm ?? null, age_snapshot: perfil?.idade ?? null, sex_snapshot: perfil?.sexo ?? null,
+    met_value: estimativa?.met ?? null, volume_kg: Math.round(series.reduce((t, s) => t + s.reps * s.weight_kg, 0) * 100) / 100,
+    exercises_count: new Set(series.map(s => s.exercise_id || s.exercise_name.trim().toLocaleLowerCase("pt-BR"))).size,
+    sets_completed: series.length, reps_completed: series.reduce((t, s) => t + s.reps, 0) };
+}
 
 export type EstimativaCaloriasTreino = {
   caloriasAtivas: number;
