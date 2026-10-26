@@ -1,7 +1,7 @@
 import React, { memo, useEffect, useState } from "react";
 import { AppState, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
-import { assinarRascunhos, lerResumoTreinoAtivo, type ResumoTreinoAtivo } from "../servicos/treinoLocal";
+import { assinarRascunhos, lerResumoTreinoAtivo, listarRascunhos, type ResumoTreinoAtivo } from "../servicos/treinoLocal";
 import { sincronizarTreinosPendentes } from "../servicos/treinoSincronizacao";
 
 function Contagem({ fimEm, pausado, restantes }: { fimEm?: number | null; pausado?: boolean; restantes?: number }) {
@@ -15,10 +15,10 @@ function Barra({ usuarioId, corTema, visivel, onRetomar }: { usuarioId: string; 
   useEffect(() => {
     let ativo = true;
     let versao = 0;
-    let ultimoResumo: ResumoTreinoAtivo | null = null;
+    let haRascunhos = false;
     const refresh = async () => {
       const pedido = ++versao;
-      try { const atual = await lerResumoTreinoAtivo(usuarioId); if (ativo && pedido === versao) { ultimoResumo = atual; setResumo(atual); } }
+      try { const itens = await listarRascunhos(usuarioId); const atual = await lerResumoTreinoAtivo(usuarioId); if (ativo && pedido === versao) { haRascunhos = itens.length > 0; setResumo(atual); } }
       catch { /* Keep the last known local summary; never discard pending data. */ }
     };
     const sincronizar = () => { void sincronizarTreinosPendentes(usuarioId).then(refresh).catch(refresh); };
@@ -26,7 +26,7 @@ function Barra({ usuarioId, corTema, visivel, onRetomar }: { usuarioId: string; 
     const cancelar = assinarRascunhos(refresh);
     const rede = NetInfo.addEventListener(estado => { if (estado.isConnected && estado.isInternetReachable !== false) sincronizar(); });
     const foco = AppState.addEventListener("change", estado => { if (estado === "active") { refresh(); sincronizar(); } });
-    const tentar = () => { if (ativo && ultimoResumo?.pendencias && !ultimoResumo.conflito && (typeof navigator === "undefined" || navigator.onLine !== false)) sincronizar(); };
+    const tentar = () => { if (ativo && haRascunhos && (typeof navigator === "undefined" || navigator.onLine !== false)) sincronizar(); };
     const intervalo = setInterval(tentar, 12000);
     if (typeof window !== "undefined") { window.addEventListener("online", tentar); window.addEventListener("focus", tentar); }
     return () => { ativo = false; cancelar(); rede(); foco.remove(); clearInterval(intervalo); if (typeof window !== "undefined") { window.removeEventListener("online", tentar); window.removeEventListener("focus", tentar); } };

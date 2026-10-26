@@ -41,6 +41,8 @@ const draft = { versao: 1, usuarioId: "u1", planId: "p1", planName: "Plano", ses
   const parcial = await sync.sincronizarRascunho("u1", "p1");
   assert.ok(parcial.erro); assert.equal((await local.lerRascunho("u1", "p1")).finalizacao.finishedAt, finishedAt);
   assert.equal(state.session.finished_at, finishedAt);
+  assert.equal(parcial.encerrado, true, "Falha de detalhes não mantém sessão ativa");
+  assert.equal(await local.lerResumoTreinoAtivo("u1"), null, "Barra ativa desaparece antes do reenvio de detalhes");
   const final = await sync.sincronizarRascunho("u1", "p1");
   assert.equal(final.concluido, true); assert.equal(await local.lerRascunho("u1", "p1"), null); assert.equal(state.finishes, 1);
   // Uma nova sessão tem outro ID; sessões concluídas nunca são reabertas.

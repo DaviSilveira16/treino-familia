@@ -31,6 +31,8 @@ import {
   copiarSeriesAnteriores,
   listarRascunhos,
   mesmaOperacao,
+  assinarRascunhos,
+  sessaoFoiEncerrada,
   guardarConclusao,
   listarCopiasTreino,
   type DescansoTreino,
@@ -144,6 +146,8 @@ export default function TreinoAtivo({
   const [destinoModelo, setDestinoModelo] = useState<"sessao" | "novo" | "adicionar">("sessao");
   const [nomeNovoPlano, setNomeNovoPlano] = useState("");
   const [erroConclusao, setErroConclusao] = useState("");
+  const [encerramentoConfirmado, setEncerramentoConfirmado] = useState<string | null>(null);
+  const navegacaoEncerradaRef = useRef<string | null>(null);
   const criacaoPendenteRef = useRef(false);
   useVoltarDoModal(editorId !== null, () => setEditorId(null));
   useVoltarDoModal(revisaoFim !== null, () => { if (!salvando) setRevisaoFim(null); });
@@ -172,6 +176,44 @@ export default function TreinoAtivo({
   usuarioRef.current = usuarioId;
   intensidadeRef.current = intensidade;
   esforcoRef.current = esforco;
+
+  const retirarSessaoDaTela = useCallback((sessaoId: string) => {
+    if (sessaoRef.current?.id !== sessaoId) return;
+    prontoRef.current = false; sessaoRef.current = null; finalizacaoRef.current = undefined;
+    setSessao(null); setFinalizacao(undefined); setRestaurado(false);
+    setEditorId(null); setRevisaoFim(null); setMostrarCopias(false);
+    setConflitoRemoto(false); setConflitoSessao(false); setErroSincronizacao("");
+    setDescanso(atual => ({ ...atual, fimEm: null, pausado: false, segundosPausados: 0 }));
+    setMensagem("Treino concluído no servidor. Detalhes pendentes continuam protegidos no aparelho.");
+    setEncerramentoConfirmado(sessaoId);
+  }, []);
+
+  // Fecha modais primeiro. Navega só se esta ainda for a tela que o usuário usa.
+  // Respostas atrasadas de uma tela oculta nunca devem fazê-lo voltar de outra tela.
+  useEffect(() => {
+    if (!encerramentoConfirmado || navegacaoEncerradaRef.current === encerramentoConfirmado) return;
+    navegacaoEncerradaRef.current = encerramentoConfirmado;
+    if (estaEmFoco) onVoltar();
+  }, [encerramentoConfirmado, estaEmFoco, onVoltar]);
+
+  useEffect(() => {
+    let ativo = true;
+    const conferir = async () => {
+      const atual = sessaoRef.current, id = usuarioRef.current;
+      if (!atual || !id || !prontoRef.current) return;
+      try {
+        const local = await lerRascunho(id, planId);
+        const encerrada = local?.sessao.id === atual.id ? Boolean(local.encerradaNoServidor)
+          : await sessaoFoiEncerrada(id, atual.id);
+        if (ativo && encerrada) retirarSessaoDaTela(atual.id);
+      } catch { /* Falha de leitura não é prova de conclusão. */ }
+    };
+    const aoMudar = () => { void conferir(); };
+    const cancelar = assinarRascunhos(aoMudar);
+    aoMudar(); // Também cobre confirmação ocorrida durante o carregamento da tela.
+    if (typeof window !== "undefined") window.addEventListener("storage", aoMudar);
+    return () => { ativo = false; cancelar(); if (typeof window !== "undefined") window.removeEventListener("storage", aoMudar); };
+  }, [planId, retirarSessaoDaTela, sessao?.id]);
 
   const montarRascunho = useCallback(
     (novasSeries?: SerieAtiva[]): TreinoRascunho | null => {
@@ -224,12 +266,10 @@ export default function TreinoAtivo({
     try {
       const resultado = recuperar === "local" ? await reenviarConclusaoLocal(id, planId)
         : recuperar === "remota" ? await recuperarConclusaoRemota(id, planId) : await sincronizarRascunho(id, planId, permitirSobrescrever);
-      if (resultado.concluido && !resultado.rascunho) {
-        prontoRef.current = false; sessaoRef.current = null; finalizacaoRef.current = undefined;
-        setFinalizacao(undefined); setSessao(null); setErroSincronizacao("");
-        setMensagem("Treino concluído e sincronizado. O horário original foi preservado.");
-        onVoltar(); return;
+      if (resultado.encerrado || (resultado.concluido && !resultado.rascunho)) {
+        retirarSessaoDaTela(atual.id); return;
       }
+      if (sessaoRef.current?.id !== atual.id) return;
       if (resultado.rascunho?.sessao.id === atual.id) {
         const porChave = new Map(resultado.rascunho.series.map((serie) => [serie.chave, serie]));
         const antesPorChave = new Map(antes.map((serie) => [serie.chave, serie]));
@@ -247,7 +287,7 @@ export default function TreinoAtivo({
     } catch {
       setErroSincronizacao("Não foi possível sincronizar. Seus dados continuam guardados neste aparelho.");
     } finally { sincronizandoRef.current = false; setSincronizando(false); setRecuperacaoEmCurso(undefined); }
-  }, [onVoltar, planId]);
+  }, [planId, retirarSessaoDaTela]);
 
   // Grava também mudanças de carga/repetições ainda não concluídas.
   useEffect(() => {
@@ -280,13 +320,13 @@ export default function TreinoAtivo({
     finalizacao: finalizacao?.finishedAt,
   }), [series, finalizacao]);
   useEffect(() => {
-    if (!sessao || (!finalizacao && !seriesRef.current.some((serie) => serie.pendente))) return;
+    if (!sessao) return;
     // Persist before sending. A failed attempt with unchanged operations must not
     // immediately trigger another render/send loop.
     void salvarLocal().then(() => sincronizar()).catch(() => setErroSincronizacao("Não foi possível proteger as alterações neste aparelho."));
   }, [sessao, operacoesPendentes, salvarLocal, sincronizar, finalizacao]);
   useEffect(() => {
-    if (!sessao || (!finalizacao && !seriesRef.current.some((serie) => serie.pendente))) return;
+    if (!sessao) return;
     const intervalo = setInterval(() => {
       void sincronizar();
     }, 12000);
@@ -311,6 +351,11 @@ export default function TreinoAtivo({
       const sessaoUsuario = { user: usuarioEmCache };
       setUsuarioId(idUsuario);
       setCopias(await listarCopiasTreino(idUsuario, planId));
+      if (local?.encerradaNoServidor) {
+        prontoRef.current = false;
+        setMensagem("Este treino já está concluído no servidor. Os detalhes locais continuam protegidos até o envio terminar.");
+        return;
+      }
       setPerfil(
         lerPerfilTreino(
           (sessaoUsuario.user.user_metadata ?? {}) as Record<string, unknown>,
@@ -510,6 +555,12 @@ export default function TreinoAtivo({
         const id = data.session?.user.id;
         const local = id ? await lerRascunho(id, planId) : null;
         if (id && local) {
+          if (local.encerradaNoServidor) {
+            setUsuarioId(id); usuarioRef.current = id; prontoRef.current = false;
+            setCopias(await listarCopiasTreino(id, planId));
+            setMensagem("Treino concluído no servidor. Os detalhes pendentes continuam neste aparelho.");
+            return;
+          }
           criacaoPendenteRef.current = Boolean(local.criacaoPendente);
           setUsuarioId(id);
           usuarioRef.current = id;
@@ -871,6 +922,7 @@ export default function TreinoAtivo({
       const conclusao: FinalizacaoTreino = { finishedAt: revisaoFim, notes: "Treino concluído no modo ativo;esforco_percebido=" + esforco + ";modelo=" + destinoModelo, metricas, modelo };
       // Não grava um snapshot da UI sobre confirmações recebidas durante a revisão.
       const salvo = await guardarConclusao(usuarioId, planId, sessao.id, conclusao);
+      if (sessaoRef.current?.id !== sessao.id) return;
       finalizacaoRef.current = salvo.finalizacao;
       setFinalizacao(salvo.finalizacao); setRevisaoFim(null);
       setMensagem("Encerramento e escolha de treino guardados. O horário real será preservado, mesmo sem internet.");

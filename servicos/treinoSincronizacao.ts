@@ -1,6 +1,6 @@
 import { supabase } from "../supabase";
 import { registrarMudancaDeDados } from "./revisaoDados";
-import { arquivarConclusaoRemota, copiarRascunhoParaReenvio, atualizarRascunho, lerRascunho, listarRascunhos, mesmaOperacao, novoIdSerie, type TreinoRascunho } from "./treinoLocal";
+import { arquivarConclusaoRemota, copiarRascunhoParaReenvio, marcarSessaoEncerrada, atualizarRascunho, lerRascunho, listarRascunhos, mesmaOperacao, novoIdSerie, type TreinoRascunho } from "./treinoLocal";
 import { salvarModeloDoTreino, ConflitoModeloTreino } from "./salvarModeloTreino";
 
 export type ResultadoSincronizacao = {
@@ -9,6 +9,7 @@ export type ResultadoSincronizacao = {
   erro?: string;
   conflito?: boolean;
   conflitoSessao?: boolean;
+  encerrado?: boolean;
 };
 class ConflitoTreino extends Error {}
 class ConflitoSessao extends ConflitoTreino {}
@@ -55,16 +56,29 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
   let local = await lerRascunho(usuarioId, planId);
   if (!local) return { rascunho: null, concluido: false };
   const sessaoId = local.sessao.id;
-  if (!local.finalizacao && !local.series.some((serie) => serie.pendente)) return { rascunho: local, concluido: false };
-  if (local.conflitoSincronizacao && local.conflitoSessao === false && !permitirSobrescrever) return {
-    rascunho: local, concluido: false, conflito: true, conflitoSessao: local.conflitoSessao, erro: local.erroSincronizacao,
-  };
   try {
     const { data: autenticado, error: erroAuth } = await supabase.auth.getUser();
     if (erroAuth || autenticado.user?.id !== usuarioId) throw new Error("Entre novamente na sua conta para sincronizar este treino.");
     let { data: remota, error: erroSessao } = await supabase.from("workout_sessions")
       .select("id, plan_id, status, finished_at").eq("id", sessaoId).eq("user_id", usuarioId).maybeSingle();
     if (erroSessao) throw erroSessao;
+    if (remota?.status === "concluido") {
+      // A sessão já terminou, mesmo se um envio posterior de detalhes falhar.
+      local = await marcarSessaoEncerrada(usuarioId, planId, sessaoId, remota.finished_at ?? null);
+      if (!local || local.sessao.id !== sessaoId) throw new Error("A sessão local mudou durante a conferência.");
+      if (Number.isFinite(Date.parse(remota.finished_at ?? "")) && remota.plan_id
+        && (situacaoConclusao(remota, local) !== "confirmada" || local.series.some(s => s.pendente))) {
+        // Conclusão de outro fluxo/aparelho: não sobrescreve a versão remota.
+        // Qualquer diferença local fica integralmente consultável na cópia.
+        await arquivarConclusaoRemota(usuarioId, planId, sessaoId, { finished_at: remota.finished_at!, plan_id: remota.plan_id });
+        registrarMudancaDeDados();
+        return { rascunho: await lerRascunho(usuarioId, planId), concluido: true, encerrado: true };
+      }
+    }
+    if (local.conflitoSincronizacao && local.conflitoSessao === false && !permitirSobrescrever && !local.encerradaNoServidor) return {
+      rascunho: local, concluido: false, conflito: true, conflitoSessao: false, erro: local.erroSincronizacao,
+    };
+    if (remota?.status === "em_andamento" && !local.finalizacao && !local.series.some(s => s.pendente)) return { rascunho: local, concluido: false };
     if (!remota && local.criacaoPendente) {
       const data = new Date(local.sessao.started_at), inicio = new Date(data.getFullYear(), data.getMonth(), data.getDate()), fim = new Date(data.getFullYear(), data.getMonth(), data.getDate() + 1);
       const { data: doDia, error: erroDia } = await supabase.from("workout_sessions").select("id, plan_id").eq("user_id", usuarioId).gte("started_at", inicio.toISOString()).lt("started_at", fim.toISOString()).limit(2);
@@ -160,6 +174,8 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
         if (!data) throw new ConflitoTreino("O encerramento mudou durante o envio. A conclusão local foi preservada para conferência.");
         registrarMudancaDeDados();
       }
+      local = await marcarSessaoEncerrada(usuarioId, planId, sessaoId, finalizacao.finishedAt);
+      if (!local || local.sessao.id !== sessaoId) throw new Error("A sessão local mudou após a confirmação.");
       // Até a confirmação dos detalhes, a fila continua no disco, inclusive após reabrir.
       const { data: detalhes, error: erroDetalhes } = await supabase.from("workout_sessions").update(finalizacao.metricas)
         .eq("id", sessaoId).eq("user_id", usuarioId).eq("status", "concluido").eq("finished_at", finalizacao.finishedAt)
@@ -170,7 +186,7 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
       await atualizarRascunho(usuarioId, planId, (atual) => atual.sessao.id === sessaoId
         && atual.finalizacao?.finishedAt === finalizacao.finishedAt && !atual.series.some((serie) => serie.pendente) ? null : atual);
       registrarMudancaDeDados();
-      return { rascunho: await lerRascunho(usuarioId, planId), concluido: true };
+      return { rascunho: await lerRascunho(usuarioId, planId), concluido: true, encerrado: true };
     }
     local = await atualizarRascunho(usuarioId, planId, (atual) => ({ ...atual, erroSincronizacao: undefined, conflitoSincronizacao: false, conflitoSessao: false }));
     return { rascunho: local, concluido: false };
@@ -179,7 +195,7 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
     const conflito = erro instanceof ConflitoTreino || erro instanceof ConflitoModeloTreino;
     const conflitoSessao = erro instanceof ConflitoSessao;
     local = await atualizarRascunho(usuarioId, planId, (atual) => atual.sessao.id !== sessaoId ? atual : { ...atual, erroSincronizacao: mensagem, conflitoSincronizacao: conflito, conflitoSessao });
-    return { rascunho: local, concluido: false, erro: mensagem, conflito, conflitoSessao };
+    return { rascunho: local, concluido: false, erro: mensagem, conflito, conflitoSessao, encerrado: Boolean(local?.encerradaNoServidor) };
   }
 }
 
@@ -260,7 +276,8 @@ export async function recuperarConclusaoRemota(usuarioId: string, planId: string
 export async function sincronizarTreinosPendentes(usuarioId: string): Promise<ResultadoSincronizacao[]> {
   const resultados: ResultadoSincronizacao[] = [];
   for (const rascunho of await listarRascunhos(usuarioId)) {
-    if (rascunho.finalizacao || rascunho.series.some((serie) => serie.pendente)) resultados.push(await sincronizarRascunho(usuarioId, rascunho.planId));
+    // Rascunhos sem operações também podem ser de uma sessão já concluída remotamente.
+    resultados.push(await sincronizarRascunho(usuarioId, rascunho.planId));
   }
   return resultados;
 }
