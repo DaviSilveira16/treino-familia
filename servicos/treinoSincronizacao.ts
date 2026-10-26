@@ -20,6 +20,7 @@ import {
   salvarModeloDoTreino,
   ConflitoModeloTreino,
 } from "./salvarModeloTreino";
+import { registrarTempoFinalizacao } from "./tempoFinalizacao";
 
 export type ResultadoSincronizacao = {
   rascunho: TreinoRascunho | null;
@@ -121,6 +122,10 @@ async function enviar(
   let local = await lerRascunho(usuarioId, planId);
   if (!local) return { rascunho: null, concluido: false };
   const sessaoId = local.sessao.id;
+  const inicioEnvio = Date.now();
+  const medirConclusao = Boolean(
+    local.finalizacao && !local.encerradaNoServidor,
+  );
   try {
     const exclusao = await lerExclusaoTreino(usuarioId, sessaoId);
     if (exclusao?.estado === "confirmada") {
@@ -486,6 +491,12 @@ async function enviar(
         sessaoId,
         finalizacao.finishedAt,
       );
+      if (medirConclusao)
+        void registrarTempoFinalizacao(
+          usuarioId,
+          sessaoId,
+          Date.now() - inicioEnvio,
+        ).catch(() => {});
       if (!local || local.sessao.id !== sessaoId)
         throw new Error("A sessão local mudou após a confirmação.");
       // Até a confirmação dos detalhes, a fila continua no disco, inclusive após reabrir.

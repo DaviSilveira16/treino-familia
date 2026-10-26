@@ -73,6 +73,8 @@ export type DescansoTreino = {
 export type FinalizacaoTreino = {
   /** Momento real do toque em finalizar, jamais o momento da sincronização. */
   finishedAt: string;
+  /** Início da espera após confirmar; não altera o horário real do treino. */
+  envioIniciadoEm?: string;
   notes: string;
   metricas: Record<string, string | number | null>;
   modelo?: ModeloTreinoPendente;

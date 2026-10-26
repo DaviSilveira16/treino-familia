@@ -73,6 +73,8 @@ import EditorExercicioSessao, {
   type DadosEditorExercicio,
 } from "../componentes/EditorExercicioSessao";
 import ResumoRegistroTreino from "../componentes/ResumoRegistroTreino";
+import ProgressoFinalizacao from "../componentes/ProgressoFinalizacao";
+import { estimarTempoFinalizacao } from "../servicos/tempoFinalizacao";
 import {
   criarExercicioSessao,
   acrescentarSerie,
@@ -182,12 +184,28 @@ export default function TreinoAtivo({
   >("sessao");
   const [nomeNovoPlano, setNomeNovoPlano] = useState("");
   const [erroConclusao, setErroConclusao] = useState("");
+  const [inicioFinalizacao, setInicioFinalizacao] = useState<number | null>(
+    null,
+  );
+  const [estimativaFinalizacao, setEstimativaFinalizacao] = useState<
+    number | null
+  >(null);
   const [encerramentoConfirmado, setEncerramentoConfirmado] = useState<
     string | null
   >(null);
   const navegacaoEncerradaRef = useRef<string | null>(null);
   const criacaoPendenteRef = useRef(false);
   const novaSessaoAtivaRef = useRef(false);
+  useEffect(() => {
+    let ativo = true;
+    if (usuarioId)
+      void estimarTempoFinalizacao(usuarioId).then((valor) => {
+        if (ativo) setEstimativaFinalizacao(valor);
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [usuarioId]);
   useVoltarDoModal(editorId !== null, () => setEditorId(null));
   useVoltarDoModal(revisaoFim !== null, () => {
     if (!salvando) setRevisaoFim(null);
@@ -973,6 +991,7 @@ export default function TreinoAtivo({
         setMostrarCopias(false);
         setEditorId(null);
         setRevisaoFim(null);
+        setInicioFinalizacao(null);
         setMensagem(
           copia
             ? "Cópia carregada em uma nova sessão. As séries estão abertas para você treinar."
@@ -1428,6 +1447,7 @@ export default function TreinoAtivo({
     setSalvando(true);
     salvandoRef.current = true;
     setErroConclusao("");
+    setInicioFinalizacao(Date.now());
     try {
       const metricas = metricasRegistroTreino(
         perfil,
@@ -1447,6 +1467,7 @@ export default function TreinoAtivo({
             );
       const conclusao: FinalizacaoTreino = {
         finishedAt: revisaoFim,
+        envioIniciadoEm: new Date().toISOString(),
         notes:
           "Treino concluído no modo ativo;esforco_percebido=" +
           esforco +
@@ -1472,6 +1493,7 @@ export default function TreinoAtivo({
       void sincronizar();
     } catch (erro) {
       finalizacaoRef.current = undefined;
+      setInicioFinalizacao(null);
       setErroConclusao(
         erro instanceof Error
           ? erro.message
@@ -1511,6 +1533,19 @@ export default function TreinoAtivo({
           Modo de treino ativo · registre as séries que realmente concluiu.
         </Text>
         {mensagem ? <Text style={estilos.mensagem}>{mensagem}</Text> : null}
+        {sessao && finalizacao ? (
+          <ProgressoFinalizacao
+            inicio={
+              inicioFinalizacao ??
+              Date.parse(finalizacao.envioIniciadoEm ?? finalizacao.finishedAt)
+            }
+            estimativa={estimativaFinalizacao}
+            salvando={false}
+            online={online}
+            erro={Boolean(erroSincronizacao || conflitoRemoto)}
+            cor={corTema}
+          />
+        ) : null}
         {sessao &&
         (finalizacao ||
           restaurado ||
@@ -1985,6 +2020,22 @@ export default function TreinoAtivo({
               <Text style={estilos.tituloCartao}>
                 Revisar e concluir treino
               </Text>
+              {salvando && inicioFinalizacao !== null ? (
+                <ProgressoFinalizacao
+                  inicio={inicioFinalizacao}
+                  estimativa={estimativaFinalizacao}
+                  salvando
+                  online={online}
+                  erro={false}
+                  cor={corTema}
+                />
+              ) : (
+                <Text style={estilos.secundario}>
+                  {estimativaFinalizacao === null
+                    ? "Ao confirmar, a conclusão será salva neste aparelho e enviada ao servidor. O tempo depende da conexão."
+                    : `Previsão de envio após confirmar: cerca de ${estimativaFinalizacao} s, com base nos envios anteriores deste aparelho. Pode variar conforme a conexão.`}
+                </Text>
+              )}
               <ResumoRegistroTreino
                 perfil={perfil}
                 series={seriesDoResumo}
