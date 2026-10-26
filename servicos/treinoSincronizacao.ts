@@ -1,6 +1,6 @@
 import { supabase } from "../supabase";
 import { registrarMudancaDeDados } from "./revisaoDados";
-import { arquivarConclusaoRemota, copiarRascunhoParaReenvio, marcarSessaoEncerrada, atualizarRascunho, lerRascunho, listarRascunhos, mesmaOperacao, novoIdSerie, type TreinoRascunho } from "./treinoLocal";
+import { arquivarConclusaoRemota, copiarRascunhoParaReenvio, marcarSessaoEncerrada, atualizarRascunho, lerRascunho, listarRascunhos, mesmaOperacao, novoIdSerie, lerExclusaoTreino, listarExclusoesPendentes, registrarExclusaoTreino, confirmarExclusaoTreino, type TreinoRascunho } from "./treinoLocal";
 import { salvarModeloDoTreino, ConflitoModeloTreino } from "./salvarModeloTreino";
 
 export type ResultadoSincronizacao = {
@@ -13,7 +13,13 @@ export type ResultadoSincronizacao = {
 };
 class ConflitoTreino extends Error {}
 class ConflitoSessao extends ConflitoTreino {}
+class ExclusaoSolicitada extends Error {}
 const emEnvio = new Map<string, Promise<ResultadoSincronizacao>>();
+const exclusoesEmAndamento = new Map<string, Promise<void>>();
+
+async function garantirEnvioPermitido(usuarioId: string, sessaoId: string) {
+  if (await lerExclusaoTreino(usuarioId, sessaoId)) throw new ExclusaoSolicitada("A exclusão desta sessão tem prioridade sobre o reenvio.");
+}
 
 type SessaoRemota = { plan_id: string | null; status: string | null; finished_at?: string | null };
 function mensagemErro(erro: unknown): string {
@@ -57,11 +63,31 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
   if (!local) return { rascunho: null, concluido: false };
   const sessaoId = local.sessao.id;
   try {
+    const exclusao = await lerExclusaoTreino(usuarioId, sessaoId);
+    if (exclusao?.estado === "confirmada") {
+      await confirmarExclusaoTreino(usuarioId, sessaoId);
+      return { rascunho: null, concluido: false, encerrado: true };
+    }
+    if (local.exclusaoSolicitada) throw new ExclusaoSolicitada();
+    await garantirEnvioPermitido(usuarioId, sessaoId);
     const { data: autenticado, error: erroAuth } = await supabase.auth.getUser();
     if (erroAuth || autenticado.user?.id !== usuarioId) throw new Error("Entre novamente na sua conta para sincronizar este treino.");
     let { data: remota, error: erroSessao } = await supabase.from("workout_sessions")
       .select("id, plan_id, status, finished_at").eq("id", sessaoId).eq("user_id", usuarioId).maybeSingle();
     if (erroSessao) throw erroSessao;
+    if (!remota && (local.sessaoConfirmadaNoServidor || local.encerradaNoServidor)) {
+      // Uma sessão que comprovadamente existiu e desapareceu não é uma criação
+      // offline nova. Preserva a cópia e respeita a exclusão feita em outro fluxo.
+      await registrarExclusaoTreino(usuarioId, sessaoId);
+      await confirmarExclusaoTreino(usuarioId, sessaoId);
+      registrarMudancaDeDados();
+      return { rascunho: null, concluido: false, encerrado: true };
+    }
+    if (remota && (!local.sessaoConfirmadaNoServidor || local.criacaoPendente)) {
+      local = await atualizarRascunho(usuarioId, planId, atual => atual.sessao.id !== sessaoId ? atual
+        : { ...atual, sessaoConfirmadaNoServidor: true, criacaoPendente: false });
+      if (!local || local.sessao.id !== sessaoId) throw new Error("O rascunho mudou durante a confirmação da sessão.");
+    }
     if (remota?.status === "concluido") {
       // A sessão já terminou, mesmo se um envio posterior de detalhes falhar.
       local = await marcarSessaoEncerrada(usuarioId, planId, sessaoId, remota.finished_at ?? null);
@@ -87,9 +113,13 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
       const { data: ativas, error: erroAtivas } = await supabase.from("workout_sessions").select("id").eq("user_id", usuarioId).eq("status", "em_andamento").limit(1);
       if (erroAtivas) throw erroAtivas;
       if (ativas?.some(s => s.id !== sessaoId)) throw new Error("Conclua o treino em andamento antes de enviar o registro pela Frequência.");
+      await garantirEnvioPermitido(usuarioId, sessaoId);
       const { data: criada, error } = await supabase.from("workout_sessions").insert({ id: sessaoId, user_id: usuarioId, plan_id: local.planId, started_at: local.sessao.started_at, status: "em_andamento" }).select("id, plan_id, status, finished_at").single();
       if (error) throw error;
       remota = criada;
+      local = await atualizarRascunho(usuarioId, planId, atual => atual.sessao.id !== sessaoId ? atual
+        : { ...atual, sessaoConfirmadaNoServidor: true, criacaoPendente: false });
+      if (!local || local.sessao.id !== sessaoId) throw new Error("O rascunho mudou após criar a sessão.");
     }
     const reparar = local.reenvioSolicitado && local.finalizacao && remota?.plan_id === planId
       && remota.finished_at === null && (remota.status === null || remota.status === "concluido");
@@ -98,6 +128,7 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
     if (situacao === "confirmada" && local.series.some((serie) => serie.pendente)) throw new ConflitoSessao("O servidor já encerrou esta sessão, mas ainda existem séries locais pendentes. Confira a conclusão no servidor; sua cópia será preservada.");
 
     for (const item of local.series.filter((serie) => serie.pendente)) {
+      await garantirEnvioPermitido(usuarioId, sessaoId);
       let busca = supabase.from("workout_sets").select("id, reps, weight_kg").eq("user_id", usuarioId).eq("session_id", sessaoId);
       if (item.avulsa) {
         if (!item.registroId) throw new Error("Exercício da sessão sem identificador local. Reabra o treino para conferir.");
@@ -107,6 +138,7 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
       if (erroBusca) throw erroBusca;
       if ((existentes ?? []).length > 1) throw new ConflitoTreino("Há séries duplicadas no servidor. Seu rascunho foi preservado para conferência.");
       const existente = existentes?.[0];
+      await garantirEnvioPermitido(usuarioId, sessaoId);
       let registroId: string | undefined;
       if (item.pendente === "remover") {
         if (existente) {
@@ -160,6 +192,7 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
     }
     local = await lerRascunho(usuarioId, planId);
     if (local?.finalizacao && !local.series.some((serie) => serie.pendente)) {
+      await garantirEnvioPermitido(usuarioId, sessaoId);
       const finalizacao = local.finalizacao;
       if (situacao !== "confirmada") {
         let encerrar = supabase.from("workout_sessions")
@@ -177,11 +210,13 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
       local = await marcarSessaoEncerrada(usuarioId, planId, sessaoId, finalizacao.finishedAt);
       if (!local || local.sessao.id !== sessaoId) throw new Error("A sessão local mudou após a confirmação.");
       // Até a confirmação dos detalhes, a fila continua no disco, inclusive após reabrir.
+      await garantirEnvioPermitido(usuarioId, sessaoId);
       const { data: detalhes, error: erroDetalhes } = await supabase.from("workout_sessions").update(finalizacao.metricas)
         .eq("id", sessaoId).eq("user_id", usuarioId).eq("status", "concluido").eq("finished_at", finalizacao.finishedAt)
         .select("id").maybeSingle();
       if (erroDetalhes) throw new Error("O encerramento foi enviado. Os detalhes permanecem guardados até a próxima sincronização.");
       if (!detalhes) throw new ConflitoTreino("O encerramento remoto mudou. Seus detalhes locais continuam preservados.");
+      await garantirEnvioPermitido(usuarioId, sessaoId);
       await salvarModeloDoTreino(local);
       await atualizarRascunho(usuarioId, planId, (atual) => atual.sessao.id === sessaoId
         && atual.finalizacao?.finishedAt === finalizacao.finishedAt && !atual.series.some((serie) => serie.pendente) ? null : atual);
@@ -191,6 +226,7 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
     local = await atualizarRascunho(usuarioId, planId, (atual) => ({ ...atual, erroSincronizacao: undefined, conflitoSincronizacao: false, conflitoSessao: false }));
     return { rascunho: local, concluido: false };
   } catch (erro) {
+    if (erro instanceof ExclusaoSolicitada) return { rascunho: await lerRascunho(usuarioId, planId), concluido: false, encerrado: true };
     const mensagem = mensagemErro(erro);
     const conflito = erro instanceof ConflitoTreino || erro instanceof ConflitoModeloTreino;
     const conflitoSessao = erro instanceof ConflitoSessao;
@@ -207,6 +243,7 @@ export async function reenviarConclusaoLocal(usuarioId: string, planId: string):
     const local = await lerRascunho(usuarioId, planId);
     if (!local) return { rascunho: null, concluido: false, erro: "Não há treino local para enviar. Confira o histórico." };
     try {
+      await garantirEnvioPermitido(usuarioId, local.sessao.id);
       const { data: autenticado, error: erroAuth } = await supabase.auth.getUser();
       if (erroAuth || autenticado.user?.id !== usuarioId) throw new Error("Entre novamente na sua conta para enviar este treino.");
       const fim = Date.parse(local.finalizacao?.finishedAt ?? ""), inicio = Date.parse(local.sessao.started_at);
@@ -214,6 +251,7 @@ export async function reenviarConclusaoLocal(usuarioId: string, planId: string):
       const { data: remota, error } = await supabase.from("workout_sessions").select("id, plan_id, status, finished_at")
         .eq("id", local.sessao.id).eq("user_id", usuarioId).maybeSingle();
       if (error) throw error;
+      if (!remota && (local.sessaoConfirmadaNoServidor || local.encerradaNoServidor)) return enviar(usuarioId, planId, false);
       if (remota && situacaoConclusao(remota, local) === "confirmada") {
         // O envio pode já ter terminado e só os detalhes/modelo estarem pendentes.
         await atualizarRascunho(usuarioId, planId, atual => ({ ...atual, conflitoSincronizacao: false, conflitoSessao: false }));
@@ -226,6 +264,7 @@ export async function reenviarConclusaoLocal(usuarioId: string, planId: string):
       if (erroPlano) throw erroPlano;
       if (!plano) throw new Error("O plano deste treino não foi encontrado na sua conta. A cópia local permanece preservada.");
       await copiarRascunhoParaReenvio(usuarioId, planId, local.sessao.id, remota);
+      await garantirEnvioPermitido(usuarioId, local.sessao.id);
       await atualizarRascunho(usuarioId, planId, atual => {
         if (atual.sessao.id !== local.sessao.id) throw new Error("A sessão mudou durante o reenvio.");
         return { ...atual, reenvioSolicitado: true, criacaoPendente: !remota || atual.criacaoPendente,
@@ -275,9 +314,34 @@ export async function recuperarConclusaoRemota(usuarioId: string, planId: string
 
 export async function sincronizarTreinosPendentes(usuarioId: string): Promise<ResultadoSincronizacao[]> {
   const resultados: ResultadoSincronizacao[] = [];
+  for (const exclusao of await listarExclusoesPendentes(usuarioId)) {
+    try { await excluirSessaoTreino(usuarioId, exclusao.sessaoId); } catch { /* Mantém o pedido e bloqueia reenvio até conseguir confirmar. */ }
+  }
   for (const rascunho of await listarRascunhos(usuarioId)) {
     // Rascunhos sem operações também podem ser de uma sessão já concluída remotamente.
     resultados.push(await sincronizarRascunho(usuarioId, rascunho.planId));
   }
   return resultados;
+}
+
+/** Serializa a exclusão com os envios em curso e só confirma após reler o servidor. */
+export function excluirSessaoTreino(usuarioId: string, sessaoId: string): Promise<void> {
+  const chave = `${usuarioId}:${sessaoId}`;
+  const existente = exclusoesEmAndamento.get(chave);
+  if (existente) return existente;
+  const tarefa = (async () => {
+    const { data: auth, error: erroAuth } = await supabase.auth.getUser();
+    if (erroAuth || auth.user?.id !== usuarioId) throw new Error("Entre novamente na sua conta para excluir este treino.");
+    await registrarExclusaoTreino(usuarioId, sessaoId);
+    await Promise.all([...emEnvio.entries()].filter(([envio]) => envio.startsWith(`${usuarioId}:`)).map(([, tarefa]) => tarefa));
+    const resultado = await supabase.from("workout_sessions").delete().eq("id", sessaoId).eq("user_id", usuarioId).select("id");
+    // DELETE sem linhas afetadas pode significar RLS, não uma exclusão bem-sucedida.
+    // A releitura também reconhece uma resposta perdida depois de apagar a linha.
+    const { data: restante, error: erroConferencia } = await supabase.from("workout_sessions").select("id").eq("id", sessaoId).eq("user_id", usuarioId).maybeSingle();
+    if (erroConferencia) throw new Error("Não foi possível confirmar a exclusão no servidor. O pedido permanece guardado neste aparelho.");
+    if (restante) throw new Error(resultado.error ? mensagemErro(resultado.error) : "O servidor não confirmou a exclusão deste treino. Ele continua registrado; confira as permissões da conta no Supabase.");
+    await confirmarExclusaoTreino(usuarioId, sessaoId);
+    registrarMudancaDeDados();
+  })().finally(() => exclusoesEmAndamento.delete(chave));
+  exclusoesEmAndamento.set(chave, tarefa); return tarefa;
 }

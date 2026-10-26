@@ -9,7 +9,7 @@ jobs:
   verificar:
     runs-on: ubuntu-latest
     env:
-      EXPO_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+      EXPO_PUBLIC_SUPABASE_URL: http://127.0.0.1:43119
       EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
     steps:
       - uses: actions/checkout@v4

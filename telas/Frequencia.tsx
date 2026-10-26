@@ -20,6 +20,7 @@ import {
 import { lerCache, salvarCache } from "../servicos/cacheConsultas";
 import { medir } from "../servicos/performance";
 import FormularioRegistroTreino from "../componentes/FormularioRegistroTreino";
+import { excluirRegistroFrequencia } from "../servicos/excluirRegistroFrequencia";
 import {
   categoriaDoCardio,
   estimarCaloriasAtivas,
@@ -137,6 +138,7 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const envioCardioEmAndamento = useRef(false);
+  const exclusaoEmAndamento = useRef(false);
   const chaveCardioPendente = useRef<{
     fingerprint: string;
     chave: string;
@@ -716,33 +718,20 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
 
   async function excluirRegistroSelecionado() {
     const registro = registroParaExcluir;
-    if (!usuarioId || !registro) return;
+    if (!usuarioId || !registro || exclusaoEmAndamento.current) return;
 
+    exclusaoEmAndamento.current = true;
     setSalvando(true);
     setMensagemStatus("");
+    controladorConsultaRef.current?.abort();
+    consultaAtivaRef.current++;
+    ultimaConsultaRef.current = 0;
+    ultimaRevisaoRef.current = -1;
 
     try {
-      const resultado =
-        registro.tipo === "treino"
-          ? await supabase
-              .from("workout_sessions")
-              .delete()
-              .eq("id", registro.id)
-              .eq("user_id", usuarioId)
-          : await supabase
-              .from("cardio_sessions")
-              .delete()
-              .eq("id", registro.id)
-              .eq("user_id", usuarioId);
-
-      if (resultado.error) {
-        setMensagemStatus(
-          `Não foi possível excluir este ${registro.tipo === "treino" ? "treino" : "cardio"}: ${resultado.error.message}`,
-        );
-        return;
-      }
-
-      registrarMudancaDeDados();
+      await excluirRegistroFrequencia(usuarioId, registro);
+      if (registro.tipo === "treino") setSessoes(atuais => atuais.filter(item => item.id !== registro.id));
+      else setSessoesCardio(atuais => atuais.filter(item => item.id !== registro.id));
       setRegistroParaExcluir(null);
       if (registro.tipo === "treino") setTreinoSelecionado("");
       if (registro.tipo === "cardio") setCardioSelecionado("");
@@ -750,9 +739,10 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
       setMensagemStatus(
         `${registro.tipo === "treino" ? "Treino" : "Cardio"} excluído. Os outros registros desse dia foram mantidos.`,
       );
-    } catch {
-      setMensagemStatus("Ocorreu um erro ao excluir o registro selecionado.");
+    } catch (erro) {
+      setMensagemStatus(erro instanceof Error ? erro.message : "Ocorreu um erro ao excluir o registro selecionado.");
     } finally {
+      exclusaoEmAndamento.current = false;
       setSalvando(false);
     }
   }
