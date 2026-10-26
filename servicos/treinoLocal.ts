@@ -54,6 +54,8 @@ export type TreinoRascunho = {
   erroSincronizacao?: string;
   conflitoSincronizacao?: boolean;
   conflitoSessao?: boolean;
+  /** Reenvio explícito permite reparar apenas uma conclusão incompleta. */
+  reenvioSolicitado?: boolean;
   criacaoPendente?: boolean;
 };
 
@@ -193,6 +195,29 @@ export async function guardarConclusao(usuarioId: string, planId: string, sessao
   return salvo;
 }
 
+type EstadoSessaoCopiada = { finished_at: string | null; plan_id: string | null; status?: string | null } | null;
+type CopiaTreino = { rascunho: TreinoRascunho; remota: EstadoSessaoCopiada; arquivadoEm: string };
+
+async function guardarCopia(atual: TreinoRascunho, remota: EstadoSessaoCopiada) {
+  const destino = `@treino-familia:recuperacao:v1:${atual.usuarioId}:${atual.planId}:${atual.sessao.id}`;
+  // Repetir a tentativa nunca substitui o snapshot original pela versão já reparada.
+  if (!await AsyncStorage.getItem(destino)) await AsyncStorage.setItem(destino, JSON.stringify({ rascunho: atual, remota, arquivadoEm: new Date().toISOString() }));
+}
+
+/** Backup sem retirar a pendência: o envio só termina após confirmação remota. */
+export function copiarRascunhoParaReenvio(usuarioId: string, planId: string, sessaoId: string, remota: EstadoSessaoCopiada) {
+  const tarefa = fila.catch(() => {}).then(async () => {
+    const texto = await AsyncStorage.getItem(chave(usuarioId, planId));
+    if (!texto) throw new Error("O rascunho local não foi encontrado.");
+    const atual = JSON.parse(texto) as TreinoRascunho;
+    if (atual.usuarioId !== usuarioId || atual.planId !== planId || atual.sessao.id !== sessaoId) throw new Error("A sessão mudou. Reabra o treino para conferir.");
+    await guardarCopia(atual, remota);
+    notificar();
+  });
+  fila = tarefa.catch(() => {});
+  return tarefa;
+}
+
 /** Backup primeiro. Se qualquer gravação falhar, a sessão continua recuperável. */
 export function arquivarConclusaoRemota(usuarioId: string, planId: string, sessaoId: string, remota: { finished_at: string; plan_id: string }) {
   const tarefa = fila.catch(() => {}).then(async () => {
@@ -200,7 +225,7 @@ export function arquivarConclusaoRemota(usuarioId: string, planId: string, sessa
     if (!texto) return;
     const atual = JSON.parse(texto) as TreinoRascunho;
     if (atual.usuarioId !== usuarioId || atual.planId !== planId || atual.sessao.id !== sessaoId) throw new Error("O rascunho mudou. Reabra o treino para conferir.");
-    await AsyncStorage.setItem(`@treino-familia:recuperacao:v1:${usuarioId}:${planId}:${sessaoId}`, JSON.stringify({ rascunho: atual, remota, arquivadoEm: new Date().toISOString() }));
+    await guardarCopia(atual, remota);
     await AsyncStorage.setItem(chaveEncerrada(usuarioId, sessaoId), "1");
     await AsyncStorage.removeItem(chave(usuarioId, planId));
     notificar();
@@ -209,7 +234,7 @@ export function arquivarConclusaoRemota(usuarioId: string, planId: string, sessa
   return tarefa;
 }
 
-export async function listarCopiasTreino(usuarioId: string, planId: string): Promise<{ rascunho: TreinoRascunho; remota: { finished_at: string; plan_id: string }; arquivadoEm: string }[]> {
+export async function listarCopiasTreino(usuarioId: string, planId: string): Promise<CopiaTreino[]> {
   await fila.catch(() => {});
   const prefixo = `@treino-familia:recuperacao:v1:${usuarioId}:${planId}:`;
   const chaves = (await AsyncStorage.getAllKeys()).filter(item => item.startsWith(prefixo));

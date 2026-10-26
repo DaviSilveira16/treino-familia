@@ -59,16 +59,27 @@ function filtered(table, search) {
   let activePage;
   try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-    const errors = []; const page = await context.newPage(); activePage = page; page.on("pageerror", error => errors.push(error.message)); page.on("dialog", dialog => dialog.accept());
+    let phase = "initial";
+    let forcedOffline = false, offlineReports = 0;
+    const setOffline = async value => { forcedOffline = value; await context.setOffline(value); };
+    const errors = []; const page = await context.newPage(); activePage = page; page.on("pageerror", error => {
+      // WebKit relata a falha nativa de fetch como ErrorEvent ao forçar offline,
+      // mesmo quando a rejeição é tratada. Não confundir com erro de JS/CORS online.
+      if (process.env.SMOKE_BROWSER === "webkit" && forcedOffline
+        && (error.stack || "").includes(`Fetch API cannot load ${supabaseUrl}/`)
+        && error.message.endsWith("due to access control checks.")) { offlineReports++; return; }
+      errors.push(error.message); console.error("PAGE ERROR", phase, error.stack || error.message);
+    }); page.on("dialog", dialog => dialog.accept());
     await context.route("**/*", async route => {
       const request = route.request(), url = new URL(request.url());
       if (url.origin === origin) return route.continue();
       if (!url.hostname.endsWith(".supabase.co")) return route.abort();
-      if (backendOffline) return route.abort("internetdisconnected");
       const headers = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS", "content-type": "application/json" };
       if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+      // Simula serviço indisponível com CORS válido; setOffline cobre a queda real de rede.
+      if (backendOffline) return route.fulfill({ status: 503, json: { message: "Serviço temporariamente indisponível" }, headers });
       if (url.pathname === "/auth/v1/user") {
-        if (holdSync) { holdSync = false; await new Promise(resolve => { releaseSync = resolve; }); return route.abort("internetdisconnected"); }
+        if (holdSync) { holdSync = false; await new Promise(resolve => { releaseSync = resolve; }); return route.fulfill({ status: 503, json: { message: "Serviço temporariamente indisponível" }, headers }); }
         return route.fulfill({ json: user, headers });
       }
       if (url.pathname.endsWith("/rpc/entrar_na_familia_por_codigo")) {
@@ -123,7 +134,8 @@ function filtered(table, search) {
     await page.waitForFunction(() => document.querySelector('input[aria-label="Agachamento teste, série 1, repetições realizadas"]')?.value === "8");
     await reps.fill("14"); await reps.focus(); const element = await reps.elementHandle();
     await page.waitForTimeout(2100); assert.equal(await reps.inputValue(), "14"); assert.equal(await reps.evaluate((node, old) => node === old, element), true);
-    await context.setOffline(true);
+    phase = "offline";
+    await setOffline(true);
     await page.getByRole("button", { name: "Adicionar exercício durante o treino" }).click();
     await page.getByRole("textbox", { name: "Nome do exercício/aparelho", exact: true }).fill("Remada academia viagem");
     await page.getByRole("textbox", { name: "Quantidade de séries", exact: true }).fill("2");
@@ -143,7 +155,7 @@ function filtered(table, search) {
     await reps.fill("15");
     await page.getByRole("button", { name: "Concluir Agachamento teste, série 1", exact: true }).click();
     await page.waitForFunction(key => JSON.parse(localStorage.getItem(key)).series[0].pendente === "salvar", draftKey);
-    backendOffline = true; await context.setOffline(false); await page.reload();
+    backendOffline = true; await setOffline(false); await page.reload();
     await page.getByRole("button", { name: /Continuar treino: Plano teste/ }).click();
     await page.getByRole("button", { name: "Desmarcar Remada academia viagem, série 1", exact: true }).waitFor();
     assert.equal(await page.getByRole("textbox", { name: "Remada academia viagem, série 1, carga em quilos", exact: true }).inputValue(), "20");
@@ -161,11 +173,11 @@ function filtered(table, search) {
     await page.getByRole("button", { name: "Confirmar conclusão do treino", exact: true }).click();
     await page.waitForFunction(key => !!JSON.parse(localStorage.getItem(key)).finalizacao, draftKey);
     assert.ok(releaseSync, "Conclusão local deve funcionar com requisição de rede em voo");
-    backendOffline = true; releaseSync(); await context.setOffline(true);
+    backendOffline = true; releaseSync(); await setOffline(true);
     const finish = await page.evaluate(key => JSON.parse(localStorage.getItem(key)).finalizacao.finishedAt, draftKey);
     assert.ok(Date.parse(finish) >= endedBefore);
     await page.screenshot({ path: path.join(output, "web-offline-completion.png") });
-    backendOffline = true; await context.setOffline(false); await page.reload();
+    backendOffline = true; await setOffline(false); await page.reload();
     await page.getByText("Conclusão pendente de envio", { exact: false }).first().waitFor({ timeout: 10000 });
     assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).finalizacao.finishedAt, draftKey), finish);
     backendOffline = false; await page.evaluate(() => window.dispatchEvent(new Event("online")));
@@ -176,6 +188,7 @@ function filtered(table, search) {
     assert.equal(active.plan_id, travel.id); assert.equal(tables.exercises.filter(e => e.plan_id === travel.id).length, 2);
     assert.equal(tables.exercises.filter(e => e.plan_id === pid).length, 1); assert.equal(tables.exercise_load_defaults.find(e => e.exercise_id === eid).weight_kg, 20);
     // Estado do vídeo: conclusão local antiga, conclusão remota diferente, rascunho legado.
+    phase = "remote conflict";
     const conflictSid = "66666666-6666-4666-8666-666666666666";
     const serverFinish = new Date(now - 30000).toISOString(), localFinish = new Date(now - 32000).toISOString();
     tables.workout_sessions.push({ ...active, id: conflictSid, plan_id: pid, finished_at: serverFinish });
@@ -226,6 +239,39 @@ function filtered(table, search) {
     await page.getByText("Exercícios — Plano teste", { exact: true }).waitFor();
     assert.ok(await page.evaluate(key => localStorage.getItem(key), backupKey));
     await page.getByRole("button", { name: "Ir para treinos" }).click();
+    // Estado da nova imagem: a cópia local terminou, mas não há conclusão remota.
+    phase = "local resend";
+    const missingSid = "77777777-7777-4777-8777-777777777777";
+    const missingStart = new Date(now - 2 * 86400000).toISOString();
+    const missingFinish = new Date(Date.parse(missingStart) + 178000).toISOString();
+    await page.evaluate(({ draftKey, uid, pid, eid, missingSid, missingStart, missingFinish }) => {
+      localStorage.setItem(draftKey, JSON.stringify({ versao: 1, usuarioId: uid, planId: pid, planName: "Plano teste", sessao: { id: missingSid, plan_id: pid, started_at: missingStart }, exercicios: [{ id: eid, name: "Agachamento teste", sets_goal: 18, reps_goal: "8" }], series: Array.from({ length: 18 }, (_, i) => ({ chave: `${eid}:${i + 1}`, exercise_id: eid, exercise_name: "Agachamento teste", set_number: i + 1, reps: "8", weight_kg: "300", concluida: i === 0 })), intensidade: "moderada", esforco: "adequado", salvoEm: missingFinish, finalizacao: { finishedAt: missingFinish, notes: "Treino da imagem", metricas: { duration_minutes: 2.97, volume_kg: 2400, sets_completed: 1 } }, conflitoSincronizacao: true, conflitoSessao: true, erroSincronizacao: "Não há uma conclusão válida para esta sessão no servidor." }));
+    }, { draftKey, uid, pid, eid, missingSid, missingStart, missingFinish });
+    await page.reload();
+    await page.getByRole("button", { name: /Conclusão pendente: Plano teste/ }).click();
+    await page.getByRole("button", { name: "Usar conclusão do servidor e guardar cópia local", exact: true }).click();
+    await page.getByText(/Esta sessão não foi encontrada no servidor/).waitFor();
+    await page.screenshot({ path: path.join(output, "web-sessao-ausente-reenvio.png") });
+    await page.getByRole("button", { name: "Enviar treino salvo neste aparelho", exact: true }).click();
+    await page.waitForFunction(key => !localStorage.getItem(key), draftKey);
+    const restored = tables.workout_sessions.filter(row => row.id === missingSid);
+    assert.equal(restored.length, 1); assert.equal(restored[0].status, "concluido");
+    assert.equal(restored[0].started_at, missingStart); assert.equal(restored[0].finished_at, missingFinish); assert.equal(restored[0].volume_kg, 2400);
+    assert.equal(tables.workout_sets.filter(row => row.session_id === missingSid).length, 1, "Envia somente a série concluída de 18");
+    assert.equal(tables.workout_sets.find(row => row.session_id === missingSid).weight_kg, 300);
+    const resendBackup = `@treino-familia:recuperacao:v1:${uid}:${pid}:${missingSid}`;
+    assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).rascunho.series.length, resendBackup), 18);
+    await page.reload(); await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /Conclusão pendente: Plano teste/ }).count(), 0);
+    assert.equal(tables.workout_sessions.filter(row => row.id === missingSid).length, 1);
+    phase = "history";
+    await page.getByText("Histórico", { exact: true }).click();
+    await page.getByText("Volume registrado: 2.400 kg·reps", { exact: true }).click();
+    await page.getByText("1 exercícios · 1 séries registradas", { exact: true }).waitFor();
+    await page.getByText("300", { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(output, "web-treino-reenviado-historico.png") });
+    await page.getByRole("button", { name: "Ir para treinos" }).click();
+    phase = "community";
     await page.getByRole("button", { name: "Abrir comunidade da família" }).click();
     await page.getByText("Ver mais publicações", { exact: true }).click();
     await page.waitForFunction(() => !Array.from(document.querySelectorAll('div')).some(el => el.textContent === "Ver mais publicações"));
@@ -310,7 +356,8 @@ function filtered(table, search) {
     await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
-    console.log("OK UI — conclusão com rede em voo, conflito legado, cópia íntegra sem escrita remota, swipe-back, famílias, treino offline, registro manual e cardio");
+    if (offlineReports) console.log(`WebKit: ${offlineReports} avisos nativos durante a queda de rede forçada; estado e retomada verificados.`);
+    console.log("OK UI — restaura e envia sessão ausente (1/18 séries), preserva horário e cópia, rede em voo, conflito legado, swipe-back, famílias, registro manual e cardio");
     await context.close();
   } catch (error) {
     if (activePage) { await activePage.screenshot({ path: path.join(output, "web-failure.png") }).catch(() => {}); console.error((await activePage.locator("body").innerText()).slice(0, 2000)); }
