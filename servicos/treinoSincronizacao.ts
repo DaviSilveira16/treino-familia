@@ -1,6 +1,6 @@
 import { supabase } from "../supabase";
 import { registrarMudancaDeDados } from "./revisaoDados";
-import { arquivarConclusaoRemota, atualizarRascunho, lerRascunho, listarRascunhos, mesmaOperacao, type TreinoRascunho } from "./treinoLocal";
+import { arquivarConclusaoRemota, copiarRascunhoParaReenvio, atualizarRascunho, lerRascunho, listarRascunhos, mesmaOperacao, novoIdSerie, type TreinoRascunho } from "./treinoLocal";
 import { salvarModeloDoTreino, ConflitoModeloTreino } from "./salvarModeloTreino";
 
 export type ResultadoSincronizacao = {
@@ -14,9 +14,22 @@ class ConflitoTreino extends Error {}
 class ConflitoSessao extends ConflitoTreino {}
 const emEnvio = new Map<string, Promise<ResultadoSincronizacao>>();
 
+type SessaoRemota = { plan_id: string | null; status: string | null; finished_at?: string | null };
+function mensagemErro(erro: unknown): string {
+  // PostgREST retorna objetos simples, não instâncias de Error.
+  return erro && typeof erro === "object" && "message" in erro && typeof erro.message === "string"
+    ? erro.message : "Não foi possível enviar o treino. Seus dados continuam guardados neste aparelho.";
+}
+function mensagemEstado(sessao: SessaoRemota | null): string {
+  if (!sessao) return "Esta sessão não foi encontrada no servidor. Use Enviar treino salvo neste aparelho para restaurar suas séries e o horário original.";
+  if (sessao.status === "em_andamento") return "A sessão ainda está em andamento no servidor. Use Enviar treino salvo neste aparelho para concluir o envio.";
+  if (!sessao.finished_at && (sessao.status === null || sessao.status === "concluido")) return "O registro no servidor está incompleto, sem horário de conclusão. Use Enviar treino salvo neste aparelho para repará-lo.";
+  return "A sessão no servidor tem outro estado, treino ou horário. Seus dados locais estão preservados. Confira o histórico antes de usar a conclusão remota.";
+}
+
 /** Não reabre sessões e só reconhece como nossa a conclusão com a mesma data. */
 export function situacaoConclusao(
-  sessao: { plan_id: string; status: string; finished_at?: string | null } | null,
+  sessao: SessaoRemota | null,
   rascunho: Pick<TreinoRascunho, "planId" | "finalizacao">,
 ): "ativa" | "confirmada" | "conflito" {
   if (!sessao) return "conflito";
@@ -43,7 +56,7 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
   if (!local) return { rascunho: null, concluido: false };
   const sessaoId = local.sessao.id;
   if (!local.finalizacao && !local.series.some((serie) => serie.pendente)) return { rascunho: local, concluido: false };
-  if (local.conflitoSincronizacao && typeof local.conflitoSessao === "boolean" && !permitirSobrescrever) return {
+  if (local.conflitoSincronizacao && local.conflitoSessao === false && !permitirSobrescrever) return {
     rascunho: local, concluido: false, conflito: true, conflitoSessao: local.conflitoSessao, erro: local.erroSincronizacao,
   };
   try {
@@ -64,8 +77,10 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
       if (error) throw error;
       remota = criada;
     }
-    const situacao = situacaoConclusao(remota, local);
-    if (situacao === "conflito") throw new ConflitoSessao("A sessão no servidor difere da cópia local. Confira a conclusão no servidor para recuperar o treino sem sobrescrever dados.");
+    const reparar = local.reenvioSolicitado && local.finalizacao && remota?.plan_id === planId
+      && remota.finished_at === null && (remota.status === null || remota.status === "concluido");
+    const situacao = reparar ? "reparavel" : situacaoConclusao(remota, local);
+    if (situacao === "conflito") throw new ConflitoSessao(mensagemEstado(remota));
     if (situacao === "confirmada" && local.series.some((serie) => serie.pendente)) throw new ConflitoSessao("O servidor já encerrou esta sessão, mas ainda existem séries locais pendentes. Confira a conclusão no servidor; sua cópia será preservada.");
 
     for (const item of local.series.filter((serie) => serie.pendente)) {
@@ -133,10 +148,14 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
     if (local?.finalizacao && !local.series.some((serie) => serie.pendente)) {
       const finalizacao = local.finalizacao;
       if (situacao !== "confirmada") {
-        const { data, error } = await supabase.from("workout_sessions")
+        let encerrar = supabase.from("workout_sessions")
           .update({ finished_at: finalizacao.finishedAt, status: "concluido", notes: finalizacao.notes })
-          .eq("id", sessaoId).eq("plan_id", planId).eq("user_id", usuarioId).eq("status", "em_andamento")
-          .select("id").maybeSingle();
+          .eq("id", sessaoId).eq("plan_id", planId).eq("user_id", usuarioId);
+        if (reparar) {
+          encerrar = encerrar.is("finished_at", null);
+          encerrar = remota!.status === null ? encerrar.is("status", null) : encerrar.eq("status", remota!.status);
+        } else encerrar = encerrar.eq("status", "em_andamento");
+        const { data, error } = await encerrar.select("id").maybeSingle();
         if (error) throw error;
         if (!data) throw new ConflitoTreino("O encerramento mudou durante o envio. A conclusão local foi preservada para conferência.");
         registrarMudancaDeDados();
@@ -156,12 +175,58 @@ async function enviar(usuarioId: string, planId: string, permitirSobrescrever: b
     local = await atualizarRascunho(usuarioId, planId, (atual) => ({ ...atual, erroSincronizacao: undefined, conflitoSincronizacao: false, conflitoSessao: false }));
     return { rascunho: local, concluido: false };
   } catch (erro) {
-    const mensagem = erro instanceof Error ? erro.message : "Não foi possível sincronizar. Seus dados continuam guardados neste aparelho.";
+    const mensagem = mensagemErro(erro);
     const conflito = erro instanceof ConflitoTreino || erro instanceof ConflitoModeloTreino;
     const conflitoSessao = erro instanceof ConflitoSessao;
     local = await atualizarRascunho(usuarioId, planId, (atual) => atual.sessao.id !== sessaoId ? atual : { ...atual, erroSincronizacao: mensagem, conflitoSincronizacao: conflito, conflitoSessao });
     return { rascunho: local, concluido: false, erro: mensagem, conflito, conflitoSessao };
   }
+}
+
+/** Restaura a mesma sessão e as séries locais, sem sobrescrever conclusões válidas. */
+export async function reenviarConclusaoLocal(usuarioId: string, planId: string): Promise<ResultadoSincronizacao> {
+  const chave = `${usuarioId}:${planId}`;
+  while (emEnvio.has(chave)) await emEnvio.get(chave);
+  const tarefa = (async (): Promise<ResultadoSincronizacao> => {
+    const local = await lerRascunho(usuarioId, planId);
+    if (!local) return { rascunho: null, concluido: false, erro: "Não há treino local para enviar. Confira o histórico." };
+    try {
+      const { data: autenticado, error: erroAuth } = await supabase.auth.getUser();
+      if (erroAuth || autenticado.user?.id !== usuarioId) throw new Error("Entre novamente na sua conta para enviar este treino.");
+      const fim = Date.parse(local.finalizacao?.finishedAt ?? ""), inicio = Date.parse(local.sessao.started_at);
+      if (!Number.isFinite(fim) || !Number.isFinite(inicio) || fim < inicio || !local.series.some(s => s.concluida && !s.excluida)) throw new Error("Confira o horário e as séries concluídas do treino local antes de reenviar.");
+      const { data: remota, error } = await supabase.from("workout_sessions").select("id, plan_id, status, finished_at")
+        .eq("id", local.sessao.id).eq("user_id", usuarioId).maybeSingle();
+      if (error) throw error;
+      if (remota && situacaoConclusao(remota, local) === "confirmada") {
+        // O envio pode já ter terminado e só os detalhes/modelo estarem pendentes.
+        await atualizarRascunho(usuarioId, planId, atual => ({ ...atual, conflitoSincronizacao: false, conflitoSessao: false }));
+        return enviar(usuarioId, planId, false);
+      }
+      if (remota && (remota.plan_id !== planId || ![null, "em_andamento", "concluido"].includes(remota.status) || remota.finished_at !== null)) {
+        throw new ConflitoSessao("Esta sessão já tem outra conclusão ou foi alterada no servidor. O reenvio não substituiu os dados. Confira o histórico ou use a conclusão remota.");
+      }
+      const { data: plano, error: erroPlano } = await supabase.from("workout_plans").select("id").eq("id", planId).eq("user_id", usuarioId).maybeSingle();
+      if (erroPlano) throw erroPlano;
+      if (!plano) throw new Error("O plano deste treino não foi encontrado na sua conta. A cópia local permanece preservada.");
+      await copiarRascunhoParaReenvio(usuarioId, planId, local.sessao.id, remota);
+      await atualizarRascunho(usuarioId, planId, atual => {
+        if (atual.sessao.id !== local.sessao.id) throw new Error("A sessão mudou durante o reenvio.");
+        return { ...atual, reenvioSolicitado: true, criacaoPendente: !remota || atual.criacaoPendente,
+          conflitoSincronizacao: false, conflitoSessao: false, erroSincronizacao: undefined,
+          // Confirmações antigas não provam que a linha ainda existe. Reconsultar
+          // reconhece valores iguais e evita duplicar séries com resposta perdida.
+          series: atual.series.map(s => s.concluida && !s.excluida
+            ? { ...s, registroId: s.registroId ?? novoIdSerie(), pendente: "salvar" } : s) };
+      });
+      return enviar(usuarioId, planId, false);
+    } catch (erro) {
+      return { rascunho: await lerRascunho(usuarioId, planId), concluido: false,
+        conflito: true, conflitoSessao: true, erro: mensagemErro(erro) };
+    }
+  })().finally(() => emEnvio.delete(chave));
+  emEnvio.set(chave, tarefa);
+  return tarefa;
 }
 
 /** Escolha explícita do usuário. Somente leitura remota; nunca reabre ou sobrescreve. */
@@ -178,14 +243,14 @@ export async function recuperarConclusaoRemota(usuarioId: string, planId: string
         .eq("id", local.sessao.id).eq("user_id", usuarioId).maybeSingle();
       if (error) throw error;
       if (remota?.status !== "concluido" || !remota.plan_id || !Number.isFinite(Date.parse(remota.finished_at ?? ""))) {
-        throw new Error("Não há uma conclusão válida para esta sessão no servidor. Sua cópia local continua intacta; tente sincronizar novamente.");
+        throw new Error(mensagemEstado(remota));
       }
       await arquivarConclusaoRemota(usuarioId, planId, local.sessao.id, { finished_at: remota.finished_at!, plan_id: remota.plan_id });
       registrarMudancaDeDados();
       return { rascunho: await lerRascunho(usuarioId, planId), concluido: true };
     } catch (erro) {
       return { rascunho: await lerRascunho(usuarioId, planId), concluido: false, conflito: true, conflitoSessao: true,
-        erro: erro instanceof Error ? erro.message : "Não foi possível conferir. Seus dados locais continuam preservados." };
+        erro: mensagemErro(erro) };
     }
   })().finally(() => emEnvio.delete(chave));
   emEnvio.set(chave, tarefa);

@@ -1,5 +1,17 @@
 # Conclusão de treino presa — 26/10/2026
 
+## Correção complementar após o PR #4
+
+A imagem enviada após o merge confirma que a atualização chegou ao iPhone, mas o fluxo anterior não resolve o envio quando não existe uma conclusão válida no servidor. A ação implementada no PR #4 apenas aceitava uma conclusão remota já existente; não restaurava uma sessão ausente nem reparava um registro incompleto. A imagem, sozinha, não distingue sessão ausente de estado/plano/horário inconsistente.
+
+A nova ação **Enviar treino salvo neste aparelho** efetivamente retoma o envio. Autentica a conta, consulta a mesma sessão e verifica o plano. Antes de qualquer escrita remota, guarda um snapshot integral local. Se a sessão estiver ausente, prepara a criação com o mesmo UUID e horário original, verificando outros registros da data e sessões ativas para não duplicar treinos. Todas as séries concluídas são reconsultadas, inclusive aquelas sem marcador de pendência antigo; linhas iguais são reconhecidas e não são inseridas novamente. As séries abertas não são enviadas.
+
+Se a sessão estiver ativa, o envio prossegue. Registros com status nulo ou `concluido` e `finished_at` nulo podem ser reparados por escolha explícita: a atualização final exige que plano, usuário, status anterior e horário nulo continuem iguais. Não passa o registro concluído de volta para `em_andamento`. Uma conclusão válida diferente, outro plano ou um status não reconhecido continuam protegidos contra sobrescrita. Erros simples do PostgREST agora preservam sua mensagem, em vez de serem substituídos por um aviso genérico.
+
+Conflitos de sessão deixam de ficar bloqueados para sempre num resultado antigo em cache. Cada tentativa volta a consultar o servidor. A cópia ativa só é retirada depois de o servidor confirmar sessão, séries, métricas e eventual modelo; em falha permanece pendente. As cópias anteriores não são substituídas nas tentativas seguintes. O swipe-back e sua proteção de foco são mantidos.
+
+O novo teste reproduz o rascunho da imagem (1/18 séries, 02:58 e 2.400 kg × repetições). Confere a criação real da sessão e da única série concluída, todos os horários, métricas, snapshot com 18 séries, respostas perdidas em cada etapa, falha de backup, divergência de séries, mudança concorrente, usuário diferente, plano ausente e prevenção de duplicatas. O teste de interface também abre o Histórico e confere o registro e a carga enviada. Todos os dados desses testes são fictícios; não se afirma que a sessão real do iPhone já foi enviada.
+
 ## Evidência e causa
 
 O vídeo de 22 segundos mostra o plano “Perna top up”, 1/18 séries e tempo de 02:58. A tela informa que o treino foi encerrado neste aparelho, exibe conflito com a sessão remota e mantém o botão de conclusão em “Encerramento aguardando confirmação”. O botão “Enviar minha versão” aparece, mas não oferece saída efetiva.
@@ -24,7 +36,7 @@ Não há service worker no projeto. O HTML da raiz usa revalidação e os bundle
 
 ## Validação
 
-Executados com sucesso: `npm run check` (tipos, lint sem erros e 9 arquivos de testes), `npm run build:web`, `npm run test:ui` com Chromium e com `SMOKE_BROWSER=webkit`. O lint registra 43 avisos nas áreas já existentes. A integração contínua passa a executar os dois navegadores.
+Executados com sucesso: `npm run check` (tipos, lint sem erros e 10 arquivos de testes), `npm run build:web`, `npm run test:ui` com Chromium e com `SMOKE_BROWSER=webkit`. O lint registra 43 avisos nas áreas já existentes. A integração contínua executa os dois navegadores.
 
 Os testes de regressão cobrem conclusão com confirmação de série em voo; snapshots antigos; primeiro horário preservado; conflito com outro horário remoto; bloqueio de outra conta; sessão ausente, ativa ou sem data; falha de backup; cópia íntegra; isolamento de usuários; e nova sessão após a recuperação. O teste de rede confere aborto real, remoção do timer e cancelamento externo.
 
@@ -32,4 +44,4 @@ O teste de interface usa conta e backend fictícios e intercepta todas as requis
 
 ## Conferência após publicar
 
-No iPhone afetado, abrir o treino pendente, usar a ação de recuperação e conferir o histórico e a cópia local. A recuperação só libera a sessão se o servidor confirmar uma conclusão válida. Se o servidor não confirmar, a cópia ativa permanece intacta e o app explica o motivo; não presume que o treino terminou.
+No iPhone afetado, abrir o treino pendente e usar **Enviar treino salvo neste aparelho** para restaurar/retomar o envio. Conferir o Histórico e a cópia local depois da confirmação. **Usar conclusão do servidor e guardar cópia local** é uma alternativa apenas para aceitar uma conclusão que já exista remotamente; não envia diferenças locais. Se houver erro de permissão, plano ausente ou outra conclusão diferente, a cópia ativa permanece intacta e a tela explica o motivo.
