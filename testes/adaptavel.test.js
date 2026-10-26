@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { carregar, armazenamento } = require("./suporte.cjs");
-const local = carregar("servicos/treinoLocal.ts", { "@react-native-async-storage/async-storage": armazenamento() });
+const storage = armazenamento();
+const local = carregar("servicos/treinoLocal.ts", { "@react-native-async-storage/async-storage": storage });
 const adaptar = carregar("servicos/treinoAdaptavel.ts", { "./treinoLocal": local });
 const calorias = carregar("servicos/caloriasTreino.ts");
 const perfil = { pesoKg: 80, alturaCm: 175, idade: 30, sexo: "masculino" };
@@ -63,9 +64,12 @@ async function concluir() { let result; for (let i = 0; i < 5; i++) { result = a
   assert.equal(db.workout_plans.length, 2); assert.equal(db.exercises.filter(e => e.plan_id === novo.planId).length, 2);
   assert.equal(db.workout_sessions[0].plan_id, novo.planId); assert.equal(db.workout_sessions[0].finished_at, fim);
   assert.equal(db.exercise_load_defaults.find(e => e.exercise_id === "e1").weight_kg, 99, "Referência original preservada");
-  // Replay after the session was moved to the new plan must also succeed.
+  // Uma tela antiga não ressuscita a sessão já confirmada.
   const finishedDraft = { ...base, exercicios: exercises, series: sets.map(s => ({ ...s, pendente: undefined })), finalizacao: { finishedAt: fim, notes: "Teste", metricas, modelo: novo } };
-  await local.gravarRascunho(finishedDraft); assert.equal((await concluir()).concluido, true); assert.equal(db.workout_plans.length, 2);
+  await local.gravarRascunho(finishedDraft); assert.equal(await local.lerRascunho("u1", "p1"), null);
+  // Snapshot legado (antes da proteção local) ainda reconhece o novo plano e não duplica.
+  await storage.default.setItem("@treino-familia:rascunho:v1:u1:p1", JSON.stringify(finishedDraft));
+  assert.equal((await concluir()).concluido, true); assert.equal(db.workout_plans.length, 2);
   // Append-only choice keeps every existing exercise and its reference values.
   db.workout_sessions.push({ id: "s2", user_id: "u1", plan_id: "p1", started_at: "2026-10-11T12:00:00Z", status: "em_andamento", finished_at: null });
   const second = { ...base, sessao: { ...base.sessao, id: "s2" }, exercicios: exercises, series: [{ ...serie, registroId: "set-b" }], finalizacao: { finishedAt: "2026-10-11T12:30:00Z", notes: "Teste", metricas, modelo: adicionar } };

@@ -1,11 +1,11 @@
 // Isolated browser + fictional backend. Every non-local request is intercepted.
-const { chromium } = require("playwright");
+const { chromium, webkit } = require("playwright");
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const root = path.join(__dirname, "..");
-const output = path.join(root, ".test-results"); fs.mkdirSync(output, { recursive: true });
+const output = path.join(root, ".test-results", process.env.SMOKE_BROWSER || "chromium"); fs.mkdirSync(output, { recursive: true });
 const env = fs.existsSync(path.join(root, ".env")) ? fs.readFileSync(path.join(root, ".env"), "utf8") : "";
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || env.match(/^EXPO_PUBLIC_SUPABASE_URL=["']?([^\s"']+)/m)?.[1] || "https://ci-placeholder.supabase.co";
 const storageKey = `sb-${new URL(supabaseUrl).hostname.split(".")[0]}-auth-token`;
@@ -28,6 +28,7 @@ const tables = {
   cardio_activities: [{ id: "cardio-a", user_id: uid, nome: "Escadas teste", tipo: "Escadas", duracao_min: 10, distancia_km: null, calorias: null, observacoes: null }], cardio_sessions: [],
 };
 let backendOffline = false, feedPages = 0;
+let holdSync = false, releaseSync;
 let releasePost, releaseFeed, holdPost = false, holdFeedFamily = null, postCounter = 0;
 const server = http.createServer((req, res) => {
   let requestPath; try { requestPath = decodeURIComponent(new URL(req.url, "http://localhost").pathname); } catch { res.writeHead(400).end(); return; }
@@ -54,7 +55,7 @@ function filtered(table, search) {
 (async () => {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await (process.env.SMOKE_BROWSER === "webkit" ? webkit : chromium).launch({ headless: true });
   let activePage;
   try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -66,7 +67,10 @@ function filtered(table, search) {
       if (backendOffline) return route.abort("internetdisconnected");
       const headers = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS", "content-type": "application/json" };
       if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
-      if (url.pathname === "/auth/v1/user") return route.fulfill({ json: user, headers });
+      if (url.pathname === "/auth/v1/user") {
+        if (holdSync) { holdSync = false; await new Promise(resolve => { releaseSync = resolve; }); return route.abort("internetdisconnected"); }
+        return route.fulfill({ json: user, headers });
+      }
       if (url.pathname.endsWith("/rpc/entrar_na_familia_por_codigo")) {
         const family = tables.families.find(f => f.invite_code === request.postDataJSON().p_codigo);
         if (!family) return route.fulfill({ status: 400, json: { message: "Convite inválido" }, headers });
@@ -105,6 +109,7 @@ function filtered(table, search) {
     await page.screenshot({ path: path.join(output, "web-login.png") });
     const draftKey = `@treino-familia:rascunho:v1:${uid}:${pid}`;
     await context.addInitScript(({ key, auth, draftKey, uid, pid, sid, eid, start }) => {
+      Object.defineProperty(navigator, "standalone", { configurable: true, value: true });
       localStorage.setItem(key, JSON.stringify(auth));
       if (!localStorage.getItem("@smoke:rascunho-inicial")) {
         localStorage.setItem(draftKey, JSON.stringify({ versao: 1, usuarioId: uid, planId: pid, planName: "Plano teste", sessao: { id: sid, plan_id: pid, started_at: start }, exercicios: [{ id: eid, name: "Agachamento teste", sets_goal: 2, reps_goal: "8-12" }], series: [1, 2].map(set_number => ({ chave: `${eid}:${set_number}`, exercise_id: eid, exercise_name: "Agachamento teste", set_number, reps: "10", weight_kg: "20", concluida: false })), intensidade: "moderada", esforco: "adequado", salvoEm: start, descanso: { fimEm: Date.now() + 90000, pausado: false, segundosPausados: 0, duracao: 90 } }));
@@ -142,8 +147,11 @@ function filtered(table, search) {
     await page.getByRole("button", { name: /Continuar treino: Plano teste/ }).click();
     await page.getByRole("button", { name: "Desmarcar Remada academia viagem, série 1", exact: true }).waitFor();
     assert.equal(await page.getByRole("textbox", { name: "Remada academia viagem, série 1, carga em quilos", exact: true }).inputValue(), "20");
-    await context.setOffline(true);
-    const endedBefore = Date.now(); await page.getByText("Finalizar e salvar treino", { exact: true }).click();
+    // Rede aparenta estar online, mas uma requisição fica em voo durante a revisão.
+    backendOffline = false; holdSync = true;
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('div')).some(el => el.textContent === "Sincronizando com o Supabase..."));
+    const endedBefore = Date.now(); await page.getByText("Finalizar e salvar treino", { exact: true }).click({ timeout: 5000 });
     await page.getByRole("button", { name: "Criar novo treino", exact: true }).click();
     await page.getByRole("textbox", { name: "Nome do novo treino", exact: true }).fill("Academia da viagem");
     await page.getByRole("textbox", { name: "Duração do treino em minutos", exact: true }).fill("35");
@@ -152,6 +160,8 @@ function filtered(table, search) {
     await page.waitForTimeout(300); await page.screenshot({ path: path.join(output, "web-revisao-treino.png") });
     await page.getByRole("button", { name: "Confirmar conclusão do treino", exact: true }).click();
     await page.waitForFunction(key => !!JSON.parse(localStorage.getItem(key)).finalizacao, draftKey);
+    assert.ok(releaseSync, "Conclusão local deve funcionar com requisição de rede em voo");
+    backendOffline = true; releaseSync(); await context.setOffline(true);
     const finish = await page.evaluate(key => JSON.parse(localStorage.getItem(key)).finalizacao.finishedAt, draftKey);
     assert.ok(Date.parse(finish) >= endedBefore);
     await page.screenshot({ path: path.join(output, "web-offline-completion.png") });
@@ -165,6 +175,57 @@ function filtered(table, search) {
     assert.equal(tables.workout_plans.length, 2); const travel = tables.workout_plans.find(p => p.name === "Academia da viagem"); assert.ok(travel);
     assert.equal(active.plan_id, travel.id); assert.equal(tables.exercises.filter(e => e.plan_id === travel.id).length, 2);
     assert.equal(tables.exercises.filter(e => e.plan_id === pid).length, 1); assert.equal(tables.exercise_load_defaults.find(e => e.exercise_id === eid).weight_kg, 20);
+    // Estado do vídeo: conclusão local antiga, conclusão remota diferente, rascunho legado.
+    const conflictSid = "66666666-6666-4666-8666-666666666666";
+    const serverFinish = new Date(now - 30000).toISOString(), localFinish = new Date(now - 32000).toISOString();
+    tables.workout_sessions.push({ ...active, id: conflictSid, plan_id: pid, finished_at: serverFinish });
+    const serverBefore = JSON.stringify(tables);
+    await page.evaluate(({ draftKey, uid, pid, eid, conflictSid, start, localFinish }) => {
+      localStorage.setItem(draftKey, JSON.stringify({ versao: 1, usuarioId: uid, planId: pid, planName: "Plano teste", sessao: { id: conflictSid, plan_id: pid, started_at: start }, exercicios: [{ id: eid, name: "Agachamento teste", sets_goal: 2, reps_goal: "8-12" }], series: [{ chave: `${eid}:1`, exercise_id: eid, exercise_name: "Agachamento teste", set_number: 1, reps: "8", weight_kg: "300", concluida: true }], intensidade: "moderada", esforco: "adequado", salvoEm: start, finalizacao: { finishedAt: localFinish, notes: "Cópia do vídeo", metricas: { duration_minutes: 3 } }, conflitoSincronizacao: true, erroSincronizacao: "Esta sessão foi encerrada ou alterada em outro aparelho." }));
+    }, { draftKey, uid, pid, eid, conflictSid, start: active.started_at, localFinish });
+    await page.reload();
+    await page.getByRole("button", { name: /Conclusão pendente: Plano teste/ }).click();
+    const recover = page.getByRole("button", { name: "Usar conclusão do servidor e guardar cópia local", exact: true });
+    await recover.waitFor();
+    assert.equal(await page.getByText("Enviar minha versão (substituir no servidor)", { exact: true }).count(), 0);
+    await page.screenshot({ path: path.join(output, "web-recuperar-conclusao.png") });
+    await recover.click();
+    await page.waitForFunction(key => !localStorage.getItem(key), draftKey);
+    assert.equal(JSON.stringify(tables), serverBefore, "Recuperar não escreve no Supabase");
+    const backupKey = `@treino-familia:recuperacao:v1:${uid}:${pid}:${conflictSid}`;
+    const preserved = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), backupKey);
+    assert.equal(preserved.rascunho.series[0].weight_kg, "300");
+    assert.equal(preserved.rascunho.finalizacao.finishedAt, localFinish);
+    await page.getByText("Meus treinos", { exact: true }).click();
+    await page.getByText("Plano teste", { exact: true }).first().click();
+    await page.getByText("▶ Iniciar treino com cronômetro", { exact: true }).click();
+    await page.getByRole("button", { name: "Ver cópias de segurança deste treino", exact: true }).click();
+    await page.getByText(/Agachamento teste · série 1: 8 × 300 kg/).waitFor();
+    await page.waitForTimeout(300); // Captura o modal após a animação de entrada.
+    await page.screenshot({ path: path.join(output, "web-copia-preservada.png") });
+    // O swipe-back fecha o modal primeiro e preserva os dados, sem navegar para fora.
+    const swipeBack = async () => page.evaluate(() => {
+      const target = document.body;
+      const dispatch = (type, x) => {
+        const event = new Event(type, { bubbles: true, cancelable: true });
+        const touch = { identifier: 1, target, clientX: x, clientY: 250 };
+        Object.defineProperties(event, {
+          touches: { value: type === "touchend" ? [] : [touch] },
+          targetTouches: { value: type === "touchend" ? [] : [touch] },
+          changedTouches: { value: [touch] },
+        });
+        target.dispatchEvent(event);
+      };
+      dispatch("touchstart", 15); dispatch("touchmove", 140); dispatch("touchend", 140);
+    });
+    await swipeBack();
+    await page.getByText("Cópias locais preservadas", { exact: true }).waitFor({ state: "hidden" });
+    await page.getByText("Pronto para começar?", { exact: true }).waitFor();
+    await page.waitForTimeout(350); // Aguarda a animação de fechamento do Modal antes do segundo gesto.
+    await swipeBack();
+    await page.getByText("Exercícios — Plano teste", { exact: true }).waitFor();
+    assert.ok(await page.evaluate(key => localStorage.getItem(key), backupKey));
+    await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByRole("button", { name: "Abrir comunidade da família" }).click();
     await page.getByText("Ver mais publicações", { exact: true }).click();
     await page.waitForFunction(() => !Array.from(document.querySelectorAll('div')).some(el => el.textContent === "Ver mais publicações"));
@@ -249,7 +310,7 @@ function filtered(table, search) {
     await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
-    console.log("OK UI — várias famílias, convites, publicações/rascunhos isolados, troca rápida, preferência após reabrir, treino offline, registro manual e cardio");
+    console.log("OK UI — conclusão com rede em voo, conflito legado, cópia íntegra sem escrita remota, swipe-back, famílias, treino offline, registro manual e cardio");
     await context.close();
   } catch (error) {
     if (activePage) { await activePage.screenshot({ path: path.join(output, "web-failure.png") }).catch(() => {}); console.error((await activePage.locator("body").innerText()).slice(0, 2000)); }

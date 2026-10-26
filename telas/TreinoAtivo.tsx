@@ -31,6 +31,8 @@ import {
   copiarSeriesAnteriores,
   listarRascunhos,
   mesmaOperacao,
+  guardarConclusao,
+  listarCopiasTreino,
   type DescansoTreino,
   type FinalizacaoTreino,
   type SerieRascunho,
@@ -48,7 +50,7 @@ import {
 
 import { CronometroTreino, PainelDescanso, OPCOES_DESCANSO } from "../componentes/ContadoresTreino";
 import { CartaoExercicioTreino } from "../componentes/CartaoExercicioTreino";
-import { sincronizarRascunho } from "../servicos/treinoSincronizacao";
+import { recuperarConclusaoRemota, sincronizarRascunho } from "../servicos/treinoSincronizacao";
 import { carregarUltimasSeries, type UltimoExercicio } from "../servicos/ultimasSeriesTreino";
 import EditorExercicioSessao, { type DadosEditorExercicio } from "../componentes/EditorExercicioSessao";
 import ResumoRegistroTreino from "../componentes/ResumoRegistroTreino";
@@ -130,6 +132,9 @@ export default function TreinoAtivo({
   const [sincronizando, setSincronizando] = useState(false);
   const [erroSincronizacao, setErroSincronizacao] = useState("");
   const [conflitoRemoto, setConflitoRemoto] = useState(false);
+  const [conflitoSessao, setConflitoSessao] = useState(false);
+  const [copias, setCopias] = useState<Awaited<ReturnType<typeof listarCopiasTreino>>>([]);
+  const [mostrarCopias, setMostrarCopias] = useState(false);
   const [bloqueioSessao, setBloqueioSessao] = useState(false);
   const [online, setOnline] = useState(true);
   const [editorId, setEditorId] = useState<string | null>(null);
@@ -141,6 +146,7 @@ export default function TreinoAtivo({
   const criacaoPendenteRef = useRef(false);
   useVoltarDoModal(editorId !== null, () => setEditorId(null));
   useVoltarDoModal(revisaoFim !== null, () => { if (!salvando) setRevisaoFim(null); });
+  useVoltarDoModal(mostrarCopias, () => setMostrarCopias(false));
   const prontoRef = useRef(false);
   const sincronizandoRef = useRef(false);
   const seriesRef = useRef(series);
@@ -203,7 +209,7 @@ export default function TreinoAtivo({
     [montarRascunho],
   );
 
-  const sincronizar = useCallback(async (permitirSobrescrever = false) => {
+  const sincronizar = useCallback(async (permitirSobrescrever = false, recuperar = false) => {
     if (sincronizandoRef.current || bloqueioRef.current || !prontoRef.current) return;
     if (Platform.OS === "web" && typeof navigator !== "undefined" && navigator.onLine === false) {
       setOnline(false); return;
@@ -214,7 +220,7 @@ export default function TreinoAtivo({
     sincronizandoRef.current = true; setSincronizando(true);
     const antes = seriesRef.current;
     try {
-      const resultado = await sincronizarRascunho(id, planId, permitirSobrescrever);
+      const resultado = recuperar ? await recuperarConclusaoRemota(id, planId) : await sincronizarRascunho(id, planId, permitirSobrescrever);
       if (resultado.concluido && !resultado.rascunho) {
         prontoRef.current = false; sessaoRef.current = null; finalizacaoRef.current = undefined;
         setFinalizacao(undefined); setSessao(null); setErroSincronizacao("");
@@ -232,6 +238,7 @@ export default function TreinoAtivo({
         seriesRef.current = atualizadas; setSeries(atualizadas);
       }
       setConflitoRemoto(Boolean(resultado.conflito)); setErroSincronizacao(resultado.erro ?? "");
+      setConflitoSessao(Boolean(resultado.conflitoSessao));
       if (!resultado.erro) { setOnline(true); setMensagem("Treino sincronizado."); }
     } catch {
       setErroSincronizacao("Não foi possível sincronizar. Seus dados continuam guardados neste aparelho.");
@@ -299,6 +306,7 @@ export default function TreinoAtivo({
       usuarioRef.current = idUsuario;
       const sessaoUsuario = { user: usuarioEmCache };
       setUsuarioId(idUsuario);
+      setCopias(await listarCopiasTreino(idUsuario, planId));
       setPerfil(
         lerPerfilTreino(
           (sessaoUsuario.user.user_metadata ?? {}) as Record<string, unknown>,
@@ -316,6 +324,7 @@ export default function TreinoAtivo({
         setRestaurado(true); prontoRef.current = true;
         setErroSincronizacao(local.erroSincronizacao ?? "");
         setConflitoRemoto(Boolean(local.conflitoSincronizacao));
+        setConflitoSessao(local.conflitoSessao !== false);
         setMensagem("Treino encerrado neste aparelho. A conclusão aguarda confirmação do servidor.");
         return;
       }
@@ -842,7 +851,8 @@ export default function TreinoAtivo({
   };
   const seriesDoResumo: SerieCalculoTreino[] = series.filter(s => s.concluida && !s.excluida).map(s => ({ exercise_id: s.exercise_id, exercise_name: s.exercise_name, set_number: s.set_number, reps: Number(s.reps), weight_kg: Number(s.weight_kg.replace(",", ".")) }));
   function finalizarSessao() {
-    if (!podeAdaptar()) return;
+    // Encerrar localmente não depende da rede nem da fila de envio.
+    if (finalizacaoRef.current || bloqueioRef.current || salvandoRef.current || chaveSalvandoRef.current || !sessaoRef.current) return;
     if (!seriesDoResumo.length) { avisar("Nenhuma série concluída", "Marque ao menos uma série como concluída antes de finalizar o treino."); return; }
     const fim = new Date().toISOString();
     setDuracaoFinal(String(Math.max(0.5, Math.round((Date.parse(fim) - Date.parse(sessaoRef.current!.started_at)) / 600) / 100)));
@@ -855,10 +865,10 @@ export default function TreinoAtivo({
       const metricas = metricasRegistroTreino(perfil, Number(duracaoFinal.replace(",", ".")), intensidade, seriesDoResumo);
       const modelo = destinoModelo === "sessao" ? undefined : prepararModeloTreino(destinoModelo, destinoModelo === "novo" ? nomeNovoPlano : planName, planId, exerciciosRef.current, seriesRef.current);
       const conclusao: FinalizacaoTreino = { finishedAt: revisaoFim, notes: "Treino concluído no modo ativo;esforco_percebido=" + esforco + ";modelo=" + destinoModelo, metricas, modelo };
-      finalizacaoRef.current = conclusao;
-      const rascunho = montarRascunho(); if (!rascunho) throw new Error("Não foi possível preparar a conclusão local.");
-      try { await gravarRascunho(rascunho); } catch (erro) { finalizacaoRef.current = undefined; throw erro; }
-      setFinalizacao(conclusao); setRevisaoFim(null);
+      // Não grava um snapshot da UI sobre confirmações recebidas durante a revisão.
+      const salvo = await guardarConclusao(usuarioId, planId, sessao.id, conclusao);
+      finalizacaoRef.current = salvo.finalizacao;
+      setFinalizacao(salvo.finalizacao); setRevisaoFim(null);
       setMensagem("Encerramento e escolha de treino guardados. O horário real será preservado, mesmo sem internet.");
       void sincronizar();
     } catch (erro) { finalizacaoRef.current = undefined; setErroConclusao(erro instanceof Error ? erro.message : "Não foi possível guardar a conclusão."); }
@@ -918,7 +928,7 @@ export default function TreinoAtivo({
             {erroSincronizacao ? (
               <Text style={estilos.aviso}>{erroSincronizacao}</Text>
             ) : null}
-            {conflitoRemoto && !bloqueioSessao ? (
+            {conflitoRemoto && !bloqueioSessao && !conflitoSessao ? (
               <TouchableOpacity
                 style={estilos.botaoSecundario}
                 onPress={() => {
@@ -945,6 +955,10 @@ export default function TreinoAtivo({
                 </Text>
               </TouchableOpacity>
             ) : null}
+            {conflitoRemoto && !bloqueioSessao ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Usar conclusão do servidor e guardar cópia local" disabled={sincronizando || salvando} style={estilos.botaoSecundario} onPress={() => {
+              void confirmar("Recuperar conclusão do servidor?", "Vamos conferir se esta sessão está concluída no servidor, sem alterar seus dados. Todas as séries, horários e escolhas deste aparelho ficarão numa cópia de segurança, acessível ao abrir este treino. Diferenças locais não serão enviadas ao histórico nem ao plano. Deseja continuar?")
+                .then(aceitou => { if (aceitou) void sincronizar(false, true); });
+            }}><Text style={estilos.textoBotaoSecundario}>{sincronizando ? "Conferindo..." : "Usar conclusão do servidor e guardar cópia local"}</Text></TouchableOpacity> : null}
             {bloqueioSessao ? (
               <>
                 <Text style={estilos.aviso}>
@@ -1100,7 +1114,6 @@ export default function TreinoAtivo({
                 disabled={
                   salvando ||
                   chaveEmSalvamento !== null ||
-                  sincronizando ||
                   bloqueioSessao ||
                   Boolean(finalizacao)
                 }
@@ -1116,7 +1129,20 @@ export default function TreinoAtivo({
             </View>
           </>
         )}
+        {copias.length ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Ver cópias de segurança deste treino" style={estilos.botaoSecundario} onPress={() => setMostrarCopias(true)}><Text style={estilos.textoBotaoSecundario}>Ver cópias de segurança deste treino ({copias.length})</Text></TouchableOpacity> : null}
       </ScrollView>
+      <Modal transparent animationType="fade" visible={mostrarCopias} onRequestClose={() => setMostrarCopias(false)}>
+        <View style={{ flex: 1, backgroundColor: "#000B" }}><ScrollView contentContainerStyle={{ padding: 18, paddingTop: 50, gap: 16 }}>
+          <View style={estilos.cartao}><Text style={estilos.tituloCartao}>Cópias locais preservadas</Text><Text style={estilos.secundario}>Estas cópias ficam neste aparelho. O histórico mantém a conclusão do servidor. Séries e escolhas abaixo não foram sobrescritas nem reenviadas.</Text>
+            {copias.map(copia => <View key={copia.rascunho.sessao.id} style={{ gap: 8 }}>
+              <Text style={estilos.textoOpcao}>{copia.rascunho.planName} · {new Date(copia.arquivadoEm).toLocaleString()}</Text>
+              <Text style={estilos.secundario}>Início: {copia.rascunho.sessao.started_at}{"\n"}Conclusão local: {copia.rascunho.finalizacao?.finishedAt ?? "Não registrada"}{"\n"}Conclusão no servidor: {copia.remota.finished_at}{"\n"}Escolha de plano: {copia.rascunho.finalizacao?.modelo?.nome ?? "Só nesta sessão"}</Text>
+              {copia.rascunho.series.map(serie => <Text key={serie.chave} style={estilos.secundario}>{serie.exercise_name} · série {serie.set_number}: {serie.reps} × {serie.weight_kg} kg · {serie.excluida ? "retirada" : serie.concluida ? "concluída" : "aberta"}{serie.pendente ? " · envio pendente na cópia" : ""}</Text>)}
+            </View>)}
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Fechar cópias de segurança" onPress={() => setMostrarCopias(false)} style={estilos.botaoSecundario}><Text style={estilos.textoBotaoSecundario}>Fechar</Text></TouchableOpacity>
+          </View>
+        </ScrollView></View>
+      </Modal>
       {editorId !== null ? <EditorExercicioSessao key={editorId} editando={editorId !== "novo"} nomeBloqueado={series.some(s => s.exercise_id === editorId && (s.concluida || s.pendente))} cor={corTema} onFechar={() => setEditorId(null)} onSalvar={salvarExercicio} inicial={(() => {
         const exercicio = exercicios.find(e => e.id === editorId), abertas = series.filter(s => s.exercise_id === editorId && !s.excluida);
         return { nome: exercicio?.name ?? "", series: String(abertas.length || 3), repeticoes: abertas[0]?.reps ?? "10", peso: abertas[0]?.weight_kg ?? "0" };
@@ -1130,7 +1156,7 @@ export default function TreinoAtivo({
           {destinoModelo === "novo" ? <TextInput accessibilityLabel="Nome do novo treino" placeholder="Ex.: Treino academia da viagem" placeholderTextColor="#828A85" value={nomeNovoPlano} onChangeText={setNomeNovoPlano} maxLength={100} editable={!salvando} style={{ borderWidth: 1, borderColor: corTema, borderRadius: 10, padding: 12, color: "#F0F4F1" }} /> : null}
           <Text style={estilos.secundario}>{destinoModelo === "novo" ? "Cria um plano com os exercícios e cargas desta sessão e vincula esta conclusão a ele. O original é preservado." : destinoModelo === "adicionar" ? "Acrescenta somente exercícios novos. Não exclui exercícios nem troca as cargas de referência que já existiam no original." : "Guarda o que você realizou no histórico, sem mudar nenhum plano."}</Text>
           {erroConclusao ? <Text accessibilityRole="alert" style={estilos.aviso}>{erroConclusao}</Text> : null}
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Confirmar conclusão do treino" disabled={salvando || sincronizando} onPress={() => void confirmarConclusao()} style={[estilos.botaoPrimario, { backgroundColor: corTema }]}><Text style={estilos.textoPrimario}>{salvando ? "Guardando..." : "Confirmar conclusão do treino"}</Text></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Confirmar conclusão do treino" disabled={salvando} onPress={() => void confirmarConclusao()} style={[estilos.botaoPrimario, { backgroundColor: corTema }]}><Text style={estilos.textoPrimario}>{salvando ? "Guardando..." : "Confirmar conclusão do treino"}</Text></TouchableOpacity>
           <TouchableOpacity accessibilityRole="button" disabled={salvando} onPress={() => setRevisaoFim(null)} style={estilos.botaoSecundario}><Text style={estilos.textoOpcao}>Continuar treinando</Text></TouchableOpacity>
         </View></ScrollView></View>
       </Modal>
