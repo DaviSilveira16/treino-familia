@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { Platform } from "react-native";
 import { registrarTempo } from "./servicos/performance";
 import { noAndroidWrapper } from "./servicos/ambienteAndroid";
+import { requisicaoComPrazo } from "./servicos/requisicaoComPrazo";
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabasePublishableKey =
@@ -34,7 +35,10 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
         /* O monitoramento nunca deve impedir uma solicitação. */
       }
       try {
-        const resposta = await fetch(input, init);
+        // Uploads de fotos podem levar mais tempo numa rede móvel.
+        const resposta = rotulo === "supabase.storage"
+          ? await fetch(input, init)
+          : await requisicaoComPrazo(input, init);
         registrarTempo(rotulo, inicio, !resposta.ok);
         return resposta;
       } catch (erro) {

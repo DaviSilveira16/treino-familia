@@ -43,14 +43,17 @@ const draft = { versao: 1, usuarioId: "u1", planId: "p1", planName: "Plano", ses
   assert.equal(state.session.finished_at, finishedAt);
   const final = await sync.sincronizarRascunho("u1", "p1");
   assert.equal(final.concluido, true); assert.equal(await local.lerRascunho("u1", "p1"), null); assert.equal(state.finishes, 1);
-  state.session = { ...state.session, status: "em_andamento", finished_at: null };
-  await local.gravarRascunho({ ...draft, series: [{ ...serie, weight_kg: "25" }] });
+  // Uma nova sessão tem outro ID; sessões concluídas nunca são reabertas.
+  state.session = { ...state.session, id: "s2", status: "em_andamento", finished_at: null };
+  state.sets = state.sets.map(item => ({ ...item, session_id: "s2" }));
+  const segunda = { ...draft, sessao: { ...draft.sessao, id: "s2" } };
+  await local.gravarRascunho({ ...segunda, series: [{ ...serie, weight_kg: "25" }] });
   const conflito = await sync.sincronizarRascunho("u1", "p1");
   assert.equal(conflito.conflito, true); assert.equal(state.sets[0].weight_kg, 20); assert.equal((await local.lerRascunho("u1", "p1")).series[0].weight_kg, "25");
-  await local.gravarRascunho({ ...draft, series: [{ ...serie, weight_kg: "25", baseRemota: { id: "r1", reps: 10, weight_kg: 20 } }] });
+  await local.gravarRascunho({ ...segunda, series: [{ ...serie, weight_kg: "25", baseRemota: { id: "r1", reps: 10, weight_kg: 20 } }] });
   const correcao = await sync.sincronizarRascunho("u1", "p1"); assert.equal(correcao.conflito, undefined); assert.equal(state.sets[0].weight_kg, 25, "Correção explícita aplica somente sobre a base conhecida");
   state.sets[0].weight_kg = 30;
-  await local.gravarRascunho({ ...draft, series: [{ ...serie, weight_kg: "35", baseRemota: { id: "r1", reps: 10, weight_kg: 25 } }] });
+  await local.gravarRascunho({ ...segunda, series: [{ ...serie, weight_kg: "35", baseRemota: { id: "r1", reps: 10, weight_kg: 25 } }] });
   assert.equal((await sync.sincronizarRascunho("u1", "p1")).conflito, true); assert.equal(state.sets[0].weight_kg, 30, "Mudança concorrente não é sobrescrita");
   console.log("OK — resposta perdida, reenvio idempotente, conclusão offline e conflito preservado");
 })().catch(error => { console.error(error); process.exitCode = 1; });

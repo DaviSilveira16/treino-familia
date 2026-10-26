@@ -53,6 +53,7 @@ export type TreinoRascunho = {
   finalizacao?: FinalizacaoTreino;
   erroSincronizacao?: string;
   conflitoSincronizacao?: boolean;
+  conflitoSessao?: boolean;
   criacaoPendente?: boolean;
 };
 
@@ -109,12 +110,19 @@ let fila: Promise<unknown> = Promise.resolve();
 export function gravarRascunho(rascunho: TreinoRascunho): Promise<void> {
   const tarefa = fila
     .catch(() => {})
-    .then(() =>
-      AsyncStorage.setItem(
+    .then(async () => {
+      // Uma tela antiga não pode ressuscitar uma sessão já confirmada.
+      if (await AsyncStorage.getItem(chaveEncerrada(rascunho.usuarioId, rascunho.sessao.id))) return;
+      const texto = await AsyncStorage.getItem(chave(rascunho.usuarioId, rascunho.planId));
+      const atual = texto ? JSON.parse(texto) as TreinoRascunho : null;
+      // Depois da conclusão, só a fila atômica de sincronização altera os dados.
+      if (atual?.sessao.id === rascunho.sessao.id && atual.finalizacao) return;
+      await AsyncStorage.setItem(
         chave(rascunho.usuarioId, rascunho.planId),
         JSON.stringify(rascunho),
-      ).then(notificar),
-    );
+      );
+      notificar();
+    });
   fila = tarefa.catch(() => {});
   return tarefa;
 }
@@ -160,12 +168,54 @@ export function atualizarRascunho(
     if (atual.usuarioId !== usuarioId || atual.planId !== planId) return null;
     const proximo = alterar(atual);
     if (proximo) await AsyncStorage.setItem(chave(usuarioId, planId), JSON.stringify(proximo));
-    else await AsyncStorage.removeItem(chave(usuarioId, planId));
+    else {
+      await AsyncStorage.setItem(chaveEncerrada(usuarioId, atual.sessao.id), "1");
+      await AsyncStorage.removeItem(chave(usuarioId, planId));
+    }
     notificar();
     return proximo;
   });
   fila = tarefa.catch(() => {});
   return tarefa;
+}
+
+function chaveEncerrada(usuarioId: string, sessaoId: string) {
+  return `@treino-familia:encerrada:v1:${usuarioId}:${sessaoId}`;
+}
+
+/** Acrescenta a conclusão à versão mais recente, incluindo confirmações em voo. */
+export async function guardarConclusao(usuarioId: string, planId: string, sessaoId: string, finalizacao: FinalizacaoTreino) {
+  const salvo = await atualizarRascunho(usuarioId, planId, atual => {
+    if (atual.sessao.id !== sessaoId) throw new Error("A sessão mudou. Reabra o treino antes de concluir.");
+    return atual.finalizacao ? atual : { ...atual, finalizacao };
+  });
+  if (!salvo) throw new Error("Não foi possível encontrar o rascunho local. Reabra o treino.");
+  return salvo;
+}
+
+/** Backup primeiro. Se qualquer gravação falhar, a sessão continua recuperável. */
+export function arquivarConclusaoRemota(usuarioId: string, planId: string, sessaoId: string, remota: { finished_at: string; plan_id: string }) {
+  const tarefa = fila.catch(() => {}).then(async () => {
+    const texto = await AsyncStorage.getItem(chave(usuarioId, planId));
+    if (!texto) return;
+    const atual = JSON.parse(texto) as TreinoRascunho;
+    if (atual.usuarioId !== usuarioId || atual.planId !== planId || atual.sessao.id !== sessaoId) throw new Error("O rascunho mudou. Reabra o treino para conferir.");
+    await AsyncStorage.setItem(`@treino-familia:recuperacao:v1:${usuarioId}:${planId}:${sessaoId}`, JSON.stringify({ rascunho: atual, remota, arquivadoEm: new Date().toISOString() }));
+    await AsyncStorage.setItem(chaveEncerrada(usuarioId, sessaoId), "1");
+    await AsyncStorage.removeItem(chave(usuarioId, planId));
+    notificar();
+  });
+  fila = tarefa.catch(() => {});
+  return tarefa;
+}
+
+export async function listarCopiasTreino(usuarioId: string, planId: string): Promise<{ rascunho: TreinoRascunho; remota: { finished_at: string; plan_id: string }; arquivadoEm: string }[]> {
+  await fila.catch(() => {});
+  const prefixo = `@treino-familia:recuperacao:v1:${usuarioId}:${planId}:`;
+  const chaves = (await AsyncStorage.getAllKeys()).filter(item => item.startsWith(prefixo));
+  const textos = await Promise.all(chaves.map(item => AsyncStorage.getItem(item)));
+  return textos.filter((item): item is string => Boolean(item)).map(item => JSON.parse(item))
+    .filter(item => item.rascunho?.usuarioId === usuarioId && item.rascunho?.planId === planId);
 }
 
 export async function listarRascunhos(usuarioId: string): Promise<TreinoRascunho[]> {
