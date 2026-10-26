@@ -1,22 +1,25 @@
 /** Cancela a requisição real; a fila só é liberada quando o fetch encerra. */
 export async function requisicaoComPrazo(input: RequestInfo | URL, init?: RequestInit, prazoMs = 20000): Promise<Response> {
-  const controle = new AbortController();
-  const sinal = init?.signal ?? (typeof Request !== "undefined" && input instanceof Request ? input.signal : undefined);
-  const cancelar = () => controle.abort();
-  if (sinal?.aborted) cancelar();
-  else sinal?.addEventListener("abort", cancelar, { once: true });
-  const timer = setTimeout(cancelar, prazoMs);
-  try {
-    // Safari pode emitir um erro nativo de acesso ao chamar fetch com um sinal
-    // já cancelado. Uma tela antiga não deve sequer iniciar essa requisição.
-    if (controle.signal.aborted) {
+  const sinal = init?.signal ?? (typeof input === "object" && input !== null && "signal" in input ? input.signal as AbortSignal : undefined);
+  if (sinal) {
+    if (sinal.aborted) {
       const erro = new Error("Requisição cancelada");
       erro.name = "AbortError";
       throw erro;
     }
+    // O sinal do chamador precisa continuar ligado ao corpo da resposta, mesmo
+    // depois de fetch devolver os cabeçalhos. Clonar e desligar no finally
+    // interrompia esse cancelamento ao sair da tela. Combinação nativa também
+    // mantém o prazo; em ambientes antigos, preserva o cancelamento do chamador.
+    const combinado = typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.any([sinal, AbortSignal.timeout(prazoMs)]) : sinal;
+    return fetch(input, { ...init, signal: combinado });
+  }
+  const controle = new AbortController();
+  const timer = setTimeout(() => controle.abort(), prazoMs);
+  try {
     return await fetch(input, { ...init, signal: controle.signal });
   } finally {
     clearTimeout(timer);
-    sinal?.removeEventListener("abort", cancelar);
   }
 }

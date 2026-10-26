@@ -203,7 +203,7 @@ export default function TreinoAtivo({
       if (!atual || !id || !prontoRef.current) return;
       try {
         const local = await lerRascunho(id, planId);
-        const encerrada = local?.sessao.id === atual.id ? Boolean(local.encerradaNoServidor)
+        const encerrada = local?.sessao.id === atual.id ? Boolean(local.encerradaNoServidor || local.exclusaoSolicitada) || await sessaoFoiEncerrada(id, atual.id)
           : await sessaoFoiEncerrada(id, atual.id);
         if (ativo && encerrada) retirarSessaoDaTela(atual.id);
       } catch { /* Falha de leitura não é prova de conclusão. */ }

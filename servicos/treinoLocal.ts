@@ -58,6 +58,8 @@ export type TreinoRascunho = {
   reenvioSolicitado?: boolean;
   /** Estado da sessão, independente da fila de detalhes/modelo ainda não enviada. */
   encerradaNoServidor?: { finishedAt: string | null };
+  sessaoConfirmadaNoServidor?: boolean;
+  exclusaoSolicitada?: boolean;
   criacaoPendente?: boolean;
 };
 
@@ -117,13 +119,15 @@ export function gravarRascunho(rascunho: TreinoRascunho): Promise<void> {
     .then(async () => {
       // Uma tela antiga não pode ressuscitar uma sessão já confirmada.
       if (await AsyncStorage.getItem(chaveEncerrada(rascunho.usuarioId, rascunho.sessao.id))) return;
+      if (await AsyncStorage.getItem(chaveExclusao(rascunho.usuarioId, rascunho.sessao.id))) return;
       const texto = await AsyncStorage.getItem(chave(rascunho.usuarioId, rascunho.planId));
       const atual = texto ? JSON.parse(texto) as TreinoRascunho : null;
       // Depois da conclusão, só a fila atômica de sincronização altera os dados.
-      if (atual?.sessao.id === rascunho.sessao.id && (atual.finalizacao || atual.encerradaNoServidor)) return;
+      if (atual?.sessao.id === rascunho.sessao.id && (atual.finalizacao || atual.encerradaNoServidor || atual.exclusaoSolicitada)) return;
       await AsyncStorage.setItem(
         chave(rascunho.usuarioId, rascunho.planId),
-        JSON.stringify(rascunho),
+        JSON.stringify(atual?.sessao.id === rascunho.sessao.id && atual.sessaoConfirmadaNoServidor
+          ? { ...rascunho, sessaoConfirmadaNoServidor: true, criacaoPendente: false } : rascunho),
       );
       notificar();
     });
@@ -188,6 +192,63 @@ export function atualizarRascunho(
 
 function chaveEncerrada(usuarioId: string, sessaoId: string) {
   return `@treino-familia:encerrada:v1:${usuarioId}:${sessaoId}`;
+}
+
+type ExclusaoTreino = { usuarioId: string; sessaoId: string; estado: "solicitada" | "confirmada"; solicitadaEm: string };
+function chaveExclusao(usuarioId: string, sessaoId: string) {
+  return `@treino-familia:exclusao:v1:${usuarioId}:${sessaoId}`;
+}
+export async function lerExclusaoTreino(usuarioId: string, sessaoId: string): Promise<ExclusaoTreino | null> {
+  await fila.catch(() => {});
+  const texto = await AsyncStorage.getItem(chaveExclusao(usuarioId, sessaoId));
+  if (!texto) return null;
+  const registro = JSON.parse(texto) as ExclusaoTreino;
+  return registro.usuarioId === usuarioId && registro.sessaoId === sessaoId ? registro : null;
+}
+export async function listarExclusoesPendentes(usuarioId: string): Promise<ExclusaoTreino[]> {
+  await fila.catch(() => {});
+  const prefixo = `@treino-familia:exclusao:v1:${usuarioId}:`;
+  const chaves = (await AsyncStorage.getAllKeys()).filter(item => item.startsWith(prefixo));
+  const itens = await Promise.all(chaves.map(async item => JSON.parse((await AsyncStorage.getItem(item))!) as ExclusaoTreino));
+  return itens.filter(item => item.usuarioId === usuarioId && item.estado === "solicitada");
+}
+/** O pedido de exclusão tem prioridade sobre qualquer reenvio do mesmo ID. */
+export function registrarExclusaoTreino(usuarioId: string, sessaoId: string) {
+  const tarefa = fila.catch(() => {}).then(async () => {
+    const prefixo = `@treino-familia:rascunho:v1:${usuarioId}:`;
+    const chaves = (await AsyncStorage.getAllKeys()).filter(item => item.startsWith(prefixo));
+    for (const item of chaves) {
+      const texto = await AsyncStorage.getItem(item);
+      if (!texto) continue;
+      const atual = JSON.parse(texto) as TreinoRascunho;
+      if (atual.usuarioId !== usuarioId || atual.sessao.id !== sessaoId) continue;
+      const destino = `@treino-familia:recuperacao:v1:${usuarioId}:${atual.planId}:${sessaoId}:exclusao`;
+      if (!await AsyncStorage.getItem(destino)) await AsyncStorage.setItem(destino, JSON.stringify({ rascunho: atual, remota: null, arquivadoEm: new Date().toISOString() }));
+      await AsyncStorage.setItem(item, JSON.stringify({ ...atual, exclusaoSolicitada: true }));
+    }
+    const destino = chaveExclusao(usuarioId, sessaoId);
+    if (!await AsyncStorage.getItem(destino)) await AsyncStorage.setItem(destino, JSON.stringify({ usuarioId, sessaoId, estado: "solicitada", solicitadaEm: new Date().toISOString() }));
+    await AsyncStorage.setItem(chaveEncerrada(usuarioId, sessaoId), "1");
+    notificar();
+  });
+  fila = tarefa.catch(() => {}); return tarefa;
+}
+export function confirmarExclusaoTreino(usuarioId: string, sessaoId: string) {
+  const tarefa = fila.catch(() => {}).then(async () => {
+    const destino = chaveExclusao(usuarioId, sessaoId);
+    const texto = await AsyncStorage.getItem(destino);
+    if (!texto) throw new Error("Não foi possível encontrar o pedido local de exclusão.");
+    const registro = JSON.parse(texto) as ExclusaoTreino;
+    if (registro.usuarioId !== usuarioId || registro.sessaoId !== sessaoId) throw new Error("Pedido de exclusão de outra conta.");
+    await AsyncStorage.setItem(destino, JSON.stringify({ ...registro, estado: "confirmada" }));
+    const prefixo = `@treino-familia:rascunho:v1:${usuarioId}:`;
+    for (const item of (await AsyncStorage.getAllKeys()).filter(chave => chave.startsWith(prefixo))) {
+      const atual = JSON.parse((await AsyncStorage.getItem(item))!) as TreinoRascunho;
+      if (atual?.usuarioId === usuarioId && atual.sessao?.id === sessaoId) await AsyncStorage.removeItem(item);
+    }
+    notificar();
+  });
+  fila = tarefa.catch(() => {}); return tarefa;
 }
 
 export async function sessaoFoiEncerrada(usuarioId: string, sessaoId: string): Promise<boolean> {
@@ -267,13 +328,16 @@ export async function listarRascunhos(usuarioId: string): Promise<TreinoRascunho
   await fila.catch(() => {});
   const prefixo = `@treino-familia:rascunho:v1:${usuarioId}:`;
   const chaves = (await AsyncStorage.getAllKeys()).filter((item) => item.startsWith(prefixo));
-  const itens = await Promise.all(chaves.map((item) => lerRascunho(usuarioId, item.slice(prefixo.length))));
+  const itens = await Promise.all(chaves.map(async item => {
+    const rascunho = await lerRascunho(usuarioId, item.slice(prefixo.length));
+    return rascunho && await lerExclusaoTreino(usuarioId, rascunho.sessao.id) ? { ...rascunho, exclusaoSolicitada: true } : rascunho;
+  }));
   return itens.filter((item): item is TreinoRascunho => item !== null)
     .sort((a, b) => Date.parse(b.sessao.started_at) - Date.parse(a.sessao.started_at));
 }
 
 export async function lerResumoTreinoAtivo(usuarioId: string): Promise<ResumoTreinoAtivo | null> {
-  const rascunho = (await listarRascunhos(usuarioId)).find(item => !item.encerradaNoServidor);
+  const rascunho = (await listarRascunhos(usuarioId)).find(item => !item.encerradaNoServidor && !item.exclusaoSolicitada);
   return rascunho ? {
     planId: rascunho.planId, planName: rascunho.planName,
     sessaoId: rascunho.sessao.id, startedAt: rascunho.sessao.started_at,

@@ -1,7 +1,7 @@
 import React, { memo, useEffect, useState } from "react";
 import { AppState, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
-import { assinarRascunhos, lerResumoTreinoAtivo, listarRascunhos, type ResumoTreinoAtivo } from "../servicos/treinoLocal";
+import { assinarRascunhos, lerResumoTreinoAtivo, listarRascunhos, listarExclusoesPendentes, type ResumoTreinoAtivo } from "../servicos/treinoLocal";
 import { sincronizarTreinosPendentes } from "../servicos/treinoSincronizacao";
 
 function Contagem({ fimEm, pausado, restantes }: { fimEm?: number | null; pausado?: boolean; restantes?: number }) {
@@ -18,7 +18,7 @@ function Barra({ usuarioId, corTema, visivel, onRetomar }: { usuarioId: string; 
     let haRascunhos = false;
     const refresh = async () => {
       const pedido = ++versao;
-      try { const itens = await listarRascunhos(usuarioId); const atual = await lerResumoTreinoAtivo(usuarioId); if (ativo && pedido === versao) { haRascunhos = itens.length > 0; setResumo(atual); } }
+      try { const itens = await listarRascunhos(usuarioId); const exclusoes = await listarExclusoesPendentes(usuarioId); const atual = await lerResumoTreinoAtivo(usuarioId); if (ativo && pedido === versao) { haRascunhos = itens.length > 0 || exclusoes.length > 0; setResumo(atual); } }
       catch { /* Keep the last known local summary; never discard pending data. */ }
     };
     const sincronizar = () => { void sincronizarTreinosPendentes(usuarioId).then(refresh).catch(refresh); };

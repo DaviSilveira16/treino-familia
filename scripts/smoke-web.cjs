@@ -8,6 +8,8 @@ const root = path.join(__dirname, "..");
 const output = path.join(root, ".test-results", process.env.SMOKE_BROWSER || "chromium"); fs.mkdirSync(output, { recursive: true });
 const env = fs.existsSync(path.join(root, ".env")) ? fs.readFileSync(path.join(root, ".env"), "utf8") : "";
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || env.match(/^EXPO_PUBLIC_SUPABASE_URL=["']?([^\s"']+)/m)?.[1] || "https://ci-placeholder.supabase.co";
+const backendOrigin = new URL(supabaseUrl).origin;
+const fixturePort = new URL(supabaseUrl).hostname === "127.0.0.1" ? Number(new URL(supabaseUrl).port) || 0 : 0;
 const storageKey = `sb-${new URL(supabaseUrl).hostname.split(".")[0]}-auth-token`;
 const now = Date.now(), uid = "11111111-1111-4111-8111-111111111111", pid = "22222222-2222-4222-8222-222222222222", eid = "33333333-3333-4333-8333-333333333333", sid = "44444444-4444-4444-8444-444444444444";
 const user = { id: uid, aud: "authenticated", role: "authenticated", email: "teste@example.invalid", created_at: new Date(now).toISOString(), app_metadata: { provider: "email", providers: ["email"] }, user_metadata: { nome: "Conta de teste", tema_cor: "#35D07F", peso_kg: 80, altura_cm: 175, idade: 30, sexo: "masculino" } };
@@ -30,6 +32,7 @@ const tables = {
 let backendOffline = false, feedPages = 0;
 let holdSync = false, releaseSync;
 let holdDetailsSid = null, releaseDetails;
+let denyWorkoutDelete = false;
 let releasePost, releaseFeed, holdPost = false, holdFeedFamily = null, postCounter = 0;
 const server = http.createServer((req, res) => {
   let requestPath; try { requestPath = decodeURIComponent(new URL(req.url, "http://localhost").pathname); } catch { res.writeHead(400).end(); return; }
@@ -54,7 +57,7 @@ function filtered(table, search) {
   return rows.slice(Number(search.get("offset") || 0), Number(search.get("offset") || 0) + Number(search.get("limit") || 1000));
 }
 (async () => {
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  await new Promise(resolve => server.listen(fixturePort, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browser = await (process.env.SMOKE_BROWSER === "webkit" ? webkit : chromium).launch({ headless: true });
   let activePage;
@@ -82,8 +85,9 @@ function filtered(table, search) {
     });
     await context.route("**/*", async route => {
       const request = route.request(), url = new URL(request.url());
-      if (url.origin === origin) return route.continue();
-      if (!url.hostname.endsWith(".supabase.co")) return route.abort();
+      const api = url.origin === backendOrigin && /^\/(?:auth|rest|storage)\/v1\//.test(url.pathname);
+      if (url.origin === origin && !api) return route.continue();
+      if (!api) return route.abort();
       const headers = { "access-control-allow-origin": origin, "access-control-allow-credentials": "true", "access-control-allow-headers": request.headers()["access-control-request-headers"] || "authorization,apikey,content-type,x-client-info,prefer,range,accept,content-profile,accept-profile", "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS", "content-type": "application/json" };
       if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
       // Simula serviço indisponível com CORS válido; setOffline cobre a queda real de rede.
@@ -106,6 +110,11 @@ function filtered(table, search) {
       const table = url.pathname.split("/").pop(); if (!(table in tables)) return route.fulfill({ json: [], headers });
       if (table === "community_posts") feedPages++;
       let rows = filtered(table, url.searchParams);
+      if (request.method() === "DELETE") {
+        if (table === "workout_sessions" && denyWorkoutDelete) return route.fulfill({ json: [], headers });
+        tables[table] = tables[table].filter(row => !rows.includes(row));
+        if (table === "workout_sessions") tables.workout_sets = tables.workout_sets.filter(row => !rows.some(session => session.id === row.session_id));
+      }
       if (table === "community_posts" && request.method() === "GET" && url.searchParams.get("family_id") === `eq.${holdFeedFamily}`) {
         holdFeedFamily = null; await new Promise(resolve => { releaseFeed = resolve; });
         return route.fulfill({ json: rows, headers }).catch(() => {});
@@ -145,7 +154,7 @@ function filtered(table, search) {
         if (signal?.aborted) report();
         else signal?.addEventListener("abort", report, { once: true });
         return nativeFetch(input, init).catch(error => {
-          void window.__smokeFetchFailure({ url, offline: offlineAtStart, aborted: Boolean(signal?.aborted), at: Date.now(), name: error.name }).catch(() => {});
+          void window.__smokeFetchFailure({ url, offline: offlineAtStart || navigator.onLine === false, aborted: Boolean(signal?.aborted), at: Date.now(), name: error.name }).catch(() => {});
           throw error;
         }).finally(() => signal?.removeEventListener("abort", report));
       };
@@ -411,6 +420,38 @@ function filtered(table, search) {
     const manual = tables.workout_sessions.find(s => s.notes?.includes("Frequência"));
     assert.ok(manual); assert.equal(manual.duration_minutes, 40); assert.equal(manual.sets_completed, 3); assert.ok(manual.active_calories > 0);
     assert.equal(tables.workout_sets.find(s => s.session_id === manual.id && s.set_number === 3).weight_kg, 25);
+    // Uma cópia residual do registro manual não pode recriar a sessão apagada.
+    const deletionSnapshot = { versao: 1, usuarioId: uid, planId: pid, planName: "Plano teste", sessao: { id: manual.id, plan_id: pid, started_at: manual.started_at }, exercicios: [{ id: eid, name: "Agachamento teste", sets_goal: 3, reps_goal: "8" }], series: tables.workout_sets.filter(row => row.session_id === manual.id).map(row => ({ chave: `${eid}:${row.set_number}`, exercise_id: eid, exercise_name: row.exercise_name, set_number: row.set_number, reps: String(row.reps), weight_kg: String(row.weight_kg), concluida: true, registroId: row.id })), intensidade: "moderada", esforco: "adequado", salvoEm: manual.finished_at, criacaoPendente: true, finalizacao: { finishedAt: manual.finished_at, notes: manual.notes, metricas: { duration_minutes: 40 } } };
+    await page.evaluate(({ key, snapshot }) => localStorage.setItem(key, JSON.stringify(snapshot)), { key: draftKey, snapshot: deletionSnapshot });
+    denyWorkoutDelete = true;
+    await page.getByText("Excluir treino", { exact: true }).click();
+    await page.getByText("Confirmar exclusão", { exact: true }).click();
+    await page.getByText(/O servidor não confirmou a exclusão deste treino/).waitFor();
+    assert.ok(tables.workout_sessions.some(row => row.id === manual.id), "Exclusão recusada não deve anunciar sucesso");
+    denyWorkoutDelete = false;
+    const otherSessions = tables.workout_sessions.filter(row => row.id !== manual.id).map(row => row.id).sort();
+    await page.getByText("Confirmar exclusão", { exact: true }).click();
+    await page.getByText("Treino excluído. Os outros registros desse dia foram mantidos.", { exact: true }).waitFor();
+    assert.equal(tables.workout_sessions.some(row => row.id === manual.id), false);
+    assert.deepEqual(tables.workout_sessions.map(row => row.id).sort(), otherSessions);
+    assert.equal(tables.workout_sets.some(row => row.session_id === manual.id), false);
+    assert.equal(tables.cardio_sessions.length, 1);
+    const deletionKey = `@treino-familia:exclusao:v1:${uid}:${manual.id}`;
+    assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).estado, deletionKey), "confirmada");
+    assert.equal(await page.getByText("Excluir treino", { exact: true }).count(), 0);
+    await page.getByRole("button", { name: "Ir para treinos" }).click();
+    await page.getByText("Frequência", { exact: true }).click();
+    await page.getByText("15", { exact: true }).click();
+    assert.equal(await page.getByText("Excluir treino", { exact: true }).count(), 0, "Não volta ao sair e retornar à Frequência");
+    // Uma aba antiga pode gravar o snapshot antigo diretamente; a nova versão deve descartá-lo.
+    await page.evaluate(({ key, snapshot }) => localStorage.setItem(key, JSON.stringify(snapshot)), { key: draftKey, snapshot: deletionSnapshot });
+    await page.reload(); await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
+    await page.waitForFunction(key => !localStorage.getItem(key), draftKey);
+    await page.getByText("Frequência", { exact: true }).click();
+    await page.getByText("15", { exact: true }).click();
+    assert.equal(await page.getByText("Excluir treino", { exact: true }).count(), 0, "Não volta após reabrir o app e sincronizar cópia antiga");
+    assert.equal(tables.workout_sessions.some(row => row.id === manual.id), false);
+    await page.screenshot({ path: path.join(output, "web-frequencia-exclusao-confirmada.png") });
     await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
@@ -420,7 +461,7 @@ function filtered(table, search) {
     assert.deepEqual(unexpectedFetch, [], "Falhas nativas do WebKit só são esperadas offline ou em requisições canceladas");
     offlineReports = nativeFetchReports.filter(report => report.offline).length;
     if (offlineReports) console.log(`WebKit: ${offlineReports} avisos nativos durante a queda de rede forçada; estado e retomada verificados.`);
-    console.log("OK UI — restaura e envia sessão ausente (1/18 séries), preserva horário e cópia, rede em voo, conflito legado, swipe-back, famílias, registro manual e cardio");
+    console.log("OK UI — exclusão confirmada sem reaparecer ao voltar/reabrir, RLS recusada, cópia antiga bloqueada, treino offline, histórico, swipe-back e famílias");
     await context.close();
   } catch (error) {
     if (activePage) { await activePage.screenshot({ path: path.join(output, "web-failure.png") }).catch(() => {}); console.error((await activePage.locator("body").innerText()).slice(0, 2000)); }
