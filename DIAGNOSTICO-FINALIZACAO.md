@@ -1,5 +1,17 @@
 # Conclusão de treino presa — 26/10/2026
 
+## Aviso persistente depois da confirmação no Supabase
+
+O relato seguinte informa que a sessão já aparece como concluída no servidor, mas a tela/barra/modal continua no celular. O código mantinha a atividade visual até terminar o envio das métricas e do modelo, não consultava sessões sem operações pendentes e não atualizava a tela quando outra parte do app confirmava a conclusão. Uma resposta atrasada também podia executar o retorno enquanto o usuário já estava em outra tela.
+
+O rascunho agora distingue `encerradaNoServidor` da fila de detalhes ainda pendentes. O status concluído da mesma sessão, consultado com o usuário autenticado, encerra a atividade visual. A barra ignora esses rascunhos; o processamento dos detalhes continua em segundo plano. Se a conclusão remota pertence a outro fluxo/horário ou ainda há operações locais que não podem ser aplicadas a uma sessão já encerrada, o snapshot integral é arquivado antes de retirar a pendência. Não sobrescreve o servidor nem envia alterações para uma sessão de outro usuário.
+
+A tela acompanha notificações do armazenamento e eventos de outra aba. Um marcador por sessão impede que uma tela antiga recrie o aviso. O editor e a revisão fecham antes da navegação, e o retorno só ocorre se a tela ainda estiver em foco. Respostas de telas ocultas não interrompem a Comunidade ou outro uso do app. O cartão inicial deixa de preservar o estado “Continuar treino” quando o rascunho local encerra, inclusive se nunca teve finalização local; uma consulta antiga também não pode restaurar um cartão de sessão já confirmada. A fila de detalhes é consultável na área de cópias enquanto estiver pendente; o cronômetro e a barra não continuam como se o treino estivesse em andamento.
+
+Testes novos cobrem cache sem finalização/sem pendências, sessão concluída em outro fluxo, horário nulo, falha temporária dos detalhes, cópia integral das diferenças e isolamento de usuário. A interface verifica a retirada automática sem recuperação manual, fecha o editor quando o servidor conclui a sessão, e mantém a Comunidade aberta enquanto uma requisição antiga de detalhes termina. A confirmação de um exercício isolado não encerra uma sessão que o servidor ainda informa como `em_andamento`.
+
+Consultas com sinal já cancelado não chegam mais a iniciar `fetch`. No teste WebKit, avisos nativos de rede são distinguidos de erros de JavaScript apenas quando há queda de rede forçada ou comprovação de cancelamento pelo sinal da requisição; erros de acesso online sem esse cancelamento continuam reprovando o teste.
+
 ## Correção complementar após o PR #4
 
 A imagem enviada após o merge confirma que a atualização chegou ao iPhone, mas o fluxo anterior não resolve o envio quando não existe uma conclusão válida no servidor. A ação implementada no PR #4 apenas aceitava uma conclusão remota já existente; não restaurava uma sessão ausente nem reparava um registro incompleto. A imagem, sozinha, não distingue sessão ausente de estado/plano/horário inconsistente.
@@ -36,7 +48,7 @@ Não há service worker no projeto. O HTML da raiz usa revalidação e os bundle
 
 ## Validação
 
-Executados com sucesso: `npm run check` (tipos, lint sem erros e 10 arquivos de testes), `npm run build:web`, `npm run test:ui` com Chromium e com `SMOKE_BROWSER=webkit`. O lint registra 43 avisos nas áreas já existentes. A integração contínua executa os dois navegadores.
+Executados com sucesso: `npm run check` (tipos, lint sem erros e 11 arquivos de testes), `npm run build:web`, `npm run test:ui` com Chromium e com `SMOKE_BROWSER=webkit`. O lint registra 43 avisos nas áreas já existentes. A integração contínua executa os dois navegadores.
 
 Os testes de regressão cobrem conclusão com confirmação de série em voo; snapshots antigos; primeiro horário preservado; conflito com outro horário remoto; bloqueio de outra conta; sessão ausente, ativa ou sem data; falha de backup; cópia íntegra; isolamento de usuários; e nova sessão após a recuperação. O teste de rede confere aborto real, remoção do timer e cancelamento externo.
 
@@ -44,4 +56,4 @@ O teste de interface usa conta e backend fictícios e intercepta todas as requis
 
 ## Conferência após publicar
 
-No iPhone afetado, abrir o treino pendente e usar **Enviar treino salvo neste aparelho** para restaurar/retomar o envio. Conferir o Histórico e a cópia local depois da confirmação. **Usar conclusão do servidor e guardar cópia local** é uma alternativa apenas para aceitar uma conclusão que já exista remotamente; não envia diferenças locais. Se houver erro de permissão, plano ausente ou outra conclusão diferente, a cópia ativa permanece intacta e a tela explica o motivo.
+Após atualizar o app, uma sessão já concluída no Supabase é reconhecida automaticamente e deixa de manter tela/modal/barra de treino ativo. Conferir o Histórico e eventuais cópias locais. Se a sessão ainda estiver ausente/incompleta no servidor, **Enviar treino salvo neste aparelho** continua disponível para restaurar/retomar o envio. Dados reais do celular não foram acessados nem apagados nesta investigação.

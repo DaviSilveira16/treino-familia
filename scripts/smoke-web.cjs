@@ -29,6 +29,7 @@ const tables = {
 };
 let backendOffline = false, feedPages = 0;
 let holdSync = false, releaseSync;
+let holdDetailsSid = null, releaseDetails;
 let releasePost, releaseFeed, holdPost = false, holdFeedFamily = null, postCounter = 0;
 const server = http.createServer((req, res) => {
   let requestPath; try { requestPath = decodeURIComponent(new URL(req.url, "http://localhost").pathname); } catch { res.writeHead(400).end(); return; }
@@ -61,20 +62,29 @@ function filtered(table, search) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     let phase = "initial";
     let forcedOffline = false, offlineReports = 0;
+    const cancelledRequests = new Set(), nativeFetchReports = [], fetchFailures = [];
+    await context.exposeBinding("__smokeCancelledFetch", (_, url) => { cancelledRequests.add(url); });
+    await context.exposeBinding("__smokeFetchFailure", (_, failure) => { fetchFailures.push(failure); });
     const setOffline = async value => { forcedOffline = value; await context.setOffline(value); };
     const errors = []; const page = await context.newPage(); activePage = page; page.on("pageerror", error => {
       // WebKit relata a falha nativa de fetch como ErrorEvent ao forçar offline,
       // mesmo quando a rejeição é tratada. Não confundir com erro de JS/CORS online.
-      if (process.env.SMOKE_BROWSER === "webkit" && forcedOffline
-        && (error.stack || "").includes(`Fetch API cannot load ${supabaseUrl}/`)
-        && error.message.endsWith("due to access control checks.")) { offlineReports++; return; }
+      const nativeUrl = (error.stack || "").match(/Fetch API cannot load (https?:\/\/\S+) due to access control checks\./)?.[1];
+      if (process.env.SMOKE_BROWSER === "webkit" && nativeUrl?.startsWith(`${supabaseUrl}/`)) {
+        nativeFetchReports.push({ url: nativeUrl, offline: forcedOffline, at: Date.now() }); return;
+      }
       errors.push(error.message); console.error("PAGE ERROR", phase, error.stack || error.message);
     }); page.on("dialog", dialog => dialog.accept());
+    page.on("requestfailed", request => {
+      const reason = request.failure()?.errorText || "";
+      if (/cancelled|canceled|ERR_ABORTED/i.test(reason)) cancelledRequests.add(request.url());
+      else if (!forcedOffline) console.error("REQUEST FAILED", phase, new URL(request.url()).pathname, reason);
+    });
     await context.route("**/*", async route => {
       const request = route.request(), url = new URL(request.url());
       if (url.origin === origin) return route.continue();
       if (!url.hostname.endsWith(".supabase.co")) return route.abort();
-      const headers = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS", "content-type": "application/json" };
+      const headers = { "access-control-allow-origin": origin, "access-control-allow-credentials": "true", "access-control-allow-headers": request.headers()["access-control-request-headers"] || "authorization,apikey,content-type,x-client-info,prefer,range,accept,content-profile,accept-profile", "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS", "content-type": "application/json" };
       if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
       // Simula serviço indisponível com CORS válido; setOffline cobre a queda real de rede.
       if (backendOffline) return route.fulfill({ status: 503, json: { message: "Serviço temporariamente indisponível" }, headers });
@@ -102,6 +112,9 @@ function filtered(table, search) {
       }
       if (["POST", "PATCH"].includes(request.method())) {
         const body = request.postDataJSON();
+        if (table === "workout_sessions" && request.method() === "PATCH" && !body.status && url.searchParams.get("id") === `eq.${holdDetailsSid}`) {
+          holdDetailsSid = null; await new Promise(resolve => { releaseDetails = resolve; });
+        }
         if (table === "community_posts" && request.method() === "POST") {
           if (holdPost) { holdPost = false; await new Promise(resolve => { releasePost = resolve; }); }
           Object.assign(body, { id: `post-novo-${++postCounter}`, created_at: new Date().toISOString() });
@@ -121,6 +134,21 @@ function filtered(table, search) {
     const draftKey = `@treino-familia:rascunho:v1:${uid}:${pid}`;
     await context.addInitScript(({ key, auth, draftKey, uid, pid, sid, eid, start }) => {
       Object.defineProperty(navigator, "standalone", { configurable: true, value: true });
+      // Comprova cancelamento pelo sinal real, inclusive quando o WebKit não
+      // emite requestfailed por ter cancelado antes de criar a requisição HTTP.
+      const nativeFetch = window.fetch.bind(window);
+      window.fetch = (input, init) => {
+        const signal = init?.signal || (typeof input === "object" && input !== null && "signal" in input ? input.signal : null);
+        const url = typeof input === "object" && input !== null && "url" in input ? input.url : new URL(String(input), location.href).href;
+        const offlineAtStart = navigator.onLine === false;
+        const report = () => { void window.__smokeCancelledFetch(url).catch(() => {}); };
+        if (signal?.aborted) report();
+        else signal?.addEventListener("abort", report, { once: true });
+        return nativeFetch(input, init).catch(error => {
+          void window.__smokeFetchFailure({ url, offline: offlineAtStart, aborted: Boolean(signal?.aborted), at: Date.now(), name: error.name }).catch(() => {});
+          throw error;
+        }).finally(() => signal?.removeEventListener("abort", report));
+      };
       localStorage.setItem(key, JSON.stringify(auth));
       if (!localStorage.getItem("@smoke:rascunho-inicial")) {
         localStorage.setItem(draftKey, JSON.stringify({ versao: 1, usuarioId: uid, planId: pid, planName: "Plano teste", sessao: { id: sid, plan_id: pid, started_at: start }, exercicios: [{ id: eid, name: "Agachamento teste", sets_goal: 2, reps_goal: "8-12" }], series: [1, 2].map(set_number => ({ chave: `${eid}:${set_number}`, exercise_id: eid, exercise_name: "Agachamento teste", set_number, reps: "10", weight_kg: "20", concluida: false })), intensidade: "moderada", esforco: "adequado", salvoEm: start, descanso: { fimEm: Date.now() + 90000, pausado: false, segundosPausados: 0, duracao: 90 } }));
@@ -197,13 +225,9 @@ function filtered(table, search) {
       localStorage.setItem(draftKey, JSON.stringify({ versao: 1, usuarioId: uid, planId: pid, planName: "Plano teste", sessao: { id: conflictSid, plan_id: pid, started_at: start }, exercicios: [{ id: eid, name: "Agachamento teste", sets_goal: 2, reps_goal: "8-12" }], series: [{ chave: `${eid}:1`, exercise_id: eid, exercise_name: "Agachamento teste", set_number: 1, reps: "8", weight_kg: "300", concluida: true }], intensidade: "moderada", esforco: "adequado", salvoEm: start, finalizacao: { finishedAt: localFinish, notes: "Cópia do vídeo", metricas: { duration_minutes: 3 } }, conflitoSincronizacao: true, erroSincronizacao: "Esta sessão foi encerrada ou alterada em outro aparelho." }));
     }, { draftKey, uid, pid, eid, conflictSid, start: active.started_at, localFinish });
     await page.reload();
-    await page.getByRole("button", { name: /Conclusão pendente: Plano teste/ }).click();
-    const recover = page.getByRole("button", { name: "Usar conclusão do servidor e guardar cópia local", exact: true });
-    await recover.waitFor();
-    assert.equal(await page.getByText("Enviar minha versão (substituir no servidor)", { exact: true }).count(), 0);
-    await page.screenshot({ path: path.join(output, "web-recuperar-conclusao.png") });
-    await recover.click();
     await page.waitForFunction(key => !localStorage.getItem(key), draftKey);
+    await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /Conclusão pendente: Plano teste/ }).count(), 0, "Conclusão remota dispensa recuperação manual");
     assert.equal(JSON.stringify(tables), serverBefore, "Recuperar não escreve no Supabase");
     const backupKey = `@treino-familia:recuperacao:v1:${uid}:${pid}:${conflictSid}`;
     const preserved = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), backupKey);
@@ -252,8 +276,18 @@ function filtered(table, search) {
     await page.getByRole("button", { name: "Usar conclusão do servidor e guardar cópia local", exact: true }).click();
     await page.getByText(/Esta sessão não foi encontrada no servidor/).waitFor();
     await page.screenshot({ path: path.join(output, "web-sessao-ausente-reenvio.png") });
+    holdDetailsSid = missingSid;
     await page.getByRole("button", { name: "Enviar treino salvo neste aparelho", exact: true }).click();
+    await page.waitForFunction(key => Boolean(JSON.parse(localStorage.getItem(key) || "null")?.encerradaNoServidor), draftKey);
+    await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /Conclusão pendente: Plano teste/ }).count(), 0, "Detalhes em voo não mantêm a barra ativa");
+    await page.getByRole("button", { name: "Abrir comunidade da família" }).click();
+    await page.getByRole("textbox", { name: "Texto para a família selecionada", exact: true }).waitFor();
+    assert.ok(releaseDetails, "Detalhes devem continuar na fila depois de fechar a tela ativa");
+    releaseDetails();
     await page.waitForFunction(key => !localStorage.getItem(key), draftKey);
+    await page.getByRole("textbox", { name: "Texto para a família selecionada", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Ir para treinos" }).click();
     const restored = tables.workout_sessions.filter(row => row.id === missingSid);
     assert.equal(restored.length, 1); assert.equal(restored[0].status, "concluido");
     assert.equal(restored[0].started_at, missingStart); assert.equal(restored[0].finished_at, missingFinish); assert.equal(restored[0].volume_kg, 2400);
@@ -271,6 +305,29 @@ function filtered(table, search) {
     await page.getByText("300", { exact: true }).waitFor();
     await page.screenshot({ path: path.join(output, "web-treino-reenviado-historico.png") });
     await page.getByRole("button", { name: "Ir para treinos" }).click();
+    // Sessão concluída fora desta tela, enquanto o editor do treino está aberto.
+    phase = "external completion";
+    const externalSid = "88888888-8888-4888-8888-888888888888";
+    const externalStart = new Date(now - 3 * 86400000).toISOString();
+    const externalSession = { id: externalSid, user_id: uid, plan_id: pid, started_at: externalStart, status: "em_andamento", finished_at: null };
+    tables.workout_sessions.push(externalSession);
+    tables.workout_sets.push({ id: "external-set", user_id: uid, session_id: externalSid, exercise_id: eid, exercise_name: "Agachamento teste", set_number: 1, reps: 8, weight_kg: 20 });
+    await page.evaluate(({ draftKey, uid, pid, eid, externalSid, externalStart }) => {
+      localStorage.setItem(draftKey, JSON.stringify({ versao: 1, usuarioId: uid, planId: pid, planName: "Plano teste", sessao: { id: externalSid, plan_id: pid, started_at: externalStart }, exercicios: [{ id: eid, name: "Agachamento teste", sets_goal: 2, reps_goal: "8" }], series: [1, 2].map(set_number => ({ chave: `${eid}:${set_number}`, exercise_id: eid, exercise_name: "Agachamento teste", set_number, reps: "8", weight_kg: "20", concluida: set_number === 1 })), intensidade: "moderada", esforco: "adequado", salvoEm: externalStart }));
+    }, { draftKey, uid, pid, eid, externalSid, externalStart });
+    await page.reload();
+    await page.getByRole("button", { name: /Continuar treino: Plano teste/ }).click();
+    await page.getByRole("button", { name: "Adicionar exercício durante o treino", exact: true }).click();
+    await page.getByRole("textbox", { name: "Nome do exercício/aparelho", exact: true }).waitFor();
+    externalSession.status = "concluido"; externalSession.finished_at = new Date(Date.parse(externalStart) + 178000).toISOString();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.waitForFunction(key => !localStorage.getItem(key), draftKey);
+    await page.getByRole("textbox", { name: "Nome do exercício/aparelho", exact: true }).waitFor({ state: "hidden" });
+    await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /Continuar treino: Plano teste/ }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Continuar Plano teste", exact: true }).count(), 0, "O cartão inicial também deve abandonar a sessão encerrada");
+    assert.equal(await page.getByText(/Seu treino está em andamento/).count(), 0);
+    await page.screenshot({ path: path.join(output, "web-concluido-sem-aviso.png") });
     phase = "community";
     await page.getByRole("button", { name: "Abrir comunidade da família" }).click();
     await page.getByText("Ver mais publicações", { exact: true }).click();
@@ -297,6 +354,7 @@ function filtered(table, search) {
     assert.equal(await page.getByRole("button", { name: "Abrir família Família teste", exact: true }).isDisabled(), true);
     while (!releasePost) await page.waitForTimeout(10); releasePost();
     await page.getByText("Mensagem exclusiva da academia", { exact: true }).waitFor();
+    await page.getByText("Publicar em Família da academia", { exact: true }).waitFor();
     assert.equal(tables.community_posts.find(p => p.content === "Mensagem exclusiva da academia").family_id, familyB.id);
     await page.getByRole("button", { name: "Abrir família Família teste", exact: true }).click();
     await page.getByRole("button", { name: "Publicar em Família teste", exact: true }).waitFor();
@@ -356,6 +414,11 @@ function filtered(table, search) {
     await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
+    const unexpectedFetch = nativeFetchReports.filter(report => !report.offline && !cancelledRequests.has(report.url)
+      && !fetchFailures.some(failure => failure.url === report.url && (failure.offline || failure.aborted) && Math.abs(failure.at - report.at) < 1000));
+    if (unexpectedFetch.length) console.error("NATIVE FETCH DIAGNOSTIC", { reports: nativeFetchReports, cancelled: [...cancelledRequests], failures: fetchFailures });
+    assert.deepEqual(unexpectedFetch, [], "Falhas nativas do WebKit só são esperadas offline ou em requisições canceladas");
+    offlineReports = nativeFetchReports.filter(report => report.offline).length;
     if (offlineReports) console.log(`WebKit: ${offlineReports} avisos nativos durante a queda de rede forçada; estado e retomada verificados.`);
     console.log("OK UI — restaura e envia sessão ausente (1/18 séries), preserva horário e cópia, rede em voo, conflito legado, swipe-back, famílias, registro manual e cardio");
     await context.close();

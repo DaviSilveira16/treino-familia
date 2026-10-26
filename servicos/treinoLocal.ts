@@ -56,6 +56,8 @@ export type TreinoRascunho = {
   conflitoSessao?: boolean;
   /** Reenvio explícito permite reparar apenas uma conclusão incompleta. */
   reenvioSolicitado?: boolean;
+  /** Estado da sessão, independente da fila de detalhes/modelo ainda não enviada. */
+  encerradaNoServidor?: { finishedAt: string | null };
   criacaoPendente?: boolean;
 };
 
@@ -118,7 +120,7 @@ export function gravarRascunho(rascunho: TreinoRascunho): Promise<void> {
       const texto = await AsyncStorage.getItem(chave(rascunho.usuarioId, rascunho.planId));
       const atual = texto ? JSON.parse(texto) as TreinoRascunho : null;
       // Depois da conclusão, só a fila atômica de sincronização altera os dados.
-      if (atual?.sessao.id === rascunho.sessao.id && atual.finalizacao) return;
+      if (atual?.sessao.id === rascunho.sessao.id && (atual.finalizacao || atual.encerradaNoServidor)) return;
       await AsyncStorage.setItem(
         chave(rascunho.usuarioId, rascunho.planId),
         JSON.stringify(rascunho),
@@ -169,7 +171,10 @@ export function atualizarRascunho(
     const atual = JSON.parse(texto) as TreinoRascunho;
     if (atual.usuarioId !== usuarioId || atual.planId !== planId) return null;
     const proximo = alterar(atual);
-    if (proximo) await AsyncStorage.setItem(chave(usuarioId, planId), JSON.stringify(proximo));
+    if (proximo) {
+      await AsyncStorage.setItem(chave(usuarioId, planId), JSON.stringify(proximo));
+      if (proximo.encerradaNoServidor) await AsyncStorage.setItem(chaveEncerrada(usuarioId, proximo.sessao.id), "1");
+    }
     else {
       await AsyncStorage.setItem(chaveEncerrada(usuarioId, atual.sessao.id), "1");
       await AsyncStorage.removeItem(chave(usuarioId, planId));
@@ -183,6 +188,16 @@ export function atualizarRascunho(
 
 function chaveEncerrada(usuarioId: string, sessaoId: string) {
   return `@treino-familia:encerrada:v1:${usuarioId}:${sessaoId}`;
+}
+
+export async function sessaoFoiEncerrada(usuarioId: string, sessaoId: string): Promise<boolean> {
+  await fila.catch(() => {});
+  return Boolean(await AsyncStorage.getItem(chaveEncerrada(usuarioId, sessaoId)));
+}
+
+export function marcarSessaoEncerrada(usuarioId: string, planId: string, sessaoId: string, finishedAt: string | null) {
+  return atualizarRascunho(usuarioId, planId, atual => atual.sessao.id !== sessaoId ? atual
+    : { ...atual, encerradaNoServidor: { finishedAt } });
 }
 
 /** Acrescenta a conclusão à versão mais recente, incluindo confirmações em voo. */
@@ -239,8 +254,13 @@ export async function listarCopiasTreino(usuarioId: string, planId: string): Pro
   const prefixo = `@treino-familia:recuperacao:v1:${usuarioId}:${planId}:`;
   const chaves = (await AsyncStorage.getAllKeys()).filter(item => item.startsWith(prefixo));
   const textos = await Promise.all(chaves.map(item => AsyncStorage.getItem(item)));
-  return textos.filter((item): item is string => Boolean(item)).map(item => JSON.parse(item))
+  const copias: CopiaTreino[] = textos.filter((item): item is string => Boolean(item)).map(item => JSON.parse(item))
     .filter(item => item.rascunho?.usuarioId === usuarioId && item.rascunho?.planId === planId);
+  const atual = await lerRascunho(usuarioId, planId);
+  if (atual?.encerradaNoServidor && !copias.some(copia => copia.rascunho.sessao.id === atual.sessao.id)) {
+    copias.push({ rascunho: atual, remota: { plan_id: planId, finished_at: atual.encerradaNoServidor.finishedAt }, arquivadoEm: atual.salvoEm });
+  }
+  return copias;
 }
 
 export async function listarRascunhos(usuarioId: string): Promise<TreinoRascunho[]> {
@@ -253,7 +273,7 @@ export async function listarRascunhos(usuarioId: string): Promise<TreinoRascunho
 }
 
 export async function lerResumoTreinoAtivo(usuarioId: string): Promise<ResumoTreinoAtivo | null> {
-  const [rascunho] = await listarRascunhos(usuarioId);
+  const rascunho = (await listarRascunhos(usuarioId)).find(item => !item.encerradaNoServidor);
   return rascunho ? {
     planId: rascunho.planId, planName: rascunho.planName,
     sessaoId: rascunho.sessao.id, startedAt: rascunho.sessao.started_at,

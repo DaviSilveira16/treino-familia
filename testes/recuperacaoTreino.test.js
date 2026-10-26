@@ -27,9 +27,7 @@ const sync = carregar("servicos/treinoSincronizacao.ts", { "../supabase": backen
   let atual = await local.lerRascunho("u1", "p1");
   assert.equal(atual.finalizacao.finishedAt, fim);
   assert.equal(atual.series[0].pendente, undefined, "Autosave antigo não restaura envio confirmado");
-  const conflito = await sync.sincronizarRascunho("u1", "p1");
-  assert.equal(conflito.conflitoSessao, true, "Estado do vídeo deve oferecer recuperação de sessão");
-  assert.equal((await sync.sincronizarRascunho("u1", "p1", true)).conflitoSessao, true, "Sobrescrever série não reabre sessão");
+  assert.equal(sync.situacaoConclusao(remota, atual), "conflito", "Horários diferentes não autorizam sobrescrita da conclusão remota");
   autenticado = "u2";
   const antes = leituras;
   assert.ok((await sync.recuperarConclusaoRemota("u1", "p1")).erro);

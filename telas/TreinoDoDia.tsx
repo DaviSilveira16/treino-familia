@@ -9,7 +9,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabase";
 import { obterRevisaoDeDados } from "../servicos/revisaoDados";
-import { assinarRascunhos, lerResumoTreinoAtivo } from "../servicos/treinoLocal";
+import { assinarRascunhos, lerResumoTreinoAtivo, sessaoFoiEncerrada } from "../servicos/treinoLocal";
 
 type Props = {
   onAbrirProgramacao: () => void;
@@ -21,7 +21,7 @@ type TreinoHoje = {
   nome: string;
   definido: boolean;
 };
-type TreinoContinuar = { planId: string; planName: string; finalizacaoPendente?: boolean; concluidas?: number; total?: number };
+type TreinoContinuar = { planId: string; planName: string; sessaoId: string; origemLocal?: boolean; finalizacaoPendente?: boolean; concluidas?: number; total?: number };
 
 function obterCorTransparente(cor: string, transparencia: string) {
   if (/^#[0-9A-Fa-f]{6}$/.test(cor)) {
@@ -51,7 +51,11 @@ export default function TreinoDoDia({
 }: Props) {
   const [treino, setTreino] = useState<TreinoHoje | null>(null);
   const [carregando, setCarregando] = useState(true);
-  const [continuar, setContinuar] = useState<TreinoContinuar | null>(null);
+  const [continuar, setContinuarEstado] = useState<TreinoContinuar | null>(null);
+  const continuarRef = useRef<TreinoContinuar | null>(null);
+  const setContinuar = useCallback((valor: TreinoContinuar | null) => {
+    continuarRef.current = valor; setContinuarEstado(valor);
+  }, []);
   const usuarioRef = useRef("");
   const ultimaConsultaRef = useRef(0);
   const ultimaRevisaoRef = useRef(-1);
@@ -62,10 +66,14 @@ export default function TreinoDoDia({
     if (!id) return;
     const resumo = await lerResumoTreinoAtivo(id);
     if (usuarioRef.current !== id) return;
-    if (resumo) setContinuar({ planId: resumo.planId, planName: resumo.planName,
+    if (resumo) setContinuar({ planId: resumo.planId, planName: resumo.planName, sessaoId: resumo.sessaoId, origemLocal: true,
       finalizacaoPendente: resumo.finalizacaoPendente, concluidas: resumo.seriesConcluidas, total: resumo.totalSeries });
-    else setContinuar((anterior) => anterior?.finalizacaoPendente ? null : anterior);
-  }, []);
+    else {
+      const anterior = continuarRef.current;
+      if (anterior && (anterior.origemLocal || await sessaoFoiEncerrada(id, anterior.sessaoId))
+        && usuarioRef.current === id && continuarRef.current === anterior) setContinuar(null);
+    }
+  }, [setContinuar]);
   useEffect(() => assinarRascunhos(() => { void atualizarLocal().catch(() => {}); }), [atualizarLocal]);
 
   const carregarTreinoHoje = useCallback(async () => {
@@ -91,7 +99,8 @@ export default function TreinoDoDia({
         if (!erroAtiva && ativa?.plan_id) {
           const { data: plano } = await supabase.from("workout_plans").select("name")
             .eq("id", ativa.plan_id).eq("user_id", usuarioData.user.id).maybeSingle();
-          if (plano?.name) setContinuar({ planId: ativa.plan_id, planName: plano.name });
+          if (plano?.name && !await sessaoFoiEncerrada(usuarioData.user.id, ativa.id)) setContinuar({ planId: ativa.plan_id, planName: plano.name, sessaoId: ativa.id });
+          else setContinuar(null);
         } else if (!erroAtiva) setContinuar(null);
       }
 
@@ -150,7 +159,7 @@ export default function TreinoDoDia({
     } finally {
       setCarregando(false);
     }
-  }, [atualizarLocal]);
+  }, [atualizarLocal, setContinuar]);
 
   useFocusEffect(
     useCallback(() => {

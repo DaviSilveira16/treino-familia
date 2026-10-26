@@ -1,7 +1,8 @@
 const assert = require("node:assert/strict");
 const { carregar } = require("./suporte.cjs");
-let sinalRecebido, abortou = 0;
+let sinalRecebido, abortou = 0, chamadas = 0;
 const { requisicaoComPrazo } = carregar("servicos/requisicaoComPrazo.ts", {}, { Request, fetch: async (input, init) => {
+  chamadas++;
   sinalRecebido = init.signal;
   if (input === "ok") return { ok: true };
   return new Promise((resolve, reject) => {
@@ -20,7 +21,9 @@ const { requisicaoComPrazo } = carregar("servicos/requisicaoComPrazo.ts", {}, { 
   const externo = new AbortController();
   const tarefa = requisicaoComPrazo("travada", { signal: externo.signal }, 1000);
   externo.abort(); await assert.rejects(tarefa, /Abortada/);
-  await assert.rejects(requisicaoComPrazo("travada", { signal: externo.signal }, 1000), /Abortada/);
-  assert.equal(abortou, 3);
+  const antes = chamadas;
+  await assert.rejects(requisicaoComPrazo("travada", { signal: externo.signal }, 1000), { name: "AbortError" });
+  assert.equal(chamadas, antes, "Sinal já cancelado não inicia fetch no Safari");
+  assert.equal(abortou, 2);
   console.log("OK — prazo de rede, limpeza de timer e cancelamento externo preservado");
 })().catch(error => { console.error(error); process.exitCode = 1; });
