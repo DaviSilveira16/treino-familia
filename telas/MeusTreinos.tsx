@@ -17,7 +17,7 @@ import RepetirCarga from "../componentes/RepetirCarga";
 import * as ImagePicker from "expo-image-picker";
 import type { ImagePickerAsset, ImagePickerOptions } from "expo-image-picker";
 import { prepararFotoExercicio } from "../servicos/fotoExercicio";
-import { selecionarImagemDaGaleriaWeb } from "../servicos/seletorGaleriaWeb";
+import { EntradaGaleriaWeb } from "../componentes/SeletorGaleriaWeb";
 import { supabase } from "../supabase";
 import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import {
@@ -748,27 +748,6 @@ export default function MeusTreinos({
   function escolherFonteFoto(origem: "biblioteca" | "camera") {
     const exercicio = origemFotoAberta;
     if (!exercicio) return;
-
-    if (origem === "biblioteca" && Platform.OS === "web") {
-      // O seletor é aberto com input.click() diretamente no toque do usuário,
-      // evitando o clique sintético usado pelo expo-image-picker web.
-      const selecao = selecionarImagemDaGaleriaWeb();
-      setOrigemFotoAberta(null);
-      void selecao
-        .then((imagem) => {
-          if (imagem)
-            void adicionarOuTrocarFoto(exercicio, "biblioteca", imagem);
-        })
-        .catch((erro: unknown) => {
-          mostrarMensagem(
-            "Não foi possível abrir a galeria",
-            erro instanceof Error
-              ? erro.message
-              : "Tente novamente pelo navegador.",
-          );
-        });
-      return;
-    }
 
     setOrigemFotoAberta(null);
     if (
@@ -1688,19 +1667,15 @@ export default function MeusTreinos({
                 </Text>
               </View>
             )}
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel="Escolher uma foto da galeria"
-              onPress={() => escolherFonteFoto("biblioteca")}
-              disabled={Boolean(
-                origemFotoAberta && fotoCarregandoId === origemFotoAberta.id,
-              )}
+            <View
               style={{
                 minHeight: 50,
                 justifyContent: "center",
                 padding: 12,
                 borderRadius: 10,
                 backgroundColor: corTema,
+                position: "relative",
+                overflow: "hidden",
                 opacity:
                   origemFotoAberta && fotoCarregandoId === origemFotoAberta.id
                     ? 0.65
@@ -1718,7 +1693,45 @@ export default function MeusTreinos({
                   ? "Escolher outra foto na galeria"
                   : "Escolher foto da galeria"}
               </Text>
-            </TouchableOpacity>
+              {Platform.OS === "web" ? (
+                <EntradaGaleriaWeb
+                  disabled={Boolean(
+                    origemFotoAberta &&
+                    fotoCarregandoId === origemFotoAberta.id,
+                  )}
+                  onSelecionar={(imagem) => {
+                    const exercicio = origemFotoAberta;
+                    if (!exercicio) {
+                      URL.revokeObjectURL(imagem.uri);
+                      return;
+                    }
+                    setOrigemFotoAberta(null);
+                    void adicionarOuTrocarFoto(
+                      exercicio,
+                      "biblioteca",
+                      imagem,
+                    ).finally(() => URL.revokeObjectURL(imagem.uri));
+                  }}
+                  onErro={(erro) =>
+                    mostrarMensagem(
+                      "Não foi possível escolher a foto",
+                      erro.message,
+                    )
+                  }
+                />
+              ) : (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Escolher uma foto da galeria"
+                  style={StyleSheet.absoluteFill}
+                  disabled={Boolean(
+                    origemFotoAberta &&
+                    fotoCarregandoId === origemFotoAberta.id,
+                  )}
+                  onPress={() => escolherFonteFoto("biblioteca")}
+                />
+              )}
+            </View>
             <TouchableOpacity
               accessibilityRole="button"
               onPress={() => escolherFonteFoto("camera")}

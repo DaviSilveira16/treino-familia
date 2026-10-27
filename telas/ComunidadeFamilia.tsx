@@ -14,7 +14,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
-import { selecionarImagemDaGaleriaWeb } from "../servicos/seletorGaleriaWeb";
+import { EntradaGaleriaWeb } from "../componentes/SeletorGaleriaWeb";
 import ImagemLeve from "./ImagemLeve";
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../supabase";
@@ -221,6 +221,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [textoPublicacao, setTextoPublicacao] = useState("");
   const [fotoSelecionada, setFotoSelecionada] =
     useState<ImagePicker.ImagePickerAsset | null>(null);
+  const familiaSelecaoFotoRef = useRef<string | null>(null);
   useEffect(() => {
     const uri = fotoSelecionada?.uri;
     return () => {
@@ -857,26 +858,6 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       return;
     const destino = familiaAtivaIdRef.current;
 
-    if (Platform.OS === "web") {
-      // Abrir a galeria no mesmo toque real do botão, sem aguardar outra Promise.
-      const selecao = selecionarImagemDaGaleriaWeb();
-      void selecao
-        .then((imagem) => {
-          if (imagem && destino === familiaAtivaIdRef.current) {
-            setFotoSelecionada(imagem);
-          }
-        })
-        .catch((problema: unknown) => {
-          avisar(
-            "Não foi possível abrir a galeria",
-            problema instanceof Error
-              ? problema.message
-              : "Tente novamente pelo navegador.",
-          );
-        });
-      return;
-    }
-
     void ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsMultipleSelection: false,
@@ -1416,20 +1397,61 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
             />
             {tipoPublicacao === "foto" ? (
               <View style={estilos.fotoArea}>
-                <TouchableOpacity
-                  style={[estilos.botaoSecundario, { borderColor: corTema }]}
-                  disabled={
-                    publicando ||
-                    atualizando ||
-                    criandoFamilia ||
-                    entrandoFamilia
-                  }
-                  onPress={() => void escolherFoto()}
+                <View
+                  style={[
+                    estilos.botaoSecundario,
+                    {
+                      borderColor: corTema,
+                      position: "relative",
+                      overflow: "hidden",
+                    },
+                  ]}
                 >
                   <Text style={{ color: corTema, fontWeight: "800" }}>
                     {fotoSelecionada ? "Trocar foto" : "Escolher foto"}
                   </Text>
-                </TouchableOpacity>
+                  {Platform.OS === "web" ? (
+                    <EntradaGaleriaWeb
+                      rotulo="Escolher foto para a publicação"
+                      disabled={
+                        publicando ||
+                        atualizando ||
+                        criandoFamilia ||
+                        entrandoFamilia
+                      }
+                      onAbrir={() => {
+                        familiaSelecaoFotoRef.current =
+                          familiaAtivaIdRef.current;
+                      }}
+                      onSelecionar={(imagem) => {
+                        if (
+                          familiaSelecaoFotoRef.current ===
+                          familiaAtivaIdRef.current
+                        ) {
+                          setFotoSelecionada(imagem);
+                        } else {
+                          URL.revokeObjectURL(imagem.uri);
+                        }
+                      }}
+                      onErro={(erro) =>
+                        avisar("Não foi possível escolher a foto", erro.message)
+                      }
+                    />
+                  ) : (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="Escolher foto para a publicação"
+                      style={StyleSheet.absoluteFill}
+                      disabled={
+                        publicando ||
+                        atualizando ||
+                        criandoFamilia ||
+                        entrandoFamilia
+                      }
+                      onPress={() => void escolherFoto()}
+                    />
+                  )}
+                </View>
                 {fotoSelecionada ? (
                   <Image
                     source={{ uri: fotoSelecionada.uri }}
