@@ -14,7 +14,6 @@ import {
 } from "react-native";
 import { Alert } from "../servicos/alerta";
 import RepetirCarga from "../componentes/RepetirCarga";
-import SeletorGaleriaWeb from "../componentes/SeletorGaleriaWeb";
 import * as ImagePicker from "expo-image-picker";
 import type { ImagePickerAsset, ImagePickerOptions } from "expo-image-picker";
 import { prepararFotoExercicio } from "../servicos/fotoExercicio";
@@ -750,8 +749,10 @@ export default function MeusTreinos({
     if (!exercicio) return;
 
     if (origem === "biblioteca" && Platform.OS === "web") {
-      // Na web, a entrada HTML visível ao toque (transparente) abre a galeria.
-      // Não usamos click() sintético porque alguns navegadores móveis bloqueiam.
+      // O ImagePicker é acionado diretamente no toque do botão, como exige o navegador.
+      // Chamamos antes de fechar o modal para preservar a ativação do usuário.
+      void adicionarOuTrocarFoto(exercicio, "biblioteca");
+      setOrigemFotoAberta(null);
       return;
     }
 
@@ -1666,58 +1667,37 @@ export default function MeusTreinos({
                 </Text>
               </View>
             )}
-            <SeletorGaleriaWeb
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Escolher uma foto da galeria"
+              onPress={() => escolherFonteFoto("biblioteca")}
               disabled={Boolean(
                 origemFotoAberta && fotoCarregandoId === origemFotoAberta.id,
               )}
-              onSelecionar={(imagem) => {
-                const exercicio = origemFotoAberta;
-                if (!exercicio) {
-                  URL.revokeObjectURL(imagem.uri);
-                  return;
-                }
-                setOrigemFotoAberta(null);
-                void adicionarOuTrocarFoto(
-                  exercicio,
-                  "biblioteca",
-                  imagem,
-                ).finally(() => URL.revokeObjectURL(imagem.uri));
+              style={{
+                minHeight: 50,
+                justifyContent: "center",
+                padding: 12,
+                borderRadius: 10,
+                backgroundColor: corTema,
+                opacity:
+                  origemFotoAberta && fotoCarregandoId === origemFotoAberta.id
+                    ? 0.65
+                    : 1,
               }}
             >
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel="Escolher uma foto da galeria"
-                onPress={() => {
-                  if (Platform.OS !== "web") escolherFonteFoto("biblioteca");
-                }}
-                disabled={Boolean(
-                  origemFotoAberta && fotoCarregandoId === origemFotoAberta.id,
-                )}
+              <Text
                 style={{
-                  minHeight: 50,
-                  justifyContent: "center",
-                  padding: 12,
-                  borderRadius: 10,
-                  backgroundColor: corTema,
-                  opacity:
-                    origemFotoAberta && fotoCarregandoId === origemFotoAberta.id
-                      ? 0.65
-                      : 1,
+                  color: "#101312",
+                  fontWeight: "800",
+                  textAlign: "center",
                 }}
               >
-                <Text
-                  style={{
-                    color: "#101312",
-                    fontWeight: "800",
-                    textAlign: "center",
-                  }}
-                >
-                  {origemFotoAberta?.photo_path
-                    ? "Escolher outra foto na galeria"
-                    : "Escolher foto da galeria"}
-                </Text>
-              </TouchableOpacity>
-            </SeletorGaleriaWeb>
+                {origemFotoAberta?.photo_path
+                  ? "Escolher outra foto na galeria"
+                  : "Escolher foto da galeria"}
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
               onPress={() => escolherFonteFoto("camera")}

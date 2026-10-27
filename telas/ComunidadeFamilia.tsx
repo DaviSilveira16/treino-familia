@@ -26,7 +26,6 @@ import {
   type CursorData,
 } from "../servicos/paginacaoHistorico";
 
-import SeletorGaleriaWeb from "../componentes/SeletorGaleriaWeb";
 import MinhasFamilias from "../componentes/MinhasFamilias";
 import {
   criarFamiliaComId,
@@ -858,6 +857,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
     const destino = familiaAtivaIdRef.current;
     const resultado = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
+      allowsMultipleSelection: false,
       allowsEditing: false,
       quality: 1,
       aspect: [4, 5],
@@ -1386,43 +1386,20 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
             />
             {tipoPublicacao === "foto" ? (
               <View style={estilos.fotoArea}>
-                <SeletorGaleriaWeb
+                <TouchableOpacity
+                  style={[estilos.botaoSecundario, { borderColor: corTema }]}
                   disabled={
                     publicando ||
                     atualizando ||
                     criandoFamilia ||
                     entrandoFamilia
                   }
-                  onSelecionar={(imagem) => {
-                    if (
-                      publicandoRef.current ||
-                      mutandoFamiliaRef.current ||
-                      carregandoInicialRef.current
-                    ) {
-                      if (imagem.uri.startsWith("blob:"))
-                        URL.revokeObjectURL(imagem.uri);
-                      return;
-                    }
-                    setFotoSelecionada(imagem);
-                  }}
+                  onPress={() => void escolherFoto()}
                 >
-                  <TouchableOpacity
-                    style={[estilos.botaoSecundario, { borderColor: corTema }]}
-                    disabled={
-                      publicando ||
-                      atualizando ||
-                      criandoFamilia ||
-                      entrandoFamilia
-                    }
-                    onPress={() => {
-                      if (Platform.OS !== "web") void escolherFoto();
-                    }}
-                  >
-                    <Text style={{ color: corTema, fontWeight: "800" }}>
-                      {fotoSelecionada ? "Trocar foto" : "Escolher foto"}
-                    </Text>
-                  </TouchableOpacity>
-                </SeletorGaleriaWeb>
+                  <Text style={{ color: corTema, fontWeight: "800" }}>
+                    {fotoSelecionada ? "Trocar foto" : "Escolher foto"}
+                  </Text>
+                </TouchableOpacity>
                 {fotoSelecionada ? (
                   <Image
                     source={{ uri: fotoSelecionada.uri }}
