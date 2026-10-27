@@ -1277,25 +1277,28 @@ export default function MeusTreinos({
                           style={estilos.botaoAcao}
                           onPress={() => iniciarEdicao(exercicio)}
                         >
-                          <Text style={estilos.textoAcao}>Editar</Text>
+                          <Text numberOfLines={1} style={estilos.textoAcao}>
+                            Editar
+                          </Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={estilos.botaoAcao}
                           onPress={() => abrirRegistroCarga(exercicio)}
                         >
-                          <Text style={estilos.textoAcao}>Cargas</Text>
+                          <Text numberOfLines={1} style={estilos.textoAcao}>
+                            Cargas
+                          </Text>
                         </TouchableOpacity>
                         {Platform.OS === "web" ? (
                           <EntradaGaleriaWeb
                             rotulo={`Escolher foto de ${exercicio.name}`}
                             texto={
                               fotoCarregandoId === exercicio.id
-                                ? "Enviando…"
-                                : exercicio.photo_path
-                                  ? "Trocar foto"
-                                  : "Foto"
+                                ? "…"
+                                : "Foto"
                             }
                             corTema={corTema}
+                            compacto
                             disabled={Boolean(fotoCarregandoId)}
                             onSelecionar={(imagem) => {
                               void adicionarOuTrocarFoto(
@@ -1319,20 +1322,20 @@ export default function MeusTreinos({
                             accessibilityRole="button"
                             accessibilityLabel="Escolher câmera ou fototeca"
                           >
-                            <Text style={estilos.textoAcao}>
+                            <Text numberOfLines={1} style={estilos.textoAcao}>
                               {fotoCarregandoId === exercicio.id
-                                ? "Enviando foto…"
-                                : exercicio.photo_path
-                                  ? "Trocar foto"
-                                  : "Adicionar foto"}
+                                ? "…"
+                                : "Foto"}
                             </Text>
                           </TouchableOpacity>
                         )}
                         <TouchableOpacity
-                          style={estilos.botaoExcluir}
+                          style={[estilos.botaoAcao, estilos.botaoExcluir]}
                           onPress={() => excluirExercicio(exercicio)}
                         >
-                          <Text style={estilos.textoExcluir}>Excluir</Text>
+                          <Text numberOfLines={1} style={estilos.textoExcluir}>
+                            Excluir
+                          </Text>
                         </TouchableOpacity>
                       </View>
 
@@ -1908,19 +1911,37 @@ const criarEstilos = (corTema: string) =>
     acoesExercicio: {
       width: "100%",
       flexDirection: "row",
-      justifyContent: "flex-end",
+      alignItems: "stretch",
       gap: 6,
-      flexWrap: "wrap",
     },
     botaoAcao: {
-      paddingVertical: 8,
-      paddingHorizontal: 10,
-      backgroundColor: `${corTema}20`,
-      borderRadius: 8,
+      flex: 1,
+      minWidth: 0,
+      minHeight: 44,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingVertical: 9,
+      paddingHorizontal: 6,
+      borderWidth: 1,
+      borderColor: `${corTema}55`,
+      backgroundColor: `${corTema}14`,
+      borderRadius: 10,
     },
-    textoAcao: { color: corTema, fontSize: 12, fontWeight: "700" },
-    botaoExcluir: { paddingVertical: 8, paddingHorizontal: 10 },
-    textoExcluir: { color: "#FF8A8A", fontSize: 12, fontWeight: "700" },
+    textoAcao: {
+      color: corTema,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: "700",
+      textAlign: "center",
+    },
+    botaoExcluir: { borderColor: "#D75A5A55", backgroundColor: "#D75A5A14" },
+    textoExcluir: {
+      color: "#FF8A8A",
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: "700",
+      textAlign: "center",
+    },
     linhaBotoes: { flexDirection: "row", gap: 10, marginTop: 14 },
     botaoSecundario: {
       flex: 1,

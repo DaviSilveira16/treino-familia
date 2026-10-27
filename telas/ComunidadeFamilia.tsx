@@ -1393,12 +1393,10 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
               {tipoPublicacao === "foto" ? (
                 <View style={estilos.fotoArea}>
                   {Platform.OS === "web" ? (
-                    <View
-                      style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}
-                    >
+                    <View style={estilos.acoesFoto}>
                       <EntradaGaleriaWeb
                         rotulo="Escolher foto da comunidade"
-                        texto={fotoSelecionada ? "Trocar foto" : "Escolher foto"}
+                        texto={fotoSelecionada ? "Trocar foto" : "Galeria"}
                         corTema={corTema}
                         disabled={
                           publicando ||
@@ -1849,6 +1847,7 @@ const estilos = StyleSheet.create({
   iconeOpcao: { fontSize: 13 },
   opcaoTexto: { color: "#C8D1CB", fontSize: 12, fontWeight: "800" },
   fotoArea: { gap: 10 },
+  acoesFoto: { flexDirection: "row", alignItems: "stretch", gap: 8 },
   previewFoto: {
     width: "100%",
     height: 210,

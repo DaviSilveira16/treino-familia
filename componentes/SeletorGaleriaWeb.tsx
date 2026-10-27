@@ -11,6 +11,7 @@ type Props = {
   rotulo?: string;
   texto?: string;
   corTema?: string;
+  compacto?: boolean;
 };
 
 export function EntradaGaleriaWeb({
@@ -22,6 +23,7 @@ export function EntradaGaleriaWeb({
   rotulo = "Escolher foto",
   texto = "Adicionar foto",
   corTema = "#35D07F",
+  compacto = false,
 }: Props) {
   const limparRef = useRef<(() => void) | null>(null);
   useEffect(() => () => limparRef.current?.(), []);
@@ -44,19 +46,25 @@ export function EntradaGaleriaWeb({
       }}
       style={{
         display: "inline-flex",
+        boxSizing: "border-box",
+        appearance: "none",
+        flex: "1 1 0%",
+        minWidth: 0,
+        margin: 0,
         alignItems: "center",
         justifyContent: "center",
-        gap: 7,
+        gap: compacto ? 3 : 6,
         minHeight: 44,
-        padding: "9px 12px",
+        padding: compacto ? "9px 6px" : "9px 10px",
         border: `1px solid ${corTema}55`,
         borderRadius: 10,
         color: corTema,
         backgroundColor: `${corTema}14`,
         fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-        fontSize: 13,
+        fontSize: compacto ? 12 : 13,
         fontWeight: 700,
-        lineHeight: "20px",
+        lineHeight: compacto ? "18px" : "20px",
+        whiteSpace: "nowrap",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.5 : 1,
         touchAction: "manipulation",
@@ -64,8 +72,9 @@ export function EntradaGaleriaWeb({
       }}
     >
       <svg
-        width="18"
-        height="18"
+        width={compacto ? 14 : 18}
+        height={compacto ? 14 : 18}
+        style={{ flexShrink: 0 }}
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -87,7 +96,9 @@ export function EntradaGaleriaWeb({
           </>
         )}
       </svg>
-      {texto}
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+        {texto}
+      </span>
     </button>
   );
 }
