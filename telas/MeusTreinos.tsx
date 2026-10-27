@@ -746,8 +746,70 @@ export default function MeusTreinos({
 
   function escolherFonteFoto(origem: "biblioteca" | "camera") {
     const exercicio = origemFotoAberta;
-    setOrigemFotoAberta(null);
     if (!exercicio) return;
+
+    if (
+      origem === "biblioteca" &&
+      Platform.OS === "web" &&
+      typeof document !== "undefined"
+    ) {
+      const entrada = document.createElement("input");
+      entrada.type = "file";
+      entrada.accept = "image/*";
+      entrada.multiple = false;
+      entrada.setAttribute("aria-label", "Escolher uma foto da galeria");
+      entrada.style.position = "fixed";
+      entrada.style.left = "-10000px";
+      entrada.style.top = "0";
+      entrada.style.width = "1px";
+      entrada.style.height = "1px";
+      entrada.style.opacity = "0";
+
+      const removerEntrada = () => {
+        entrada.removeEventListener("cancel", removerEntrada);
+        if (entrada.parentNode) entrada.parentNode.removeChild(entrada);
+      };
+
+      entrada.onchange = () => {
+        const arquivo = entrada.files?.[0];
+        removerEntrada();
+        if (!arquivo) return;
+
+        if (!arquivo.type.startsWith("image/")) {
+          mostrarMensagem(
+            "Arquivo inválido",
+            "Escolha uma imagem da galeria, como JPG, PNG ou WebP.",
+          );
+          return;
+        }
+
+        const uri = URL.createObjectURL(arquivo);
+        const imagem = {
+          uri,
+          file: arquivo,
+          fileName: arquivo.name,
+          fileSize: arquivo.size,
+          width: 0,
+          height: 0,
+          type: "image",
+          mimeType: arquivo.type || undefined,
+        } as ImagePickerAsset;
+
+        setOrigemFotoAberta(null);
+        void adicionarOuTrocarFoto(exercicio, "biblioteca", imagem).finally(
+          () => URL.revokeObjectURL(uri),
+        );
+      };
+
+      entrada.addEventListener("cancel", removerEntrada);
+      document.body.appendChild(entrada);
+      setOrigemFotoAberta(null);
+      // O clique precisa acontecer dentro do evento do usuário para o navegador Android abrir o seletor.
+      entrada.click();
+      return;
+    }
+
+    setOrigemFotoAberta(null);
     if (
       origem === "camera" &&
       Platform.OS === "web" &&
