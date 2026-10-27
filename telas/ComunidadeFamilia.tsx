@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -35,6 +34,9 @@ import {
   selecionarFamiliaPermitida,
   somenteDaFamilia,
   fotoPertenceAFamilia,
+  renomearFamilia as renomearFamiliaNoBanco,
+  sairDaFamilia as sairDaFamiliaNoBanco,
+  excluirFamilia as excluirFamiliaNoBanco,
   type Familia,
 } from "../servicos/familias";
 import { novoIdSerie } from "../servicos/treinoLocal";
@@ -202,6 +204,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [codigoConvite, setCodigoConvite] = useState("");
   const [criandoFamilia, setCriandoFamilia] = useState(false);
   const [entrandoFamilia, setEntrandoFamilia] = useState(false);
+  const [alterandoFamilia, setAlterandoFamilia] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const [atualizando, setAtualizando] = useState(false);
   const [erro, setErro] = useState("");
@@ -217,7 +220,6 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [textoPublicacao, setTextoPublicacao] = useState("");
   const [fotoSelecionada, setFotoSelecionada] =
     useState<ImagePicker.ImagePickerAsset | null>(null);
-  const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null);
   useEffect(() => {
     const uri = fotoSelecionada?.uri;
     return () => {
@@ -665,6 +667,123 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
     }
   }
 
+  async function renomearFamilia(id: string, nome: string): Promise<boolean> {
+    if (
+      publicandoRef.current ||
+      mutandoFamiliaRef.current ||
+      excluindoRef.current
+    )
+      return false;
+    if (!nome.trim() || nome.trim().length > 70) {
+      avisar("Nome da família", "Informe um nome com até 70 caracteres.");
+      return false;
+    }
+    mutandoFamiliaRef.current = true;
+    setAlterandoFamilia(true);
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data.user) throw new Error("Entre novamente na sua conta.");
+      const familiaAlvo = familiasRef.current.find((item) => item.id === id);
+      if (!familiaAlvo || familiaAlvo.owner_user_id !== data.user.id) {
+        throw new Error("Somente quem criou a família pode mudar o nome.");
+      }
+      await renomearFamiliaNoBanco(id, nome.trim());
+      await carregar(familiaAtivaIdRef.current ?? undefined);
+      avisar("Nome atualizado", "O nome da família foi alterado.");
+      return true;
+    } catch (problema) {
+      avisar(
+        "Não foi possível renomear a família",
+        mensagemErro(problema, "Tente novamente."),
+      );
+      return false;
+    } finally {
+      mutandoFamiliaRef.current = false;
+      setAlterandoFamilia(false);
+    }
+  }
+
+  async function sairDaFamilia(id: string): Promise<boolean> {
+    if (
+      publicandoRef.current ||
+      mutandoFamiliaRef.current ||
+      excluindoRef.current
+    )
+      return false;
+    mutandoFamiliaRef.current = true;
+    setAlterandoFamilia(true);
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data.user) throw new Error("Entre novamente na sua conta.");
+      const familiaAlvo = familiasRef.current.find((item) => item.id === id);
+      if (!familiaAlvo)
+        throw new Error("Esta família não está mais disponível.");
+      if (familiaAlvo.owner_user_id === data.user.id) {
+        throw new Error(
+          "Quem criou a família não pode simplesmente sair. Use ‘Excluir família’ ou peça ao grupo para organizar a propriedade antes.",
+        );
+      }
+      await sairDaFamiliaNoBanco(id);
+      if (familiaAtivaIdRef.current === id)
+        await guardarFamiliaPreferida(data.user.id, null);
+      await carregar();
+      avisar(
+        "Você saiu da família",
+        "Sua conta não faz mais parte desse grupo.",
+      );
+      return true;
+    } catch (problema) {
+      avisar(
+        "Não foi possível sair da família",
+        mensagemErro(problema, "Tente novamente."),
+      );
+      return false;
+    } finally {
+      mutandoFamiliaRef.current = false;
+      setAlterandoFamilia(false);
+    }
+  }
+
+  async function excluirFamilia(id: string): Promise<boolean> {
+    if (
+      publicandoRef.current ||
+      mutandoFamiliaRef.current ||
+      excluindoRef.current
+    )
+      return false;
+    excluindoRef.current = true;
+    setExcluindo(true);
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data.user) throw new Error("Entre novamente na sua conta.");
+      const familiaAlvo = familiasRef.current.find((item) => item.id === id);
+      if (!familiaAlvo || familiaAlvo.owner_user_id !== data.user.id) {
+        throw new Error("Somente quem criou a família pode excluí-la.");
+      }
+      if (familiaAtivaIdRef.current === id && !(await confirmarTrocaComFoto()))
+        return false;
+      await excluirFamiliaNoBanco(id);
+      rascunhosRef.current.delete(id);
+      if (familiaAtivaIdRef.current === id)
+        await guardarFamiliaPreferida(data.user.id, null);
+      await carregar();
+      avisar(
+        "Família excluída",
+        "A família e as publicações vinculadas a ela foram removidas.",
+      );
+      return true;
+    } catch (problema) {
+      avisar(
+        "Não foi possível excluir a família",
+        mensagemErro(problema, "Tente novamente."),
+      );
+      return false;
+    } finally {
+      excluindoRef.current = false;
+      setExcluindo(false);
+    }
+  }
+
   async function entrarNaFamilia() {
     if (
       publicandoRef.current ||
@@ -993,10 +1112,19 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       ativaId={familiaAtivaId}
       usuarioId={usuarioId}
       cor={corTema}
-      bloqueado={publicando || criandoFamilia || entrandoFamilia || excluindo}
+      bloqueado={
+        publicando ||
+        criandoFamilia ||
+        entrandoFamilia ||
+        alterandoFamilia ||
+        excluindo
+      }
       criando={criandoFamilia}
       onSelecionar={(id) => void trocarFamilia(id)}
       onCriar={criarFamilia}
+      onRenomear={renomearFamilia}
+      onSair={sairDaFamilia}
+      onExcluir={excluirFamilia}
     />
   );
 
@@ -1054,463 +1182,415 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
     );
 
   return (
-    <>
-      <FlatList
-        style={estilos.tela}
-        contentContainerStyle={estilos.conteudo}
-        data={publicacoes}
-        keyExtractor={(post) => post.id}
-        initialNumToRender={5}
-        maxToRenderPerBatch={5}
-        windowSize={5}
-        ListHeaderComponent={
-          <View style={{ gap: 14 }}>
-            <View style={estilos.topo}>
-              <View style={{ flex: 1 }}>
-                <Text style={[estilos.marca, { color: corTema }]}>
-                  TREINO FAMÍLIA
-                </Text>
-                <Text style={estilos.titulo}>Família em movimento</Text>
-                <Text style={estilos.secundario}>
-                  {familia.name} · resumo da semana
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => {
-                  setAtualizando(true);
-                  void carregar();
-                }}
-                style={[estilos.atualizar, { borderColor: corTema }]}
-              >
-                <Text style={{ color: corTema, fontSize: 22 }}>↻</Text>
-              </TouchableOpacity>
-            </View>
-            {gerenciadorFamilias}
-            <View style={estilos.cartaoCodigo}>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={estilos.rotulo}>CONVITE · {familia.name}</Text>
-                <Text selectable style={[estilos.codigo, { color: corTema }]}>
-                  {familia.invite_code}
-                </Text>
-                <Text style={estilos.secundario}>
-                  Toque e segure o código para copiá-lo e enviar aos familiares.
-                </Text>
-              </View>
-            </View>
-            <View style={estilos.cartaoEntrarFamilia}>
-              <Text style={estilos.tituloCartao}>Entrar em outra família</Text>
-              <Text style={estilos.secundario}>
-                Use o código de convite de outro grupo. Você poderá alternar
-                entre as famílias das quais participa.
+    <FlatList
+      style={estilos.tela}
+      contentContainerStyle={estilos.conteudo}
+      data={publicacoes}
+      keyExtractor={(post) => post.id}
+      initialNumToRender={5}
+      maxToRenderPerBatch={5}
+      windowSize={5}
+      ListHeaderComponent={
+        <View style={{ gap: 14 }}>
+          <View style={estilos.topo}>
+            <View style={{ flex: 1 }}>
+              <Text style={[estilos.marca, { color: corTema }]}>
+                TREINO FAMÍLIA
               </Text>
-              <TextInput
-                value={codigoConvite}
-                onChangeText={setCodigoConvite}
-                placeholder="Código de convite"
-                placeholderTextColor="#758178"
-                style={estilos.input}
-                autoCapitalize="characters"
-                autoCorrect={false}
-                maxLength={16}
-              />
-              <TouchableOpacity
-                onPress={entrarNaFamilia}
-                disabled={
-                  entrandoFamilia || criandoFamilia || publicando || excluindo
-                }
-                style={[estilos.botaoSecundario, { borderColor: corTema }]}
-              >
-                {entrandoFamilia ? (
-                  <ActivityIndicator color={corTema} />
-                ) : (
-                  <Text style={{ color: corTema, fontWeight: "800" }}>
-                    Entrar com código
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-            <Text style={estilos.tituloSecao}>
-              Progresso semanal da família
-            </Text>
-            <Text style={estilos.secundario}>
-              Contagem da semana atual, de segunda a domingo. Os números são
-              reiniciados a cada nova semana.
-            </Text>
-            {membros.map((membro) => (
-              <View key={membro.user_id} style={estilos.cartaoMembro}>
-                <View
-                  style={[
-                    estilos.avatar,
-                    { borderColor: corTema, backgroundColor: `${corTema}20` },
-                  ]}
-                >
-                  {membro.avatar_url ? (
-                    <Image
-                      source={{ uri: membro.avatar_url }}
-                      style={estilos.avatarImagem}
-                    />
-                  ) : (
-                    <Text
-                      style={{
-                        color: corTema,
-                        fontSize: 19,
-                        fontWeight: "900",
-                      }}
-                    >
-                      {membro.display_name?.charAt(0)?.toUpperCase() || "?"}
-                    </Text>
-                  )}
-                </View>
-                <View style={{ flex: 1, gap: 8 }}>
-                  <Text style={estilos.nomeMembro}>
-                    {membro.display_name}
-                    {membro.user_id === usuarioId ? " (você)" : ""}
-                  </Text>
-                  <View style={estilos.gradeMembro}>
-                    <Text style={estilos.indicadorMembro}>
-                      🏋️ {numero(membro.workouts_this_week)} treinos
-                    </Text>
-                    <Text style={estilos.indicadorMembro}>
-                      🏃 {numero(membro.cardios_this_week)} cardios
-                    </Text>
-                    <Text style={estilos.indicadorMembro}>
-                      ⏱️ {Math.round(numero(membro.minutes_this_week))} min
-                    </Text>
-                    <Text style={estilos.indicadorMembro}>
-                      🔥 {Math.round(numero(membro.calories_this_week))} kcal
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            ))}
-            {membros.length === 0 ? (
+              <Text style={estilos.titulo}>Família em movimento</Text>
               <Text style={estilos.secundario}>
-                Ainda não há dados de progresso nesta semana.
+                {familia.name} · resumo da semana
               </Text>
-            ) : null}
-            <Text style={estilos.tituloSecao}>
-              Publicações de {familia.name}
-            </Text>
-            <View style={estilos.cartaoPublicar}>
-              <Text style={estilos.tituloCartao}>
-                Publicar em {familia.name}
+            </View>
+            <TouchableOpacity
+              onPress={() => {
+                setAtualizando(true);
+                void carregar();
+              }}
+              style={[estilos.atualizar, { borderColor: corTema }]}
+            >
+              <Text style={{ color: corTema, fontSize: 22 }}>↻</Text>
+            </TouchableOpacity>
+          </View>
+          {gerenciadorFamilias}
+          <View style={estilos.cartaoCodigo}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={estilos.rotulo}>CONVITE · {familia.name}</Text>
+              <Text selectable style={[estilos.codigo, { color: corTema }]}>
+                {familia.invite_code}
               </Text>
               <Text style={estilos.secundario}>
-                Esta publicação será compartilhada somente com os integrantes de{" "}
-                {familia.name}.
+                Toque e segure o código para copiá-lo e enviar aos familiares.
               </Text>
-              <View style={estilos.opcoesPublicacao}>
-                {(
-                  [
-                    ["texto", "✍️", "Texto"],
-                    ["foto", "📷", "Foto"],
-                    ["treino", "🏋️", "Treino"],
-                  ] as [TipoPublicacao, string, string][]
-                ).map(([valor, icone, rotulo]) => (
-                  <TouchableOpacity
-                    key={valor}
-                    disabled={
-                      publicando ||
-                      atualizando ||
-                      criandoFamilia ||
-                      entrandoFamilia
-                    }
-                    accessibilityRole="button"
-                    accessibilityLabel={
-                      rotulo === "Treino" ? "Compartilhar treino" : rotulo
-                    }
-                    onPress={() => {
-                      setTipoPublicacao(valor);
-                      if (valor !== "foto") setFotoSelecionada(null);
-                    }}
-                    style={[
-                      estilos.opcao,
-                      tipoPublicacao === valor && {
-                        borderColor: corTema,
-                        backgroundColor: `${corTema}18`,
-                      },
-                    ]}
-                  >
-                    <View style={estilos.conteudoOpcao}>
-                      <Text style={estilos.iconeOpcao}>{icone}</Text>
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          estilos.opcaoTexto,
-                          tipoPublicacao === valor && { color: corTema },
-                        ]}
-                      >
-                        {rotulo}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <TextInput
-                accessibilityLabel="Texto para a família selecionada"
-                editable={
-                  !publicando &&
-                  !atualizando &&
-                  !criandoFamilia &&
-                  !entrandoFamilia
-                }
-                value={textoPublicacao}
-                onChangeText={setTextoPublicacao}
-                placeholder={
-                  tipoPublicacao === "treino"
-                    ? "Conte como foi esse treino (opcional)..."
-                    : "Compartilhe uma conquista, dica ou mensagem..."
-                }
-                placeholderTextColor="#758178"
-                style={[estilos.input, estilos.inputTexto]}
-                multiline
-                maxLength={1600}
-              />
-              {tipoPublicacao === "foto" ? (
-                <View style={estilos.fotoArea}>
-                  <TouchableOpacity
-                    style={[estilos.botaoSecundario, { borderColor: corTema }]}
-                    disabled={
-                      publicando ||
-                      atualizando ||
-                      criandoFamilia ||
-                      entrandoFamilia
-                    }
-                    onPress={escolherFoto}
-                  >
-                    <Text style={{ color: corTema, fontWeight: "800" }}>
-                      {fotoSelecionada ? "Trocar foto" : "Escolher foto"}
-                    </Text>
-                  </TouchableOpacity>
-                  {fotoSelecionada ? (
-                    <Image
-                      source={{ uri: fotoSelecionada.uri }}
-                      style={estilos.previewFoto}
-                    />
-                  ) : null}
-                </View>
-              ) : null}
-              {tipoPublicacao === "treino" ? (
-                <View style={{ gap: 8 }}>
-                  <Text style={estilos.rotulo}>
-                    SELECIONE UM DOS SEUS TREINOS
-                  </Text>
-                  {planos.length ? (
-                    planos.map((plano) => (
-                      <TouchableOpacity
-                        key={plano.id}
-                        disabled={
-                          publicando ||
-                          atualizando ||
-                          criandoFamilia ||
-                          entrandoFamilia
-                        }
-                        onPress={() => setPlanoSelecionado(plano.id)}
-                        style={[
-                          estilos.plano,
-                          planoSelecionado === plano.id && {
-                            borderColor: corTema,
-                            backgroundColor: `${corTema}18`,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            estilos.opcaoTexto,
-                            planoSelecionado === plano.id && { color: corTema },
-                          ]}
-                        >
-                          {planoSelecionado === plano.id ? "✓ " : ""}
-                          {plano.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))
-                  ) : (
-                    <Text style={estilos.secundario}>
-                      Você ainda não cadastrou treinos para compartilhar.
-                    </Text>
-                  )}
-                </View>
-              ) : null}
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel={`Publicar em ${familia.name}`}
-                onPress={publicar}
-                disabled={
-                  publicando ||
-                  atualizando ||
-                  criandoFamilia ||
-                  entrandoFamilia ||
-                  excluindo ||
-                  Boolean(erro)
-                }
-                style={[
-                  estilos.botao,
-                  { backgroundColor: corTema, marginTop: 12 },
-                ]}
-              >
-                {publicando ? (
-                  <ActivityIndicator color="#0C120E" />
-                ) : (
-                  <Text style={estilos.textoBotaoEscuro}>
-                    Publicar em {familia.name}
-                  </Text>
-                )}
-              </TouchableOpacity>
             </View>
           </View>
-        }
-        renderItem={({ item: post }) => (
-          <View key={post.id} style={estilos.cartaoPost}>
-            <View style={estilos.cabecalhoPost}>
+          <View style={estilos.cartaoEntrarFamilia}>
+            <Text style={estilos.tituloCartao}>Entrar em outra família</Text>
+            <Text style={estilos.secundario}>
+              Use o código de convite de outro grupo. Você poderá alternar entre
+              as famílias das quais participa.
+            </Text>
+            <TextInput
+              value={codigoConvite}
+              onChangeText={setCodigoConvite}
+              placeholder="Código de convite"
+              placeholderTextColor="#758178"
+              style={estilos.input}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={16}
+            />
+            <TouchableOpacity
+              onPress={entrarNaFamilia}
+              disabled={
+                entrandoFamilia || criandoFamilia || publicando || excluindo
+              }
+              style={[estilos.botaoSecundario, { borderColor: corTema }]}
+            >
+              {entrandoFamilia ? (
+                <ActivityIndicator color={corTema} />
+              ) : (
+                <Text style={{ color: corTema, fontWeight: "800" }}>
+                  Entrar com código
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+          <Text style={estilos.tituloSecao}>Progresso semanal da família</Text>
+          <Text style={estilos.secundario}>
+            Contagem da semana atual, de segunda a domingo. Os números são
+            reiniciados a cada nova semana.
+          </Text>
+          {membros.map((membro) => (
+            <View key={membro.user_id} style={estilos.cartaoMembro}>
               <View
                 style={[
-                  estilos.avatarPequeno,
+                  estilos.avatar,
                   { borderColor: corTema, backgroundColor: `${corTema}20` },
                 ]}
               >
-                {post.author_avatar_url ? (
-                  <ImagemLeve
-                    uri={post.author_avatar_url}
-                    larguraPreview={96}
+                {membro.avatar_url ? (
+                  <Image
+                    source={{ uri: membro.avatar_url }}
                     style={estilos.avatarImagem}
                   />
                 ) : (
-                  <Text style={{ color: corTema, fontWeight: "900" }}>
-                    {post.author_name?.charAt(0)?.toUpperCase() || "?"}
+                  <Text
+                    style={{ color: corTema, fontSize: 19, fontWeight: "900" }}
+                  >
+                    {membro.display_name?.charAt(0)?.toUpperCase() || "?"}
                   </Text>
                 )}
               </View>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={estilos.nomeMembro}>{post.author_name}</Text>
-                <Text style={estilos.secundario}>
-                  {dataRelativa(post.created_at)} ·{" "}
-                  {post.post_type === "treino"
-                    ? "Treino compartilhado"
-                    : post.post_type === "foto"
-                      ? "Foto"
-                      : "Publicação"}
+              <View style={{ flex: 1, gap: 8 }}>
+                <Text style={estilos.nomeMembro}>
+                  {membro.display_name}
+                  {membro.user_id === usuarioId ? " (você)" : ""}
                 </Text>
+                <View style={estilos.gradeMembro}>
+                  <Text style={estilos.indicadorMembro}>
+                    🏋️ {numero(membro.workouts_this_week)} treinos
+                  </Text>
+                  <Text style={estilos.indicadorMembro}>
+                    🏃 {numero(membro.cardios_this_week)} cardios
+                  </Text>
+                  <Text style={estilos.indicadorMembro}>
+                    ⏱️ {Math.round(numero(membro.minutes_this_week))} min
+                  </Text>
+                  <Text style={estilos.indicadorMembro}>
+                    🔥 {Math.round(numero(membro.calories_this_week))} kcal
+                  </Text>
+                </View>
               </View>
-              {post.user_id === usuarioId ? (
-                <TouchableOpacity
-                  disabled={
-                    publicando || criandoFamilia || entrandoFamilia || excluindo
-                  }
-                  onPress={() => void excluirPublicacao(post)}
-                >
-                  <Text style={estilos.excluir}>Excluir</Text>
-                </TouchableOpacity>
-              ) : null}
             </View>
-            {post.content ? (
-              <Text style={estilos.textoPost}>{post.content}</Text>
-            ) : null}
-            {post.image_url ? (
-              <TouchableOpacity
-                activeOpacity={0.9}
-                accessibilityRole="button"
-                accessibilityLabel="Ampliar foto da publicação"
-                onPress={() => setFotoAmpliada(post.image_url ?? null)}
-                style={estilos.controleImagemPost}
-              >
-                <ImagemLeve
-                  uri={post.image_url}
-                  style={estilos.imagemPost}
-                  resizeMode="cover"
-                />
-                <Text style={estilos.legendaAmpliarFoto}>
-                  Toque para ampliar
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {post.workout_plan_name ? (
-              <View
-                style={[
-                  estilos.treinoCompartilhado,
-                  { borderColor: `${corTema}70` },
-                ]}
-              >
-                <Text style={[estilos.tituloCartao, { color: corTema }]}>
-                  🏋️ {post.workout_plan_name}
-                </Text>
-                {(post.workout_snapshot ?? []).map((item, indice) => (
-                  <View
-                    key={`${post.id}-${indice}`}
-                    style={estilos.exercicioCompartilhado}
-                  >
-                    <Text style={estilos.nomeExercicio}>{item.nome}</Text>
-                    <Text style={estilos.secundario}>
-                      {item.series} séries · {item.repeticoes} repetições
+          ))}
+          {membros.length === 0 ? (
+            <Text style={estilos.secundario}>
+              Ainda não há dados de progresso nesta semana.
+            </Text>
+          ) : null}
+          <Text style={estilos.tituloSecao}>Publicações de {familia.name}</Text>
+          <View style={estilos.cartaoPublicar}>
+            <Text style={estilos.tituloCartao}>Publicar em {familia.name}</Text>
+            <Text style={estilos.secundario}>
+              Esta publicação será compartilhada somente com os integrantes de{" "}
+              {familia.name}.
+            </Text>
+            <View style={estilos.opcoesPublicacao}>
+              {(
+                [
+                  ["texto", "✍️", "Texto"],
+                  ["foto", "📷", "Foto"],
+                  ["treino", "🏋️", "Treino"],
+                ] as [TipoPublicacao, string, string][]
+              ).map(([valor, icone, rotulo]) => (
+                <TouchableOpacity
+                  key={valor}
+                  disabled={
+                    publicando ||
+                    atualizando ||
+                    criandoFamilia ||
+                    entrandoFamilia
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    rotulo === "Treino" ? "Compartilhar treino" : rotulo
+                  }
+                  onPress={() => {
+                    setTipoPublicacao(valor);
+                    if (valor !== "foto") setFotoSelecionada(null);
+                  }}
+                  style={[
+                    estilos.opcao,
+                    tipoPublicacao === valor && {
+                      borderColor: corTema,
+                      backgroundColor: `${corTema}18`,
+                    },
+                  ]}
+                >
+                  <View style={estilos.conteudoOpcao}>
+                    <Text style={estilos.iconeOpcao}>{icone}</Text>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        estilos.opcaoTexto,
+                        tipoPublicacao === valor && { color: corTema },
+                      ]}
+                    >
+                      {rotulo}
                     </Text>
-                    {item.cargas?.length ? (
-                      <Text style={estilos.secundario}>
-                        {item.cargas.join(" · ")}
-                      </Text>
-                    ) : null}
                   </View>
-                ))}
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              accessibilityLabel="Texto para a família selecionada"
+              editable={
+                !publicando &&
+                !atualizando &&
+                !criandoFamilia &&
+                !entrandoFamilia
+              }
+              value={textoPublicacao}
+              onChangeText={setTextoPublicacao}
+              placeholder={
+                tipoPublicacao === "treino"
+                  ? "Conte como foi esse treino (opcional)..."
+                  : "Compartilhe uma conquista, dica ou mensagem..."
+              }
+              placeholderTextColor="#758178"
+              style={[estilos.input, estilos.inputTexto]}
+              multiline
+              maxLength={1600}
+            />
+            {tipoPublicacao === "foto" ? (
+              <View style={estilos.fotoArea}>
+                <TouchableOpacity
+                  style={[estilos.botaoSecundario, { borderColor: corTema }]}
+                  disabled={
+                    publicando ||
+                    atualizando ||
+                    criandoFamilia ||
+                    entrandoFamilia
+                  }
+                  onPress={escolherFoto}
+                >
+                  <Text style={{ color: corTema, fontWeight: "800" }}>
+                    {fotoSelecionada ? "Trocar foto" : "Escolher foto"}
+                  </Text>
+                </TouchableOpacity>
+                {fotoSelecionada ? (
+                  <Image
+                    source={{ uri: fotoSelecionada.uri }}
+                    style={estilos.previewFoto}
+                  />
+                ) : null}
               </View>
             ) : null}
-          </View>
-        )}
-        ListEmptyComponent={
-          <Text style={estilos.secundario}>
-            Ainda não há publicações. Seja a primeira pessoa a compartilhar uma
-            conquista!
-          </Text>
-        }
-        ListFooterComponent={
-          <View style={{ gap: 14 }}>
-            {haMaisPosts ? (
-              <TouchableOpacity
-                accessibilityRole="button"
-                style={{ alignItems: "center", padding: 16 }}
-                onPress={() => void carregarMaisPublicacoes()}
-                disabled={carregandoMaisPosts || atualizando}
-              >
-                <Text style={{ color: corTema, fontWeight: "700" }}>
-                  {carregandoMaisPosts
-                    ? "Carregando publicações..."
-                    : "Ver mais publicações"}
+            {tipoPublicacao === "treino" ? (
+              <View style={{ gap: 8 }}>
+                <Text style={estilos.rotulo}>
+                  SELECIONE UM DOS SEUS TREINOS
                 </Text>
+                {planos.length ? (
+                  planos.map((plano) => (
+                    <TouchableOpacity
+                      key={plano.id}
+                      disabled={
+                        publicando ||
+                        atualizando ||
+                        criandoFamilia ||
+                        entrandoFamilia
+                      }
+                      onPress={() => setPlanoSelecionado(plano.id)}
+                      style={[
+                        estilos.plano,
+                        planoSelecionado === plano.id && {
+                          borderColor: corTema,
+                          backgroundColor: `${corTema}18`,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          estilos.opcaoTexto,
+                          planoSelecionado === plano.id && { color: corTema },
+                        ]}
+                      >
+                        {planoSelecionado === plano.id ? "✓ " : ""}
+                        {plano.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <Text style={estilos.secundario}>
+                    Você ainda não cadastrou treinos para compartilhar.
+                  </Text>
+                )}
+              </View>
+            ) : null}
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`Publicar em ${familia.name}`}
+              onPress={publicar}
+              disabled={
+                publicando ||
+                atualizando ||
+                criandoFamilia ||
+                entrandoFamilia ||
+                excluindo ||
+                Boolean(erro)
+              }
+              style={[
+                estilos.botao,
+                { backgroundColor: corTema, marginTop: 12 },
+              ]}
+            >
+              {publicando ? (
+                <ActivityIndicator color="#0C120E" />
+              ) : (
+                <Text style={estilos.textoBotaoEscuro}>
+                  Publicar em {familia.name}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      }
+      renderItem={({ item: post }) => (
+        <View key={post.id} style={estilos.cartaoPost}>
+          <View style={estilos.cabecalhoPost}>
+            <View
+              style={[
+                estilos.avatarPequeno,
+                { borderColor: corTema, backgroundColor: `${corTema}20` },
+              ]}
+            >
+              {post.author_avatar_url ? (
+                <ImagemLeve
+                  uri={post.author_avatar_url}
+                  larguraPreview={96}
+                  style={estilos.avatarImagem}
+                />
+              ) : (
+                <Text style={{ color: corTema, fontWeight: "900" }}>
+                  {post.author_name?.charAt(0)?.toUpperCase() || "?"}
+                </Text>
+              )}
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={estilos.nomeMembro}>{post.author_name}</Text>
+              <Text style={estilos.secundario}>
+                {dataRelativa(post.created_at)} ·{" "}
+                {post.post_type === "treino"
+                  ? "Treino compartilhado"
+                  : post.post_type === "foto"
+                    ? "Foto"
+                    : "Publicação"}
+              </Text>
+            </View>
+            {post.user_id === usuarioId ? (
+              <TouchableOpacity
+                disabled={
+                  publicando || criandoFamilia || entrandoFamilia || excluindo
+                }
+                onPress={() => void excluirPublicacao(post)}
+              >
+                <Text style={estilos.excluir}>Excluir</Text>
               </TouchableOpacity>
             ) : null}
-            {erro ? <Text style={estilos.erro}>{erro}</Text> : null}
-            {atualizando ? <ActivityIndicator color={corTema} /> : null}
-            <Text style={estilos.rodape}>
-              Publicações e estatísticas ficam visíveis apenas para integrantes
-              deste grupo familiar.
-            </Text>
           </View>
-        }
-      />
-      <Modal
-        visible={Boolean(fotoAmpliada)}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setFotoAmpliada(null)}
-      >
-        <View style={estilos.fotoAmpliadaFundo}>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Fechar foto ampliada"
-            onPress={() => setFotoAmpliada(null)}
-            style={estilos.fecharFotoAmpliada}
-          >
-            <Text style={estilos.fecharFotoTexto}>✕</Text>
-          </TouchableOpacity>
-          {fotoAmpliada ? (
-            <Image
-              source={{ uri: fotoAmpliada }}
-              style={estilos.fotoAmpliada}
-              resizeMode="contain"
+          {post.content ? (
+            <Text style={estilos.textoPost}>{post.content}</Text>
+          ) : null}
+          {post.image_url ? (
+            <ImagemLeve
+              uri={post.image_url}
+              style={estilos.imagemPost}
+              resizeMode="cover"
             />
           ) : null}
+          {post.workout_plan_name ? (
+            <View
+              style={[
+                estilos.treinoCompartilhado,
+                { borderColor: `${corTema}70` },
+              ]}
+            >
+              <Text style={[estilos.tituloCartao, { color: corTema }]}>
+                🏋️ {post.workout_plan_name}
+              </Text>
+              {(post.workout_snapshot ?? []).map((item, indice) => (
+                <View
+                  key={`${post.id}-${indice}`}
+                  style={estilos.exercicioCompartilhado}
+                >
+                  <Text style={estilos.nomeExercicio}>{item.nome}</Text>
+                  <Text style={estilos.secundario}>
+                    {item.series} séries · {item.repeticoes} repetições
+                  </Text>
+                  {item.cargas?.length ? (
+                    <Text style={estilos.secundario}>
+                      {item.cargas.join(" · ")}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : null}
         </View>
-      </Modal>
-    </>
+      )}
+      ListEmptyComponent={
+        <Text style={estilos.secundario}>
+          Ainda não há publicações. Seja a primeira pessoa a compartilhar uma
+          conquista!
+        </Text>
+      }
+      ListFooterComponent={
+        <View style={{ gap: 14 }}>
+          {haMaisPosts ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={{ alignItems: "center", padding: 16 }}
+              onPress={() => void carregarMaisPublicacoes()}
+              disabled={carregandoMaisPosts || atualizando}
+            >
+              <Text style={{ color: corTema, fontWeight: "700" }}>
+                {carregandoMaisPosts
+                  ? "Carregando publicações..."
+                  : "Ver mais publicações"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          {erro ? <Text style={estilos.erro}>{erro}</Text> : null}
+          {atualizando ? <ActivityIndicator color={corTema} /> : null}
+          <Text style={estilos.rodape}>
+            Publicações e estatísticas ficam visíveis apenas para integrantes
+            deste grupo familiar.
+          </Text>
+        </View>
+      }
+    />
   );
 }
 
@@ -1723,35 +1803,12 @@ const estilos = StyleSheet.create({
   cabecalhoPost: { flexDirection: "row", alignItems: "center", gap: 10 },
   excluir: { color: "#FF9292", fontSize: 12, fontWeight: "800", padding: 6 },
   textoPost: { color: "#E2E9E4", fontSize: 14, lineHeight: 21 },
-  controleImagemPost: { width: "100%", gap: 5 },
   imagemPost: {
     width: "100%",
     height: 300,
     borderRadius: 12,
     backgroundColor: "#222A24",
   },
-  legendaAmpliarFoto: { color: "#98A39B", fontSize: 11, textAlign: "right" },
-  fotoAmpliadaFundo: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.96)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 12,
-  },
-  fotoAmpliada: { width: "100%", height: "100%" },
-  fecharFotoAmpliada: {
-    position: "absolute",
-    top: Platform.OS === "web" ? 16 : 40,
-    right: 16,
-    zIndex: 2,
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "#252A27",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  fecharFotoTexto: { color: "#FFFFFF", fontSize: 22, fontWeight: "700" },
   treinoCompartilhado: {
     padding: 12,
     borderWidth: 1,
