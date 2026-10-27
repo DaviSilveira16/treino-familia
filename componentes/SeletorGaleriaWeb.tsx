@@ -1,131 +1,122 @@
-import React, { useEffect, useRef } from "react";
-import { Platform, TouchableOpacity, View } from "react-native";
 import type { ImagePickerAsset } from "expo-image-picker";
 
-type Props = {
-  children: React.ReactNode;
-  disabled?: boolean;
-  onSelecionar: (imagem: ImagePickerAsset) => void;
-};
+/** Opens the Android/browser photo chooser directly in the original tap handler. */
+export function selecionarImagemDaGaleriaWeb(): Promise<ImagePickerAsset | null> {
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return Promise.reject(
+      new Error("A galeria só pode ser aberta no navegador."),
+    );
+  }
 
-export default function SeletorGaleriaWeb({
-  children,
-  disabled = false,
-  onSelecionar,
-}: Props) {
-  const entradaRef = useRef<HTMLInputElement | null>(null);
-  const callbackRef = useRef(onSelecionar);
-  const desabilitadoRef = useRef(disabled);
-  callbackRef.current = onSelecionar;
-  desabilitadoRef.current = disabled;
-
-  useEffect(() => {
-    if (Platform.OS !== "web" || typeof document === "undefined") return;
-
-    // Um input real anexado ao documento é mais confiável no Chrome Android/PWA
-    // do que renderizar uma tag HTML diretamente dentro da árvore do React Native.
+  return new Promise((resolve, reject) => {
     const entrada = document.createElement("input");
     entrada.type = "file";
     entrada.accept = "image/*";
     entrada.multiple = false;
     entrada.setAttribute("aria-label", "Escolher uma foto da galeria");
-    entrada.tabIndex = -1;
+    // Android WebView/Chrome may ignore clicks on display:none or off-screen inputs.
     Object.assign(entrada.style, {
       position: "fixed",
       left: "0",
-      bottom: "0",
-      width: "1px",
-      height: "1px",
-      opacity: "0",
-      pointerEvents: "none",
-      overflow: "hidden",
-      zIndex: "-1",
+      top: "0",
+      width: "2px",
+      height: "2px",
+      opacity: "0.01",
+      zIndex: "2147483647",
+      pointerEvents: "auto",
     });
 
-    const aoSelecionarArquivo = () => {
-      const arquivo = entrada.files?.item(0) ?? null;
-      // Permite selecionar a mesma imagem novamente depois de trocar/cancelar.
-      entrada.value = "";
-      if (!arquivo || !arquivo.type.startsWith("image/")) return;
-
-      const uri = URL.createObjectURL(arquivo);
-      const imagem = {
-        uri,
-        file: arquivo,
-        fileName: arquivo.name,
-        fileSize: arquivo.size,
-        width: 0,
-        height: 0,
-        type: "image",
-        mimeType: arquivo.type || undefined,
-      } as ImagePickerAsset;
-
-      callbackRef.current(imagem);
-    };
-
-    entrada.addEventListener("change", aoSelecionarArquivo);
-    document.body.appendChild(entrada);
-    entradaRef.current = entrada;
-
-    return () => {
-      entrada.removeEventListener("change", aoSelecionarArquivo);
+    let finalizado = false;
+    let temporizadorFoco: ReturnType<typeof setTimeout> | undefined;
+    const limpar = () => {
+      entrada.removeEventListener("change", aoAlterar);
+      entrada.removeEventListener("cancel", aoCancelar);
+      window.removeEventListener("focus", aoVoltarAoNavegador);
+      if (temporizadorFoco) clearTimeout(temporizadorFoco);
       entrada.remove();
-      entradaRef.current = null;
     };
-  }, []);
-
-  function abrirGaleria() {
-    if (disabled || desabilitadoRef.current) return;
-    const entrada = entradaRef.current;
-    if (!entrada) {
-      if (typeof window !== "undefined") {
-        window.alert(
-          "Não foi possível abrir a galeria. Atualize a página e tente novamente.",
-        );
+    const concluir = (imagem: ImagePickerAsset | null) => {
+      if (finalizado) return;
+      finalizado = true;
+      limpar();
+      resolve(imagem);
+    };
+    const falhar = (erro: unknown) => {
+      if (finalizado) return;
+      finalizado = true;
+      limpar();
+      reject(erro);
+    };
+    const aoAlterar = () => {
+      const arquivo = entrada.files?.item(0);
+      if (!arquivo) {
+        concluir(null);
+        return;
       }
-      return;
-    }
+      const extensao = arquivo.name.split(".").pop()?.toLowerCase() ?? "";
+      const tipoPorExtensao: Record<string, string> = {
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        png: "image/png",
+        webp: "image/webp",
+        gif: "image/gif",
+        avif: "image/avif",
+        heic: "image/heic",
+        heif: "image/heif",
+        bmp: "image/bmp",
+      };
+      const mimeType = arquivo.type.startsWith("image/")
+        ? arquivo.type
+        : (tipoPorExtensao[extensao] ?? "");
+      if (!mimeType) {
+        falhar(new Error("Escolha um arquivo de imagem da galeria."));
+        return;
+      }
+      if (!arquivo.size) {
+        falhar(
+          new Error("A imagem selecionada está vazia. Escolha outra foto."),
+        );
+        return;
+      }
+      try {
+        concluir({
+          uri: URL.createObjectURL(arquivo),
+          width: 0,
+          height: 0,
+          type: "image",
+          fileName: arquivo.name || null,
+          fileSize: arquivo.size,
+          mimeType,
+          file: arquivo,
+          base64: null,
+          duration: null,
+          assetId: null,
+        });
+      } catch (erro) {
+        falhar(erro);
+      }
+    };
+    const aoCancelar = () => concluir(null);
+    const aoVoltarAoNavegador = () => {
+      temporizadorFoco = setTimeout(() => {
+        if (!entrada.files?.length) concluir(null);
+      }, 15000);
+    };
 
-    // A abertura ocorre de forma síncrona no toque do usuário, requisito do navegador.
-    entrada.value = "";
+    entrada.addEventListener("change", aoAlterar);
+    entrada.addEventListener("cancel", aoCancelar);
+    window.addEventListener("focus", aoVoltarAoNavegador, { once: true });
+    document.body.appendChild(entrada);
     try {
+      // Must happen synchronously during the real tap; Android rejects delayed synthetic clicks.
       if (typeof entrada.showPicker === "function") entrada.showPicker();
       else entrada.click();
-    } catch {
+    } catch (erro) {
       try {
         entrada.click();
       } catch {
-        if (typeof window !== "undefined") {
-          window.alert(
-            "O navegador não conseguiu abrir a galeria. Tente atualizar a página ou abrir o app no Chrome.",
-          );
-        }
+        falhar(erro);
       }
     }
-  }
-
-  if (Platform.OS !== "web") return <>{children}</>;
-
-  return (
-    <View style={{ position: "relative", alignSelf: "stretch" }}>
-      {children}
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel="Escolher uma foto da galeria"
-        activeOpacity={1}
-        disabled={disabled}
-        onPress={abrirGaleria}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          zIndex: 1000,
-          elevation: 1000,
-          backgroundColor: "transparent",
-        }}
-      />
-    </View>
-  );
+  });
 }
