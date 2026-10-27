@@ -12,7 +12,9 @@ import {
   Platform,
 } from "react-native";
 import { Alert } from "../servicos/alerta";
+import RepetirCarga from "../componentes/RepetirCarga";
 import * as ImagePicker from "expo-image-picker";
+import { prepararFotoExercicio } from "../servicos/fotoExercicio";
 import { supabase } from "../supabase";
 import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import {
@@ -119,11 +121,24 @@ export default function MeusTreinos({
   const [carregando, setCarregando] = useState(true);
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [recolhidos, setRecolhidos] = useState<Record<string, boolean>>({});
+  const [repetirCarga, setRepetirCarga] = useState(false);
   const [fotoCarregandoId, setFotoCarregandoId] = useState<string | null>(null);
-  useVoltarDoModal(Boolean(treinoSelecionado), () => { setTreinoSelecionado(null); setExercicioEditando(null); setExercicioParaCarga(null); setMostrarFormularioExercicio(false); });
-  useVoltarDoModal(mostrarFormularioExercicio, () => setMostrarFormularioExercicio(false));
-  useVoltarDoModal(Boolean(exercicioEditando), () => setExercicioEditando(null));
-  useVoltarDoModal(Boolean(exercicioParaCarga), () => setExercicioParaCarga(null));
+  useVoltarDoModal(Boolean(treinoSelecionado), () => {
+    setTreinoSelecionado(null);
+    setExercicioEditando(null);
+    setExercicioParaCarga(null);
+    setMostrarFormularioExercicio(false);
+  });
+  useVoltarDoModal(mostrarFormularioExercicio, () =>
+    setMostrarFormularioExercicio(false),
+  );
+  useVoltarDoModal(Boolean(exercicioEditando), () =>
+    setExercicioEditando(null),
+  );
+  useVoltarDoModal(Boolean(exercicioParaCarga), () =>
+    setExercicioParaCarga(null),
+  );
   const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView> | null>(
     null,
   );
@@ -663,33 +678,14 @@ export default function MeusTreinos({
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.75,
+        base64: Platform.OS !== "web",
       });
 
       if (resultado.canceled || !resultado.assets[0]) return;
 
       const imagem = resultado.assets[0];
-      const tiposAceitos = [
-        "image/jpeg",
-        "image/png",
-        "image/webp",
-        "image/heic",
-        "image/heif",
-      ];
-      const contentType = tiposAceitos.includes(imagem.mimeType ?? "")
-        ? imagem.mimeType!
-        : "image/jpeg";
-      const extensao =
-        contentType === "image/png"
-          ? "png"
-          : contentType === "image/webp"
-            ? "webp"
-            : contentType === "image/heic"
-              ? "heic"
-              : contentType === "image/heif"
-                ? "heif"
-                : "jpg";
-      const respostaImagem = await fetch(imagem.uri);
-      const arquivoImagem = await respostaImagem.arrayBuffer();
+      const { arquivoImagem, contentType, extensao } =
+        await prepararFotoExercicio(imagem);
       // eslint-disable-next-line react-hooks/purity -- Timestamp is created in the async photo button handler, never during render.
       const novoCaminho = `${usuarioId}/${exercicio.id}/${Date.now()}.${extensao}`;
       const { error: erroUpload } = await supabase.storage
@@ -773,6 +769,7 @@ export default function MeusTreinos({
 
     setExercicioEditando(null);
     setExercicioParaCarga(exercicio);
+    setRepetirCarga(false);
     setCarregandoExercicios(true);
 
     try {
@@ -798,7 +795,7 @@ export default function MeusTreinos({
         );
         return {
           repeticoes: salva ? String(salva.reps) : repsPadrao,
-          carga: salva ? String(salva.weight_kg) : "0",
+          carga: salva ? String(salva.weight_kg) : "",
         };
       });
       setSeriesCarga(series);
@@ -816,7 +813,9 @@ export default function MeusTreinos({
   ) {
     setSeriesCarga((atuais) =>
       atuais.map((serie, posicao) =>
-        posicao === indice ? { ...serie, [campo]: valor } : serie,
+        posicao === indice || (campo === "carga" && repetirCarga)
+          ? { ...serie, [campo]: valor }
+          : serie,
       ),
     );
   }
@@ -1214,165 +1213,209 @@ export default function MeusTreinos({
                             : "Ainda não registrada"}
                         </Text>
                       </View>
-                      <View style={estilos.acoesExercicio}>
-                        <TouchableOpacity
-                          style={estilos.botaoAcao}
-                          onPress={() => iniciarEdicao(exercicio)}
-                        >
-                          <Text style={estilos.textoAcao}>Editar</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={estilos.botaoAcao}
-                          onPress={() => abrirRegistroCarga(exercicio)}
-                        >
-                          <Text style={estilos.textoAcao}>Cargas</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={estilos.botaoAcao}
-                          onPress={() => adicionarOuTrocarFoto(exercicio)}
-                          disabled={fotoCarregandoId === exercicio.id}
-                        >
-                          <Text style={estilos.textoAcao}>
-                            {fotoCarregandoId === exercicio.id
-                              ? "Enviando foto…"
-                              : exercicio.photo_path
-                                ? "Trocar foto"
-                                : "Adicionar foto"}
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={estilos.botaoExcluir}
-                          onPress={() => excluirExercicio(exercicio)}
-                        >
-                          <Text style={estilos.textoExcluir}>Excluir</Text>
-                        </TouchableOpacity>
-                      </View>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel={`${recolhidos[exercicio.id] ? "Expandir" : "Recolher"} ${exercicio.name}`}
+                        accessibilityState={{
+                          expanded: !recolhidos[exercicio.id],
+                        }}
+                        onPress={() =>
+                          setRecolhidos((atual) => ({
+                            ...atual,
+                            [exercicio.id]: !atual[exercicio.id],
+                          }))
+                        }
+                        style={{
+                          minWidth: 44,
+                          minHeight: 44,
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <Text style={{ color: corTema, fontSize: 24 }}>
+                          {recolhidos[exercicio.id] ? "⌄" : "⌃"}
+                        </Text>
+                      </TouchableOpacity>
+                      {!recolhidos[exercicio.id] ? (
+                        <>
+                          <View style={estilos.acoesExercicio}>
+                            <TouchableOpacity
+                              style={estilos.botaoAcao}
+                              onPress={() => iniciarEdicao(exercicio)}
+                            >
+                              <Text style={estilos.textoAcao}>Editar</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={estilos.botaoAcao}
+                              onPress={() => abrirRegistroCarga(exercicio)}
+                            >
+                              <Text style={estilos.textoAcao}>Cargas</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={estilos.botaoAcao}
+                              onPress={() => adicionarOuTrocarFoto(exercicio)}
+                              disabled={fotoCarregandoId === exercicio.id}
+                            >
+                              <Text style={estilos.textoAcao}>
+                                {fotoCarregandoId === exercicio.id
+                                  ? "Enviando foto…"
+                                  : exercicio.photo_path
+                                    ? "Trocar foto"
+                                    : "Adicionar foto"}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={estilos.botaoExcluir}
+                              onPress={() => excluirExercicio(exercicio)}
+                            >
+                              <Text style={estilos.textoExcluir}>Excluir</Text>
+                            </TouchableOpacity>
+                          </View>
 
-                      {exercicioEditando?.id === exercicio.id && (
-                        <View style={estilos.formularioInterno}>
-                          <Text style={estilos.rotulo}>Editar nome</Text>
-                          <TextInput
-                            style={estilos.input}
-                            value={nomeEdicao}
-                            onChangeText={setNomeEdicao}
-                            placeholder="Nome do exercício"
-                            placeholderTextColor="#828A85"
-                          />
-                          <View style={estilos.linhaCampos}>
-                            <View style={estilos.campoPequeno}>
-                              <Text style={estilos.rotulo}>Séries</Text>
+                          {exercicioEditando?.id === exercicio.id && (
+                            <View style={estilos.formularioInterno}>
+                              <Text style={estilos.rotulo}>Editar nome</Text>
                               <TextInput
                                 style={estilos.input}
-                                value={seriesEdicao}
-                                onChangeText={setSeriesEdicao}
-                                keyboardType="number-pad"
+                                value={nomeEdicao}
+                                onChangeText={setNomeEdicao}
+                                placeholder="Nome do exercício"
+                                placeholderTextColor="#828A85"
                               />
+                              <View style={estilos.linhaCampos}>
+                                <View style={estilos.campoPequeno}>
+                                  <Text style={estilos.rotulo}>Séries</Text>
+                                  <TextInput
+                                    style={estilos.input}
+                                    value={seriesEdicao}
+                                    onChangeText={setSeriesEdicao}
+                                    keyboardType="number-pad"
+                                  />
+                                </View>
+                                <View style={estilos.campoGrande}>
+                                  <Text style={estilos.rotulo}>Repetições</Text>
+                                  <TextInput
+                                    style={estilos.input}
+                                    value={repeticoesEdicao}
+                                    onChangeText={setRepeticoesEdicao}
+                                  />
+                                </View>
+                              </View>
+                              <View style={estilos.linhaBotoes}>
+                                <TouchableOpacity
+                                  style={estilos.botaoSecundario}
+                                  onPress={() => setExercicioEditando(null)}
+                                >
+                                  <Text style={estilos.textoBotaoSecundario}>
+                                    Cancelar
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={estilos.botaoAdicionarCompacto}
+                                  onPress={salvarEdicao}
+                                  disabled={salvando}
+                                >
+                                  <Text style={estilos.textoBotaoAdicionar}>
+                                    Salvar edição
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
                             </View>
-                            <View style={estilos.campoGrande}>
-                              <Text style={estilos.rotulo}>Repetições</Text>
-                              <TextInput
-                                style={estilos.input}
-                                value={repeticoesEdicao}
-                                onChangeText={setRepeticoesEdicao}
-                              />
-                            </View>
-                          </View>
-                          <View style={estilos.linhaBotoes}>
-                            <TouchableOpacity
-                              style={estilos.botaoSecundario}
-                              onPress={() => setExercicioEditando(null)}
-                            >
-                              <Text style={estilos.textoBotaoSecundario}>
-                                Cancelar
-                              </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={estilos.botaoAdicionarCompacto}
-                              onPress={salvarEdicao}
-                              disabled={salvando}
-                            >
-                              <Text style={estilos.textoBotaoAdicionar}>
-                                Salvar edição
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      )}
+                          )}
 
-                      {exercicioParaCarga?.id === exercicio.id && (
-                        <View style={estilos.formularioInterno}>
-                          <Text style={estilos.descricaoTreino}>
-                            Cargas salvas como referência. Se não houver
-                            evolução, basta consultar e fechar; altere somente
-                            quando quiser atualizar seus valores.
-                          </Text>
-                          <Text style={[estilos.rotulo, { marginTop: 18 }]}>
-                            Registrar cargas por série (kg)
-                          </Text>
-                          {seriesCarga.map((serie, serieIndice) => (
-                            <View
-                              key={`${exercicio.id}-${serieIndice}`}
-                              style={estilos.linhaCampos}
-                            >
-                              <View style={estilos.campoPequeno}>
-                                <Text style={estilos.rotulo}>
-                                  Série {serieIndice + 1} · reps
-                                </Text>
-                                <TextInput
-                                  style={estilos.input}
-                                  value={serie.repeticoes}
-                                  onChangeText={(valor) =>
-                                    atualizarSerieCarga(
-                                      serieIndice,
-                                      "repeticoes",
-                                      valor,
-                                    )
-                                  }
-                                  keyboardType="number-pad"
-                                  placeholder={exercicio.reps_goal}
-                                  placeholderTextColor="#828A85"
-                                />
-                              </View>
-                              <View style={estilos.campoGrande}>
-                                <Text style={estilos.rotulo}>Carga (kg)</Text>
-                                <TextInput
-                                  style={estilos.input}
-                                  value={serie.carga}
-                                  onChangeText={(valor) =>
-                                    atualizarSerieCarga(
-                                      serieIndice,
-                                      "carga",
-                                      valor,
-                                    )
-                                  }
-                                  keyboardType="decimal-pad"
-                                  placeholder="Ex.: 20"
-                                  placeholderTextColor="#828A85"
-                                />
+                          {exercicioParaCarga?.id === exercicio.id && (
+                            <View style={estilos.formularioInterno}>
+                              <Text style={estilos.descricaoTreino}>
+                                Cargas salvas como referência. Se não houver
+                                evolução, basta consultar e fechar; altere
+                                somente quando quiser atualizar seus valores.
+                              </Text>
+                              <Text style={[estilos.rotulo, { marginTop: 18 }]}>
+                                Registrar cargas por série (kg)
+                              </Text>
+                              <RepetirCarga
+                                marcado={repetirCarga}
+                                cor={corTema}
+                                bloqueado={salvando}
+                                onAlterar={(valor) => {
+                                  setRepetirCarga(valor);
+                                  if (valor)
+                                    setSeriesCarga((atuais) =>
+                                      atuais.map((serie) => ({
+                                        ...serie,
+                                        carga: atuais[0]?.carga ?? "",
+                                      })),
+                                    );
+                                }}
+                              />
+                              {seriesCarga.map((serie, serieIndice) => (
+                                <View
+                                  key={`${exercicio.id}-${serieIndice}`}
+                                  style={estilos.linhaCampos}
+                                >
+                                  <View style={estilos.campoPequeno}>
+                                    <Text style={estilos.rotulo}>
+                                      Série {serieIndice + 1} · reps
+                                    </Text>
+                                    <TextInput
+                                      style={estilos.input}
+                                      value={serie.repeticoes}
+                                      onChangeText={(valor) =>
+                                        atualizarSerieCarga(
+                                          serieIndice,
+                                          "repeticoes",
+                                          valor,
+                                        )
+                                      }
+                                      keyboardType="number-pad"
+                                      placeholder={exercicio.reps_goal}
+                                      placeholderTextColor="#828A85"
+                                    />
+                                  </View>
+                                  <View style={estilos.campoGrande}>
+                                    <Text style={estilos.rotulo}>
+                                      Carga (kg)
+                                    </Text>
+                                    <TextInput
+                                      style={estilos.input}
+                                      value={serie.carga}
+                                      onChangeText={(valor) =>
+                                        atualizarSerieCarga(
+                                          serieIndice,
+                                          "carga",
+                                          valor,
+                                        )
+                                      }
+                                      keyboardType="decimal-pad"
+                                      placeholder="Ex.: 20"
+                                      placeholderTextColor="#828A85"
+                                    />
+                                  </View>
+                                </View>
+                              ))}
+                              <View style={estilos.linhaBotoes}>
+                                <TouchableOpacity
+                                  style={estilos.botaoSecundario}
+                                  onPress={() => setExercicioParaCarga(null)}
+                                >
+                                  <Text style={estilos.textoBotaoSecundario}>
+                                    Cancelar
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={estilos.botaoAdicionarCompacto}
+                                  onPress={salvarCargas}
+                                  disabled={salvando}
+                                >
+                                  <Text style={estilos.textoBotaoAdicionar}>
+                                    {salvando ? "Salvando..." : "Salvar cargas"}
+                                  </Text>
+                                </TouchableOpacity>
                               </View>
                             </View>
-                          ))}
-                          <View style={estilos.linhaBotoes}>
-                            <TouchableOpacity
-                              style={estilos.botaoSecundario}
-                              onPress={() => setExercicioParaCarga(null)}
-                            >
-                              <Text style={estilos.textoBotaoSecundario}>
-                                Cancelar
-                              </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={estilos.botaoAdicionarCompacto}
-                              onPress={salvarCargas}
-                              disabled={salvando}
-                            >
-                              <Text style={estilos.textoBotaoAdicionar}>
-                                {salvando ? "Salvando..." : "Salvar cargas"}
-                              </Text>
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      )}
+                          )}
+                        </>
+                      ) : null}
                     </View>
                   ))}
                 </View>

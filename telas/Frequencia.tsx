@@ -1,4 +1,10 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   ActivityIndicator,
@@ -76,6 +82,7 @@ type SessaoCardio = {
 };
 type Props = {
   onVoltar: () => void;
+  cardioInicialId?: string;
   corTema?: string;
 };
 
@@ -112,7 +119,11 @@ function lerNumero(valor: string): number | null {
   return Number.isFinite(numero) ? numero : Number.NaN;
 }
 
-export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
+export default function Frequencia({
+  onVoltar,
+  cardioInicialId,
+  corTema = "#35D07F",
+}: Props) {
   const hoje = new Date();
   const [usuarioId, setUsuarioId] = useState("");
   const [mesAtual, setMesAtual] = useState(
@@ -248,7 +259,9 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
             .abortSignal(controlador.signal),
           supabase
             .from("workout_sessions")
-            .select("id, plan_id, started_at, notes, status, duration_minutes, intensity, active_calories")
+            .select(
+              "id, plan_id, started_at, notes, status, duration_minutes, intensity, active_calories",
+            )
             .eq("user_id", usuario.user.id)
             .gte("started_at", inicioMes)
             .lt("started_at", fimMes)
@@ -449,9 +462,16 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     setDataSelecionada(dataLocal(novoMes));
   }
   async function aoRegistrarTreino(pendente: boolean, mensagem?: string) {
-    registrarMudancaDeDados(); setTreinoSelecionado("");
+    registrarMudancaDeDados();
+    setTreinoSelecionado("");
     await carregarDados();
-    Alert.alert(pendente ? "Registro guardado neste aparelho" : "Treino registrado", pendente ? (mensagem ?? "O envio será retomado com o aplicativo aberto e conexão disponível.") : "Séries realizadas, duração, intensidade e estimativa calórica foram salvas no histórico.");
+    Alert.alert(
+      pendente ? "Registro guardado neste aparelho" : "Treino registrado",
+      pendente
+        ? (mensagem ??
+            "O envio será retomado com o aplicativo aberto e conexão disponível.")
+        : "Séries realizadas, duração, intensidade e estimativa calórica foram salvas no histórico.",
+    );
   }
   function selecionarCardio(modelo: CardioModelo) {
     const categoria = categoriaDoCardio(modelo.tipo);
@@ -469,6 +489,19 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
     setInclinacaoCardio(categoria === "esteira" ? "0" : "");
     setAndaresSubidos("");
   }
+
+  const cardioInicialAplicado = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!cardioInicialId || cardioInicialAplicado.current === cardioInicialId)
+      return;
+    const modelo = modelosCardio.find((item) => item.id === cardioInicialId);
+    if (!modelo) return;
+    cardioInicialAplicado.current = cardioInicialId;
+    selecionarCardio(modelo);
+    setMensagemStatus(
+      `Cardio selecionado: ${modelo.nome}. Confira os dados e confirme o registro abaixo.`,
+    );
+  }, [cardioInicialId, modelosCardio]);
 
   async function registrarCardio() {
     if (!usuarioId || !cardioSelecionado || !dataSelecionada) {
@@ -730,8 +763,14 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
 
     try {
       await excluirRegistroFrequencia(usuarioId, registro);
-      if (registro.tipo === "treino") setSessoes(atuais => atuais.filter(item => item.id !== registro.id));
-      else setSessoesCardio(atuais => atuais.filter(item => item.id !== registro.id));
+      if (registro.tipo === "treino")
+        setSessoes((atuais) =>
+          atuais.filter((item) => item.id !== registro.id),
+        );
+      else
+        setSessoesCardio((atuais) =>
+          atuais.filter((item) => item.id !== registro.id),
+        );
       setRegistroParaExcluir(null);
       if (registro.tipo === "treino") setTreinoSelecionado("");
       if (registro.tipo === "cardio") setCardioSelecionado("");
@@ -740,7 +779,11 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
         `${registro.tipo === "treino" ? "Treino" : "Cardio"} excluído. Os outros registros desse dia foram mantidos.`,
       );
     } catch (erro) {
-      setMensagemStatus(erro instanceof Error ? erro.message : "Ocorreu um erro ao excluir o registro selecionado.");
+      setMensagemStatus(
+        erro instanceof Error
+          ? erro.message
+          : "Ocorreu um erro ao excluir o registro selecionado.",
+      );
     } finally {
       exclusaoEmAndamento.current = false;
       setSalvando(false);
@@ -926,8 +969,35 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                   </TouchableOpacity>
                 );
               })}
-              {treinoSelecionado ? <FormularioRegistroTreino key={usuarioId + ":" + treinoSelecionado + ":" + dataSelecionada} usuarioId={usuarioId} planId={treinoSelecionado} planName={treinos.find(t => t.id === treinoSelecionado)?.name ?? "Treino"} dia={dataSelecionada}
-                perfil={pesoUsuario !== null && alturaUsuario !== null && idadeUsuario !== null && sexoUsuario !== null ? { pesoKg: pesoUsuario, alturaCm: alturaUsuario, idade: idadeUsuario, sexo: sexoUsuario } : null} cor={corTema} onSalvo={aoRegistrarTreino} /> : null}
+              {treinoSelecionado ? (
+                <FormularioRegistroTreino
+                  key={
+                    usuarioId + ":" + treinoSelecionado + ":" + dataSelecionada
+                  }
+                  usuarioId={usuarioId}
+                  planId={treinoSelecionado}
+                  planName={
+                    treinos.find((t) => t.id === treinoSelecionado)?.name ??
+                    "Treino"
+                  }
+                  dia={dataSelecionada}
+                  perfil={
+                    pesoUsuario !== null &&
+                    alturaUsuario !== null &&
+                    idadeUsuario !== null &&
+                    sexoUsuario !== null
+                      ? {
+                          pesoKg: pesoUsuario,
+                          alturaCm: alturaUsuario,
+                          idade: idadeUsuario,
+                          sexo: sexoUsuario,
+                        }
+                      : null
+                  }
+                  cor={corTema}
+                  onSalvo={aoRegistrarTreino}
+                />
+              ) : null}
             </>
           )}
         </View>
@@ -952,7 +1022,17 @@ export default function Frequencia({ onVoltar, corTema = "#35D07F" }: Props) {
                         >
                           ✓ {nomeTreino}
                         </Text>
-                        {sessao.duration_minutes != null ? <Text style={estilos.textoSecundario}>{sessao.duration_minutes} min · {sessao.intensity ?? "intensidade não informada"}{sessao.active_calories != null ? " · ≈ " + sessao.active_calories + " kcal ativas" : " · calorias não estimadas"}</Text> : null}
+                        {sessao.duration_minutes != null ? (
+                          <Text style={estilos.textoSecundario}>
+                            {sessao.duration_minutes} min ·{" "}
+                            {sessao.intensity ?? "intensidade não informada"}
+                          </Text>
+                        ) : null}
+                        <Text style={estilos.textoSecundario}>
+                          {sessao.active_calories != null
+                            ? `🔥 ≈ ${Math.round(Number(sessao.active_calories))} kcal ativas estimadas`
+                            : "Calorias não estimadas neste registro"}
+                        </Text>
                         <Text style={estilos.textoSecundario}>
                           {new Date(sessao.started_at).toLocaleTimeString(
                             "pt-BR",

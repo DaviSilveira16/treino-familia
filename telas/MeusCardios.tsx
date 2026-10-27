@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
+import { registrarMudancaDeDados } from "../servicos/revisaoDados";
 import { categoriaDoCardio } from "../servicos/caloriasCardio";
 
 type Cardio = {
@@ -22,7 +23,11 @@ type Cardio = {
   calorias: number | null;
   observacoes: string | null;
 };
-type Props = { onVoltar: () => void; corTema?: string };
+type Props = {
+  onVoltar: () => void;
+  onRegistrar: (cardioId: string) => void;
+  corTema?: string;
+};
 const TIPOS = [
   "Escadas",
   "Esteira",
@@ -39,7 +44,11 @@ function permiteDistancia(tipo: string) {
   );
 }
 
-export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
+export default function MeusCardios({
+  onVoltar,
+  onRegistrar,
+  corTema = "#35D07F",
+}: Props) {
   const [cardios, setCardios] = useState<Cardio[]>([]);
   const [usuarioId, setUsuarioId] = useState("");
   const [nome, setNome] = useState("");
@@ -143,6 +152,7 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
             .eq("user_id", usuarioId)
         : await supabase.from("cardio_activities").insert(registro);
       if (resposta.error) throw resposta.error;
+      registrarMudancaDeDados();
       limparFormulario();
       await carregar();
       Alert.alert(
@@ -178,6 +188,7 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
               .eq("user_id", usuarioId);
             if (error) Alert.alert("Erro", error.message);
             else {
+              registrarMudancaDeDados();
               if (editando === cardio.id) limparFormulario();
               await carregar();
             }
@@ -206,8 +217,34 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
           no Histórico.
         </Text>
         <View style={estilos.cartao}>
+          <Text style={estilos.tituloCartao}>Usar um cardio pronto</Text>
+          <Text style={estilos.subtitulo}>
+            Escolha a modalidade, informe seus valores de referência e salve.
+            Para registrar uma atividade realizada, use “Registrar sessão” em um
+            cardio salvo.
+          </Text>
+          <View style={estilos.tipos}>
+            {TIPOS.map((item) => (
+              <TouchableOpacity
+                key={item}
+                accessibilityRole="button"
+                accessibilityLabel={`Usar modelo de ${item}`}
+                disabled={salvando}
+                onPress={() => {
+                  limparFormulario();
+                  setNome(item);
+                  setTipo(item);
+                }}
+                style={estilos.tipo}
+              >
+                <Text style={estilos.tipoTexto}>{item}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+        <View style={estilos.cartao}>
           <Text style={estilos.tituloCartao}>
-            {editando ? "Editar cardio" : "Cadastrar cardio"}
+            {editando ? "Editar cardio" : "Criar ou salvar modelo de cardio"}
           </Text>
           <Text style={estilos.rotulo}>Nome</Text>
           <TextInput
@@ -298,7 +335,7 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
               <ActivityIndicator color="#101312" />
             ) : (
               <Text style={estilos.textoBotao}>
-                {editando ? "Salvar alterações" : "Salvar cardio"}
+                {editando ? "Salvar alterações" : "Salvar modelo de cardio"}
               </Text>
             )}
           </TouchableOpacity>
@@ -337,6 +374,30 @@ export default function MeusCardios({ onVoltar, corTema = "#35D07F" }: Props) {
                 ) : null}
               </View>
               <View style={estilos.acoes}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={`Registrar sessão de ${cardio.nome}`}
+                  disabled={salvando}
+                  onPress={() => onRegistrar(cardio.id)}
+                >
+                  <Text style={[estilos.acao, { color: corTema }]}>
+                    Registrar sessão
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={`Salvar cópia de ${cardio.nome}`}
+                  disabled={salvando}
+                  onPress={() => {
+                    editar(cardio);
+                    setEditando(null);
+                    setNome(`${cardio.nome} (cópia)`);
+                  }}
+                >
+                  <Text style={[estilos.acao, { color: corTema }]}>
+                    Salvar como novo
+                  </Text>
+                </TouchableOpacity>
                 <TouchableOpacity onPress={() => editar(cardio)}>
                   <Text style={[estilos.acao, { color: corTema }]}>Editar</Text>
                 </TouchableOpacity>

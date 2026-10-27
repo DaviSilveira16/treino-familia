@@ -459,6 +459,10 @@ async function enviar(
     if (local?.finalizacao && !local.series.some((serie) => serie.pendente)) {
       await garantirEnvioPermitido(usuarioId, sessaoId);
       const finalizacao = local.finalizacao;
+      // O plano e os exercícios devem existir antes de a confirmação tirar a tela.
+      // IDs persistidos permitem retomar uma resposta perdida sem duplicar o plano.
+      await salvarModeloDoTreino(local, true);
+      if (finalizacao.modelo) registrarMudancaDeDados();
       if (situacao !== "confirmada") {
         let encerrar = supabase
           .from("workout_sessions")
@@ -860,6 +864,10 @@ export async function liberarTreinosEncerrados(usuarioId: string) {
       throw new Error(
         "Existe uma sessão realmente em andamento ou ainda não enviada. Conclua ou envie essa sessão antes de iniciar outra.",
       );
+    }
+    if (atual.finalizacao?.modelo && remota?.status === "concluido") {
+      await salvarModeloDoTreino(atual);
+      registrarMudancaDeDados();
     }
     await arquivarParaNovoTreino(
       usuarioId,

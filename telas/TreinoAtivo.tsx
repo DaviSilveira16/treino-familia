@@ -24,6 +24,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabase";
 import {
   apagarRascunho,
+  atualizarRascunho,
   gravarRascunho,
   lerRascunho,
   mesclarSeries,
@@ -73,9 +74,11 @@ import EditorExercicioSessao, {
   type DadosEditorExercicio,
 } from "../componentes/EditorExercicioSessao";
 import ResumoRegistroTreino from "../componentes/ResumoRegistroTreino";
+import RepetirCarga from "../componentes/RepetirCarga";
 import ProgressoFinalizacao from "../componentes/ProgressoFinalizacao";
 import { estimarTempoFinalizacao } from "../servicos/tempoFinalizacao";
 import {
+  repetirCargaNasSeries,
   criarExercicioSessao,
   acrescentarSerie,
   retirarSerie,
@@ -184,6 +187,7 @@ export default function TreinoAtivo({
   >("sessao");
   const [nomeNovoPlano, setNomeNovoPlano] = useState("");
   const [erroConclusao, setErroConclusao] = useState("");
+  const [aceitarCargaZero, setAceitarCargaZero] = useState(false);
   const [inicioFinalizacao, setInicioFinalizacao] = useState<number | null>(
     null,
   );
@@ -631,7 +635,7 @@ export default function TreinoAtivo({
             exercise_name: exercicio.name,
             set_number: indice + 1,
             reps: existente ? String(existente.reps) : repeticoesPadrao,
-            weight_kg: existente ? String(existente.weight_kg) : "0",
+            weight_kg: existente ? String(existente.weight_kg) : "",
             concluida: false,
           } as SerieAtiva;
         });
@@ -1069,6 +1073,13 @@ export default function TreinoAtivo({
     },
     [],
   );
+  const repetirCarga = useCallback((exercicioId: string, carga: string) => {
+    if (finalizacaoRef.current || bloqueioRef.current || salvandoRef.current)
+      return;
+    const novas = repetirCargaNasSeries(seriesRef.current, exercicioId, carga);
+    seriesRef.current = novas;
+    setSeries(novas);
+  }, []);
   const alterarDescanso = useCallback((valor: DescansoTreino) => {
     if (finalizacaoRef.current) return;
     descansoRef.current = valor;
@@ -1207,36 +1218,69 @@ export default function TreinoAtivo({
     !bloqueioRef.current &&
     !salvandoRef.current &&
     !chaveSalvandoRef.current &&
-    !sincronizandoRef.current &&
     !!sessaoRef.current;
   async function guardarAdaptacao(
     novosExercicios: PlanoExercicio[],
     novasSeries: SerieAtiva[],
   ) {
+    const sessaoAtual = sessaoRef.current;
+    if (!sessaoAtual)
+      throw new Error("Inicie o treino antes de adicionar exercícios.");
+    const anteriores = new Map(
+      seriesRef.current.map((serie) => [serie.chave, serie]),
+    );
     salvandoRef.current = true;
     setSalvando(true);
-    const antigosExercicios = exerciciosRef.current,
-      antigasSeries = seriesRef.current;
-    exerciciosRef.current = novosExercicios;
-    seriesRef.current = novasSeries;
     try {
-      await salvarLocal(novasSeries);
-    } catch (erro) {
-      exerciciosRef.current = antigosExercicios;
-      seriesRef.current = antigasSeries;
-      throw erro;
+      await comFilaTreinoPausada(usuarioRef.current, async () => {
+        const salvo = await atualizarRascunho(
+          usuarioRef.current,
+          planId,
+          (atual) => {
+            if (
+              atual.sessao.id !== sessaoAtual.id ||
+              atual.finalizacao ||
+              atual.encerradaNoServidor
+            )
+              throw new Error(
+                "Esta sessão já foi encerrada. Abra um novo treino.",
+              );
+            const recentes = new Map(
+              atual.series.map((serie) => [serie.chave, serie]),
+            );
+            return {
+              ...atual,
+              exercicios: novosExercicios,
+              salvoEm: new Date().toISOString(),
+              series: novasSeries.map((serie) => {
+                const anterior = anteriores.get(serie.chave),
+                  recente = recentes.get(serie.chave);
+                if (!anterior || !recente) return serie;
+                if (mesmaOperacao(serie, anterior))
+                  return anterior.pendente || anterior.concluida
+                    ? { ...recente, exercise_name: serie.exercise_name }
+                    : serie;
+                if (serie.excluida && !mesmaOperacao(recente, anterior))
+                  return retirarSerie(recente);
+                return serie;
+              }),
+            };
+          },
+        );
+        if (!salvo)
+          throw new Error("O rascunho não foi encontrado. Reabra o treino.");
+        exerciciosRef.current = salvo.exercicios;
+        seriesRef.current = salvo.series;
+        setExercicios(salvo.exercicios);
+        setSeries(salvo.series);
+      });
+      setMensagem(
+        "Exercício guardado nesta sessão. Ao finalizar, escolha criar um novo treino ou adicionar ao original para usá-lo depois.",
+      );
     } finally {
       salvandoRef.current = false;
       setSalvando(false);
     }
-    // A render caused by the saving indicator may have restored the previous refs.
-    exerciciosRef.current = novosExercicios;
-    seriesRef.current = novasSeries;
-    setExercicios(novosExercicios);
-    setSeries(novasSeries);
-    setMensagem(
-      "Adaptação guardada nesta sessão. O plano original permanece salvo.",
-    );
     void sincronizar();
   }
   async function salvarExercicio(dados: DadosEditorExercicio) {
@@ -1246,7 +1290,7 @@ export default function TreinoAtivo({
       dados.nome,
       Number(dados.series),
       Number(dados.repeticoes),
-      dados.peso.trim() ? Number(dados.peso.replace(",", ".")) : Number.NaN,
+      dados.peso.trim() ? Number(dados.peso.replace(",", ".")) : null,
     );
     const anterior = exerciciosRef.current.find((e) => e.id === editorId);
     if (!anterior) {
@@ -1430,6 +1474,7 @@ export default function TreinoAtivo({
         ),
       ),
     );
+    setAceitarCargaZero(false);
     setRevisaoFim(fim);
     setDestinoModelo("sessao");
     setNomeNovoPlano("");
@@ -1444,6 +1489,15 @@ export default function TreinoAtivo({
       salvandoRef.current
     )
       return;
+    if (
+      seriesDoResumo.some((serie) => serie.weight_kg === 0) &&
+      !aceitarCargaZero
+    ) {
+      setErroConclusao(
+        "Há séries com carga zero. Escolha editar as cargas ou concluir mesmo assim.",
+      );
+      return;
+    }
     setSalvando(true);
     salvandoRef.current = true;
     setErroConclusao("");
@@ -1801,12 +1855,7 @@ export default function TreinoAtivo({
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel="Adicionar exercício durante o treino"
-              disabled={
-                salvando ||
-                sincronizando ||
-                bloqueioSessao ||
-                Boolean(finalizacao)
-              }
+              disabled={salvando || bloqueioSessao || Boolean(finalizacao)}
               style={[estilos.botaoSecundario, { borderColor: corTema }]}
               onPress={() => setEditorId("novo")}
             >
@@ -1828,14 +1877,11 @@ export default function TreinoAtivo({
                   anterior={ultimasSeries[exercicio.id]}
                   cor={corTema}
                   proximaChave={proximaSerie?.chave}
-                  bloqueado={
-                    salvando ||
-                    sincronizando ||
-                    bloqueioSessao ||
-                    Boolean(finalizacao)
-                  }
+                  bloqueado={salvando || bloqueioSessao || Boolean(finalizacao)}
+                  envioEmCurso={sincronizando}
                   chaveSalvando={chaveEmSalvamento}
                   onCampo={atualizarCampo}
+                  onRepetirCarga={repetirCarga}
                   onAlternar={alternarSerie}
                   onCopiar={copiarUltimaSessao}
                   onEditar={editarExercicio}
@@ -1989,7 +2035,7 @@ export default function TreinoAtivo({
               nome: exercicio?.name ?? "",
               series: String(abertas.length || 3),
               repeticoes: abertas[0]?.reps ?? "10",
-              peso: abertas[0]?.weight_kg ?? "0",
+              peso: abertas[0]?.weight_kg ?? "",
             };
           })()}
         />
@@ -2107,6 +2153,39 @@ export default function TreinoAtivo({
                     ? "Acrescenta somente exercícios novos. Não exclui exercícios nem troca as cargas de referência que já existiam no original."
                     : "Guarda o que você realizou no histórico, sem mudar nenhum plano."}
               </Text>
+              {seriesDoResumo.some((serie) => serie.weight_kg === 0) ? (
+                <View style={{ gap: 10 }}>
+                  <Text style={estilos.aviso}>
+                    Há{" "}
+                    {
+                      seriesDoResumo.filter((serie) => serie.weight_kg === 0)
+                        .length
+                    }{" "}
+                    série(s) concluída(s) sem carga informada ou com 0 kg.
+                  </Text>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Editar cargas zeradas"
+                    disabled={salvando}
+                    style={estilos.botaoSecundario}
+                    onPress={() => {
+                      setRevisaoFim(null);
+                      setMensagem(
+                        "Desmarque a série concluída para editar sua carga e marque-a novamente ao terminar.",
+                      );
+                    }}
+                  >
+                    <Text style={estilos.textoOpcao}>Editar cargas</Text>
+                  </TouchableOpacity>
+                  <RepetirCarga
+                    marcado={aceitarCargaZero}
+                    onAlterar={setAceitarCargaZero}
+                    cor={corTema}
+                    bloqueado={salvando}
+                    rotulo="Concluir mesmo assim com carga zero"
+                  />
+                </View>
+              ) : null}
               {erroConclusao ? (
                 <Text accessibilityRole="alert" style={estilos.aviso}>
                   {erroConclusao}
