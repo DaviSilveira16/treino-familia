@@ -14,9 +14,10 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
-import { SeletorFotoPopup } from "../componentes/SeletorFotoPopup";
+import { EntradaGaleriaWeb } from "../componentes/SeletorGaleriaWeb";
 import ImagemLeve from "./ImagemLeve";
-import * as FileSystem from "expo-file-system/legacy";
+import { File as ArquivoExpo } from "expo-file-system";
+import { decodificarFotoBase64 } from "../servicos/fotoExercicio";
 import { supabase } from "../supabase";
 import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import { obterRevisaoDeDados } from "../servicos/revisaoDados";
@@ -127,43 +128,15 @@ function mensagemErro(problema: unknown, alternativa: string) {
   return alternativa;
 }
 
-function base64ParaArrayBuffer(conteudo: string): ArrayBuffer {
-  const alfabeto =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  const base64 = conteudo.replace(/^data:[^,]*,/, "").replace(/\s/g, "");
-  const preenchimento = base64.endsWith("==")
-    ? 2
-    : base64.endsWith("=")
-      ? 1
-      : 0;
-  const bytes = new Uint8Array(
-    Math.max(0, Math.floor((base64.length * 3) / 4) - preenchimento),
-  );
-  let acumulador = 0;
-  let bitsDisponiveis = 0;
-  let indice = 0;
-
-  for (const caractere of base64) {
-    if (caractere === "=") break;
-    const valor = alfabeto.indexOf(caractere);
-    if (valor < 0) continue;
-    acumulador = ((acumulador << 6) | valor) & 0xffffff;
-    bitsDisponiveis += 6;
-    if (bitsDisponiveis >= 8) {
-      bitsDisponiveis -= 8;
-      if (indice < bytes.length) {
-        bytes[indice++] = (acumulador >> bitsDisponiveis) & 0xff;
-      }
-    }
-  }
-  return bytes.buffer;
-}
-
 async function obterConteudoFoto(
   asset: ImagePicker.ImagePickerAsset,
 ): Promise<Blob | ArrayBuffer> {
   if (Platform.OS === "web" && asset.file) {
-    return asset.file;
+    // O multipart usa o MIME do Blob, mesmo quando o upload recebe contentType.
+    // Alguns provedores Android entregam o arquivo sem o tipo da imagem.
+    return asset.mimeType && asset.file.type !== asset.mimeType
+      ? asset.file.slice(0, asset.file.size, asset.mimeType)
+      : asset.file;
   }
 
   if (Platform.OS === "web") {
@@ -180,12 +153,9 @@ async function obterConteudoFoto(
     return blob;
   }
 
-  const base64 =
-    asset.base64 ||
-    (await FileSystem.readAsStringAsync(asset.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    }));
-  const arquivo = base64ParaArrayBuffer(base64);
+  const arquivo = asset.base64
+    ? decodificarFotoBase64(asset.base64)
+    : await new ArquivoExpo(asset.uri).arrayBuffer();
   if (!arquivo.byteLength) {
     throw new Error(
       "Não foi possível ler os dados da foto no aparelho. Selecione-a novamente.",
@@ -221,7 +191,6 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [textoPublicacao, setTextoPublicacao] = useState("");
   const [fotoSelecionada, setFotoSelecionada] =
     useState<ImagePicker.ImagePickerAsset | null>(null);
-  const [escolhaFotoAberta, setEscolhaFotoAberta] = useState(false);
   const familiaSelecaoFotoRef = useRef<string | null>(null);
   useEffect(() => {
     const uri = fotoSelecionada?.uri;
@@ -882,6 +851,18 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
       });
   }
 
+  function selecionarFotoWeb(imagem: ImagePicker.ImagePickerAsset) {
+    if (familiaSelecaoFotoRef.current !== familiaAtivaIdRef.current) {
+      URL.revokeObjectURL(imagem.uri);
+      avisar(
+        "Família alterada",
+        "Selecione novamente a foto para a família atual.",
+      );
+      return;
+    }
+    setFotoSelecionada(imagem);
+  }
+
   async function obterTreinoCompartilhado(): Promise<{
     nome: string;
     exercicios: ExercicioCompartilhado[];
@@ -1364,7 +1345,6 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
                       setTipoPublicacao(valor);
                       if (valor !== "foto") {
                         setFotoSelecionada(null);
-                        setEscolhaFotoAberta(false);
                       }
                     }}
                     style={[
@@ -1412,35 +1392,80 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
               />
               {tipoPublicacao === "foto" ? (
                 <View style={estilos.fotoArea}>
-                  <TouchableOpacity
-                    style={[estilos.botaoSecundario, { borderColor: corTema }]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Escolher câmera ou fototeca"
-                    disabled={
-                      publicando ||
-                      atualizando ||
-                      criandoFamilia ||
-                      entrandoFamilia
-                    }
-                    onPress={() => {
-                      if (Platform.OS === "web") {
-                        familiaSelecaoFotoRef.current =
-                          familiaAtivaIdRef.current;
-                        setEscolhaFotoAberta(true);
-                      } else {
-                        void escolherFoto();
+                  {Platform.OS === "web" ? (
+                    <>
+                      <EntradaGaleriaWeb
+                        rotulo="Escolher foto da comunidade"
+                        disabled={
+                          publicando ||
+                          atualizando ||
+                          criandoFamilia ||
+                          entrandoFamilia
+                        }
+                        onAbrir={() => {
+                          familiaSelecaoFotoRef.current =
+                            familiaAtivaIdRef.current;
+                        }}
+                        onSelecionar={selecionarFotoWeb}
+                        onErro={(erro) =>
+                          avisar("Não foi possível escolher a foto", erro.message)
+                        }
+                      />
+                      <EntradaGaleriaWeb
+                        rotulo="Tirar foto para a comunidade"
+                        capture="environment"
+                        disabled={
+                          publicando ||
+                          atualizando ||
+                          criandoFamilia ||
+                          entrandoFamilia
+                        }
+                        onAbrir={() => {
+                          familiaSelecaoFotoRef.current =
+                            familiaAtivaIdRef.current;
+                        }}
+                        onSelecionar={selecionarFotoWeb}
+                        onErro={(erro) =>
+                          avisar("Não foi possível escolher a foto", erro.message)
+                        }
+                      />
+                    </>
+                  ) : (
+                    <TouchableOpacity
+                      style={[estilos.botaoSecundario, { borderColor: corTema }]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Escolher foto da comunidade"
+                      disabled={
+                        publicando ||
+                        atualizando ||
+                        criandoFamilia ||
+                        entrandoFamilia
                       }
-                    }}
-                  >
-                    <Text style={{ color: corTema, fontWeight: "800" }}>
-                      {fotoSelecionada ? "Trocar foto" : "Adicionar foto"}
-                    </Text>
-                  </TouchableOpacity>
+                      onPress={escolherFoto}
+                    >
+                      <Text style={{ color: corTema, fontWeight: "800" }}>
+                        {fotoSelecionada ? "Trocar foto" : "Adicionar foto"}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                   {fotoSelecionada ? (
-                    <Image
-                      source={{ uri: fotoSelecionada.uri }}
-                      style={estilos.previewFoto}
-                    />
+                    <>
+                      <Image
+                        accessibilityLabel="Prévia da foto da comunidade"
+                        source={{ uri: fotoSelecionada.uri }}
+                        style={estilos.previewFoto}
+                      />
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        onPress={() => setFotoSelecionada(null)}
+                        disabled={publicando}
+                        style={estilos.botaoSecundario}
+                      >
+                        <Text style={{ color: corTema, fontWeight: "800" }}>
+                          Remover foto
+                        </Text>
+                      </TouchableOpacity>
+                    </>
                   ) : null}
                 </View>
               ) : null}
@@ -1626,31 +1651,6 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
               deste grupo familiar.
             </Text>
           </View>
-        }
-      />
-      <SeletorFotoPopup
-        aberto={escolhaFotoAberta && tipoPublicacao === "foto"}
-        titulo="Adicionar foto à comunidade"
-        bloqueado={
-          publicando || atualizando || criandoFamilia || entrandoFamilia
-        }
-        onFechar={() => setEscolhaFotoAberta(false)}
-        onAbrirSeletor={() => {
-          familiaSelecaoFotoRef.current = familiaAtivaIdRef.current;
-        }}
-        onSelecionar={(imagem) => {
-          if (familiaSelecaoFotoRef.current === familiaAtivaIdRef.current) {
-            setFotoSelecionada(imagem);
-          } else {
-            URL.revokeObjectURL(imagem.uri);
-            avisar(
-              "Família alterada",
-              "Selecione novamente a foto para a família atual.",
-            );
-          }
-        }}
-        onErro={(erro) =>
-          avisar("Não foi possível escolher a foto", erro.message)
         }
       />
     </>

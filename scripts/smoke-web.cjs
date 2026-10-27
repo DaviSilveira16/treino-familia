@@ -153,6 +153,25 @@ const tables = {
   ],
   cardio_sessions: [],
 };
+const storedPhotos = new Map(),
+  photoUploads = [];
+const photoFixture = path.join(root, "public", "treino-familia-icon-192-v2.png");
+function uploadedImage(request) {
+  const body = request.postDataBuffer();
+  const contentType = request.headers()["content-type"] || "";
+  const boundary = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  if (!boundary) return { body, contentType };
+  const part = body
+    .toString("latin1")
+    .split(`--${boundary[1] || boundary[2]}`)
+    .find((item) => /filename=/i.test(item));
+  assert.ok(part, "O upload multipart precisa conter o arquivo da foto");
+  const start = part.indexOf("\r\n\r\n");
+  return {
+    body: Buffer.from(part.slice(start + 4, -2), "latin1"),
+    contentType: part.match(/Content-Type: ([^\r\n]+)/i)?.[1] || "application/octet-stream",
+  };
+}
 let backendOffline = false,
   feedPages = 0;
 let holdSync = false,
@@ -275,6 +294,12 @@ function filtered(table, search) {
       viewport: { width: 390, height: 844 },
       isMobile: true,
       hasTouch: true,
+      ...(process.env.SMOKE_PHOTOS_ONLY && process.env.SMOKE_BROWSER !== "webkit"
+        ? {
+            userAgent:
+              "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+          }
+        : {}),
     });
     let phase = "initial";
     let forcedOffline = false,
@@ -367,6 +392,53 @@ function filtered(table, search) {
           });
         }
         return route.fulfill({ json: user, headers });
+      }
+      if (url.pathname.startsWith("/storage/v1/object/sign/")) {
+        const photoPath = decodeURIComponent(
+          url.pathname.slice("/storage/v1/object/sign/".length),
+        );
+        if (request.method() === "GET") {
+          const photo = storedPhotos.get(photoPath);
+          return route.fulfill({
+            body: photo?.body || fs.readFileSync(photoFixture),
+            headers: { ...headers, "content-type": photo?.contentType || "image/png" },
+          });
+        }
+        const signedURL = (item) => `/object/sign/${item}?token=fixture`;
+        const paths = request.postDataJSON()?.paths;
+        return route.fulfill({
+          json: paths
+            ? paths.map((item) => ({ path: item, signedURL: signedURL(`${photoPath}/${item}`) }))
+            : { signedURL: signedURL(photoPath) },
+          headers,
+        });
+      }
+      if (url.pathname.startsWith("/storage/v1/object/")) {
+        const photoPath = decodeURIComponent(
+          url.pathname.slice("/storage/v1/object/".length),
+        );
+        if (request.method() === "POST") {
+          const photo = { path: photoPath, ...uploadedImage(request) };
+          storedPhotos.set(photoPath, photo);
+          photoUploads.push(photo);
+          return route.fulfill({ json: { Key: photoPath }, headers });
+        }
+        if (request.method() === "DELETE") {
+          for (const prefix of request.postDataJSON()?.prefixes || [])
+            storedPhotos.delete(`${photoPath}/${prefix}`);
+          return route.fulfill({ json: [], headers });
+        }
+      }
+      if (url.pathname.endsWith("/rpc/criar_familia_completa")) {
+        const { p_id: id, p_nome: name } = request.postDataJSON();
+        let family = tables.families.find((item) => item.id === id);
+        if (!family) {
+          family = { id, name, owner_user_id: uid, invite_code: "NOVAFAMILIA" };
+          tables.families.push(family);
+        }
+        if (!tables.family_members.some((member) => member.user_id === uid && member.family_id === id))
+          tables.family_members.push({ user_id: uid, family_id: id, role: "owner" });
+        return route.fulfill({ json: family, headers });
       }
       if (url.pathname.endsWith("/rpc/entrar_na_familia_por_codigo")) {
         const family = tables.families.find(
@@ -598,6 +670,109 @@ function filtered(table, search) {
     await page
       .getByText("Olá, Conta de!", { exact: true })
       .waitFor({ timeout: 15000 });
+    const choosePhoto = async (input, files = photoFixture) => {
+      await input.scrollIntoViewIfNeeded();
+      assert.equal(await input.isVisible(), true);
+      const control = await input.evaluate((element) => ({
+        opacity: getComputedStyle(element).opacity,
+        height: element.getBoundingClientRect().height,
+        accept: element.accept,
+      }));
+      assert.equal(control.opacity, "1", "O seletor precisa estar visível");
+      assert.ok(control.height >= 44, "O campo deve permitir o toque no celular");
+      assert.equal(control.accept, "image/*");
+      const choosing = page.waitForEvent("filechooser");
+      await input.tap();
+      const chooser = await choosing;
+      assert.equal(chooser.isMultiple(), false);
+      await chooser.setFiles(files);
+    };
+    const exercisePhotoRegression = async () => {
+      phase = "exercise photos";
+      const input = page.getByLabel("Escolher foto de Agachamento teste", { exact: true });
+      await input.waitFor();
+      const camera = page.getByLabel("Tirar foto de Agachamento teste", { exact: true });
+      assert.equal(await camera.getAttribute("capture"), "environment");
+      assert.equal(await input.getAttribute("capture"), null, "Galeria não força a câmera");
+      const initialUploads = photoUploads.length;
+      await choosePhoto(input, []);
+      await choosePhoto(camera, []);
+      assert.equal(photoUploads.length, initialUploads, "Cancelar não envia foto");
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const saved = page.waitForRequest(
+          (request) => request.method() === "PATCH" &&
+            request.url().includes("/rest/v1/exercises") &&
+            Boolean(request.postDataJSON()?.photo_path),
+        );
+        await choosePhoto(input);
+        await saved;
+        await page.waitForFunction((label) => !document.querySelector(`input[aria-label="${label}"]`)?.disabled,
+          "Escolher foto de Agachamento teste");
+        assert.equal(await input.inputValue(), "", "Permite selecionar a mesma foto outra vez");
+        const photo = photoUploads.at(-1);
+        assert.ok(photo.path.startsWith(`exercise-photos/${uid}/${eid}/`));
+        assert.equal(photo.contentType, "image/jpeg");
+        assert.deepEqual([...photo.body.subarray(0, 3)], [255, 216, 255], "PNG convertido para JPEG válido");
+        assert.ok(tables.exercises.find((item) => item.id === eid).photo_path.endsWith(".jpg"));
+      }
+      assert.equal(photoUploads.length, initialUploads + 2, "A mesma foto pode ser salva duas vezes");
+      await page.screenshot({ path: path.join(output, "web-foto-exercicio.png") });
+    };
+    const communityPhotoSelection = async (files = photoFixture) => {
+      const input = page.getByLabel("Escolher foto da comunidade", { exact: true });
+      const camera = page.getByLabel("Tirar foto para a comunidade", { exact: true });
+      assert.equal(await camera.getAttribute("capture"), "environment");
+      assert.equal(await input.getAttribute("capture"), null);
+      await choosePhoto(camera, []);
+      const preview = page.getByRole("img", { name: "Prévia da foto da comunidade", exact: true });
+      await choosePhoto(input, files);
+      await preview.waitFor();
+      const previewUri = () => preview.evaluate((element) =>
+        element.getAttribute("src") || element.querySelector("img")?.getAttribute("src"));
+      const selectedUri = await previewUri();
+      assert.ok(selectedUri?.startsWith("blob:"));
+      await choosePhoto(input, []);
+      assert.equal(await previewUri(), selectedUri, "Cancelar mantém a foto escolhida");
+      await choosePhoto(input, files);
+      await preview.waitFor();
+      assert.notEqual(await previewUri(), selectedUri, "A mesma foto pode ser selecionada novamente");
+      assert.equal(await input.inputValue(), "");
+      return preview;
+    };
+    if (process.env.SMOKE_PHOTOS_ONLY) {
+      await page.getByText("Meus treinos", { exact: true }).click();
+      await page.getByText("Plano teste", { exact: true }).filter({ visible: true }).first().click();
+      await exercisePhotoRegression();
+      await page.getByRole("button", { name: "Abrir comunidade da família" }).click();
+      await page.getByRole("button", { name: "Foto", exact: true }).click();
+      const preview = await communityPhotoSelection({
+        name: "FOTO.PNG",
+        mimeType: "application/octet-stream",
+        buffer: fs.readFileSync(photoFixture),
+      });
+      await page.screenshot({ path: path.join(output, "web-foto-comunidade.png") });
+      await page.getByRole("textbox", { name: "Texto para a família selecionada", exact: true })
+        .fill("Foto da comunidade testada no Chrome Android");
+      const uploadedBefore = photoUploads.length;
+      await page.getByRole("button", { name: "Publicar em Família teste", exact: true }).click();
+      await preview.waitFor({ state: "hidden" });
+      assert.equal(photoUploads.length, uploadedBefore + 1);
+      const post = tables.community_posts.find((item) => item.content === "Foto da comunidade testada no Chrome Android");
+      assert.equal(post.family_id, "family-a");
+      assert.equal(post.post_type, "foto");
+      assert.ok(post.image_path.startsWith(`family-a/${uid}/`));
+      assert.ok(storedPhotos.has(`community-photos/${post.image_path}`));
+      assert.equal(photoUploads.at(-1).contentType, "image/png", "O MIME inferido pela extensão também deve chegar ao upload multipart");
+      await page.getByRole("button", { name: "Foto", exact: true }).click();
+      await choosePhoto(page.getByLabel("Escolher foto da comunidade", { exact: true }));
+      await preview.waitFor();
+      await page.getByRole("button", { name: "Remover foto", exact: true }).click();
+      await preview.waitFor({ state: "hidden" });
+      assert.deepEqual(errors, []);
+      console.log(`OK UI — ${process.env.SMOKE_BROWSER === "webkit" ? "WebKit móvel" : "Chrome Android móvel"}: seletores visíveis, câmera, cancelar, repetir foto, JPEG do exercício e publicação na família correta`);
+      await context.close();
+      return;
+    }
     assert.equal(
       await page.evaluate(() => {
         const event = new Event("treino-familia:android-back-v1", {
@@ -1043,7 +1218,8 @@ function filtered(table, search) {
     assert.equal(preserved.rascunho.series[0].weight_kg, "300");
     assert.equal(preserved.rascunho.finalizacao.finishedAt, localFinish);
     await page.getByText("Meus treinos", { exact: true }).click();
-    await page.getByText("Plano teste", { exact: true }).first().click();
+    await page.getByText("Plano teste", { exact: true }).filter({ visible: true }).first().click();
+    await exercisePhotoRegression();
     await page
       .getByText("▶ Iniciar treino com cronômetro", { exact: true })
       .click();
@@ -1539,12 +1715,7 @@ function filtered(table, search) {
     });
     await composer.fill("Rascunho exclusivo da família A");
     await page.getByRole("button", { name: "Foto", exact: true }).click();
-    const photoChooser = page.waitForEvent("filechooser");
-    await page.getByText("Escolher foto", { exact: true }).click();
-    await (
-      await photoChooser
-    ).setFiles(path.join(root, "public", "treino-familia-icon-192-v2.png"));
-    await page.getByText("Trocar foto", { exact: true }).waitFor();
+    const communityPreview = await communityPhotoSelection();
     await page
       .getByRole("button", { name: "Criar outra família", exact: true })
       .click();
@@ -1570,7 +1741,7 @@ function filtered(table, search) {
     assert.equal(tables.family_members.length, 2);
     assert.equal(await composer.inputValue(), "");
     assert.equal(
-      await page.getByText("Trocar foto", { exact: true }).count(),
+      await communityPreview.count(),
       0,
     );
     await composer.fill("Mensagem exclusiva da academia");
@@ -1751,7 +1922,7 @@ function filtered(table, search) {
     assert.equal(tables.cardio_sessions[0].weight_kg_snapshot, 80);
     await page.getByText("‹", { exact: true }).click();
     await page.getByText("15", { exact: true }).click();
-    await page.getByText("Plano teste", { exact: true }).first().click();
+    await page.getByText("Plano teste", { exact: true }).filter({ visible: true }).first().click();
     await page
       .getByRole("textbox", {
         name: "Duração do treino em minutos",
@@ -1923,33 +2094,27 @@ function filtered(table, search) {
     await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
     await page.getByText("Meus Cardios", { exact: true }).click();
-    await page
-      .getByRole("button", { name: "Usar modelo de Caminhada", exact: true })
-      .click();
+    const cardiosBeforeEdit = JSON.stringify(tables.cardio_activities);
+    await page.getByText("Editar", { exact: true }).filter({ visible: true }).first().click();
+    await page.getByText("Editar cardio", { exact: true }).waitFor();
     assert.equal(
       await page
         .getByPlaceholder("Ex.: Escada pós-treino", { exact: true })
+        .filter({ visible: true })
         .inputValue(),
-      "Caminhada",
-    );
-    await page
-      .getByRole("button", {
-        name: "Salvar cópia de Escadas teste",
-        exact: true,
-      })
-      .click();
-    assert.equal(
-      await page
-        .getByPlaceholder("Ex.: Escada pós-treino", { exact: true })
-        .inputValue(),
-      "Escadas teste (cópia)",
+      "Escadas teste",
     );
     assert.equal(
-      await page.getByPlaceholder("Ex.: 20", { exact: true }).inputValue(),
+      await page.getByPlaceholder("Ex.: 20", { exact: true }).filter({ visible: true }).inputValue(),
       "10",
     );
+    assert.equal(
+      JSON.stringify(tables.cardio_activities),
+      cardiosBeforeEdit,
+      "Abrir a edição carrega o cardio existente sem salvar ou criar uma cópia",
+    );
     await page.screenshot({
-      path: path.join(output, "web-cardios-modelos.png"),
+      path: path.join(output, "web-cardios-edicao.png"),
     });
     await page
       .getByRole("button", {
@@ -1966,7 +2131,7 @@ function filtered(table, search) {
     assert.equal(
       tables.cardio_sessions.length,
       1,
-      "Escolher modelo não registra atividade sem confirmação",
+      "Selecionar o cardio existente não registra atividade sem confirmação",
     );
     const unexpectedFetch = nativeFetchReports.filter(
       (report) =>

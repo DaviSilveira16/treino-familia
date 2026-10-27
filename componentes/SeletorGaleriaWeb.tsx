@@ -4,6 +4,7 @@ import { prepararArquivoDaGaleriaWeb } from "../servicos/seletorGaleriaWeb";
 
 type Props = {
   disabled?: boolean;
+  capture?: "environment" | "user";
   onSelecionar: (imagem: ImagePickerAsset) => void;
   onErro: (erro: Error) => void;
   onAbrir?: () => void;
@@ -13,22 +14,21 @@ type Props = {
 /**
  * Seleção direta pelo controle NATIVO de arquivos do navegador.
  *
- * Não envolver em TouchableOpacity, não sobrepor outro botão nem ocultar
- * o input. No Chrome Android, o toque deve chegar diretamente ao <input>
- * visível; picker.open(), input.click() e inputs invisíveis podem ser
- * bloqueados ou perder a ativação do usuário, especialmente em modais.
- * Sem `capture`, para não forçar a câmera no lugar da galeria.
+ * O toque chega ao input visível, sem botões sobrepostos ou abertura
+ * programática. A galeria não recebe `capture`; a câmera usa o app do aparelho.
  */
 export function EntradaGaleriaWeb({
   disabled = false,
+  capture,
   onSelecionar,
   onErro,
   onAbrir,
   rotulo = "Selecionar foto do dispositivo",
 }: Props) {
-  return React.createElement("input", {
+  const entrada = React.createElement("input", {
     type: "file",
     accept: "image/*",
+    capture,
     disabled,
     multiple: false,
     title: rotulo,
@@ -73,4 +73,20 @@ export function EntradaGaleriaWeb({
       pointerEvents: disabled ? "none" : "auto",
     },
   });
+  return (
+    <label
+      style={{
+        display: "block",
+        minWidth: 0,
+        width: "100%",
+        color: "#F3F7F4",
+        fontFamily: "system-ui, sans-serif",
+        fontSize: 13,
+        lineHeight: "20px",
+      }}
+    >
+      <span style={{ display: "block", marginBottom: 4 }}>{rotulo}</span>
+      {entrada}
+    </label>
+  );
 }
