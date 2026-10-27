@@ -832,6 +832,7 @@ export default function MeusTreinos({
       }
       const opcoesImagem: ImagePickerOptions = {
         mediaTypes: ["images"],
+        allowsMultipleSelection: false,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.75,
@@ -1574,42 +1575,105 @@ export default function MeusTreinos({
         animationType="fade"
         visible={Boolean(origemFotoAberta)}
         onRequestClose={() => setOrigemFotoAberta(null)}
+        statusBarTranslucent
       >
         <View
           style={{
             flex: 1,
-            backgroundColor: "#000B",
+            backgroundColor: "#000D",
             justifyContent: "center",
-            padding: 20,
+            padding: 16,
           }}
         >
           <View
             style={{
               width: "100%",
-              maxWidth: 420,
+              maxWidth: 480,
               alignSelf: "center",
               backgroundColor: "#191E1B",
               borderRadius: 18,
-              padding: 20,
-              gap: 12,
+              padding: 16,
+              gap: 14,
+              borderWidth: 1,
+              borderColor: "#303A33",
             }}
           >
-            <Text style={{ color: "#F0F3F1", fontSize: 20, fontWeight: "800" }}>
-              Adicionar foto
+            <Text
+              style={{
+                color: "#F0F3F1",
+                fontSize: 20,
+                fontWeight: "800",
+                textAlign: "center",
+              }}
+            >
+              Visualizar foto
             </Text>
-            <Text style={{ color: "#A4ADA7", lineHeight: 21 }}>
-              Escolha a câmera ou a galeria. O Android solicitará a permissão
-              necessária e abrirá a opção escolhida.
+            <Text
+              style={{
+                color: "#A4ADA7",
+                fontSize: 14,
+                textAlign: "center",
+              }}
+              numberOfLines={2}
+            >
+              {origemFotoAberta?.name ?? "Foto do exercício"}
             </Text>
+            {origemFotoAberta?.photo_url ? (
+              <Image
+                accessibilityLabel={`Foto do exercício ${origemFotoAberta.name}`}
+                source={{ uri: origemFotoAberta.photo_url }}
+                resizeMode="contain"
+                style={{
+                  width: "100%",
+                  height: 280,
+                  maxHeight: "55%",
+                  borderRadius: 12,
+                  backgroundColor: "#0D110F",
+                }}
+              />
+            ) : (
+              <View
+                style={{
+                  width: "100%",
+                  height: 160,
+                  borderRadius: 12,
+                  backgroundColor: "#0D110F",
+                  borderWidth: 1,
+                  borderColor: "#303A33",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 18,
+                }}
+              >
+                <Text
+                  style={{
+                    color: "#A4ADA7",
+                    textAlign: "center",
+                    lineHeight: 21,
+                  }}
+                >
+                  Este exercício ainda não tem foto. Escolha uma imagem da
+                  galeria para adicioná-la.
+                </Text>
+              </View>
+            )}
             <TouchableOpacity
               accessibilityRole="button"
-              onPress={() => escolherFonteFoto("camera")}
+              accessibilityLabel="Escolher uma foto da galeria"
+              onPress={() => escolherFonteFoto("biblioteca")}
+              disabled={Boolean(
+                origemFotoAberta && fotoCarregandoId === origemFotoAberta.id,
+              )}
               style={{
                 minHeight: 50,
                 justifyContent: "center",
                 padding: 12,
                 borderRadius: 10,
                 backgroundColor: corTema,
+                opacity:
+                  origemFotoAberta && fotoCarregandoId === origemFotoAberta.id
+                    ? 0.65
+                    : 1,
               }}
             >
               <Text
@@ -1619,16 +1683,18 @@ export default function MeusTreinos({
                   textAlign: "center",
                 }}
               >
-                Abrir câmera
+                {origemFotoAberta?.photo_path
+                  ? "Escolher outra foto na galeria"
+                  : "Escolher foto da galeria"}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
-              onPress={() => escolherFonteFoto("biblioteca")}
+              onPress={() => escolherFonteFoto("camera")}
               style={{
-                minHeight: 50,
+                minHeight: 46,
                 justifyContent: "center",
-                padding: 12,
+                padding: 11,
                 borderRadius: 10,
                 borderWidth: 1,
                 borderColor: corTema,
@@ -1641,16 +1707,16 @@ export default function MeusTreinos({
                   textAlign: "center",
                 }}
               >
-                Abrir galeria
+                Tirar foto com a câmera
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
               onPress={() => setOrigemFotoAberta(null)}
-              style={{ minHeight: 44, justifyContent: "center" }}
+              style={{ minHeight: 40, justifyContent: "center" }}
             >
               <Text style={{ color: "#A4ADA7", textAlign: "center" }}>
-                Cancelar
+                Fechar visualização
               </Text>
             </TouchableOpacity>
           </View>
