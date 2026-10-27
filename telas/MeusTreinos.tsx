@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { Alert } from "../servicos/alerta";
 import RepetirCarga from "../componentes/RepetirCarga";
+import SeletorGaleriaWeb from "../componentes/SeletorGaleriaWeb";
 import * as ImagePicker from "expo-image-picker";
 import type { ImagePickerAsset, ImagePickerOptions } from "expo-image-picker";
 import { prepararFotoExercicio } from "../servicos/fotoExercicio";
@@ -749,9 +750,8 @@ export default function MeusTreinos({
     if (!exercicio) return;
 
     if (origem === "biblioteca" && Platform.OS === "web") {
-      // Abre o seletor nativo do navegador no mesmo toque do usuário.
-      // Mantemos a janela aberta até o navegador concluir/cancelar a seleção.
-      selecionarFotoGaleriaWeb(exercicio);
+      // Na web, a entrada HTML visível ao toque (transparente) abre a galeria.
+      // Não usamos click() sintético porque alguns navegadores móveis bloqueiam.
       return;
     }
 
@@ -769,95 +769,6 @@ export default function MeusTreinos({
     }
 
     void adicionarOuTrocarFoto(exercicio, origem);
-  }
-
-  function selecionarFotoGaleriaWeb(exercicio: Exercicio) {
-    if (typeof document === "undefined") {
-      mostrarMensagem(
-        "Galeria indisponível",
-        "Abra o Treino Família no navegador do aparelho e tente novamente.",
-      );
-      return;
-    }
-
-    const entrada = document.createElement("input");
-    entrada.type = "file";
-    entrada.accept = "image/*";
-    entrada.multiple = false;
-    entrada.setAttribute("aria-label", "Escolher uma foto da galeria");
-    // Não usar display:none: em alguns navegadores móveis isso impede que
-    // o seletor seja aberto programaticamente. showPicker é chamado no toque.
-    entrada.style.position = "fixed";
-    entrada.style.left = "0";
-    entrada.style.top = "0";
-    entrada.style.width = "1px";
-    entrada.style.height = "1px";
-    entrada.style.opacity = "0";
-    entrada.style.pointerEvents = "none";
-    entrada.style.zIndex = "-1";
-
-    let finalizada = false;
-    const limparEntrada = () => {
-      if (finalizada) return;
-      finalizada = true;
-      entrada.removeEventListener("change", aoMudarArquivo);
-      entrada.removeEventListener("cancel", limparEntrada);
-      entrada.remove();
-    };
-
-    const aoMudarArquivo = () => {
-      const arquivo = entrada.files?.item(0) ?? null;
-      limparEntrada();
-      if (!arquivo) return;
-
-      if (!arquivo.type.startsWith("image/")) {
-        mostrarMensagem(
-          "Arquivo inválido",
-          "Escolha uma imagem da galeria, como JPG, PNG ou WebP.",
-        );
-        return;
-      }
-
-      const uri = URL.createObjectURL(arquivo);
-      const imagem = {
-        uri,
-        file: arquivo,
-        fileName: arquivo.name,
-        fileSize: arquivo.size,
-        width: 0,
-        height: 0,
-        type: "image",
-        mimeType: arquivo.type || undefined,
-      } as ImagePickerAsset;
-
-      setOrigemFotoAberta(null);
-      void adicionarOuTrocarFoto(exercicio, "biblioteca", imagem).finally(() =>
-        URL.revokeObjectURL(uri),
-      );
-    };
-
-    entrada.addEventListener("change", aoMudarArquivo);
-    entrada.addEventListener("cancel", limparEntrada);
-    document.body.appendChild(entrada);
-
-    // showPicker() é a API própria para abrir o seletor do navegador a partir
-    // de um toque; click() permanece como alternativa para navegadores antigos.
-    try {
-      if (typeof entrada.showPicker === "function") entrada.showPicker();
-      else entrada.click();
-    } catch {
-      try {
-        entrada.click();
-      } catch (erro) {
-        limparEntrada();
-        mostrarMensagem(
-          "Não foi possível abrir a galeria",
-          erro instanceof Error
-            ? erro.message
-            : "Tente novamente pelo Chrome do Android.",
-        );
-      }
-    }
   }
 
   function capturarFotoDaCamera() {
@@ -1755,37 +1666,58 @@ export default function MeusTreinos({
                 </Text>
               </View>
             )}
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel="Escolher uma foto da galeria"
-              onPress={() => escolherFonteFoto("biblioteca")}
+            <SeletorGaleriaWeb
               disabled={Boolean(
                 origemFotoAberta && fotoCarregandoId === origemFotoAberta.id,
               )}
-              style={{
-                minHeight: 50,
-                justifyContent: "center",
-                padding: 12,
-                borderRadius: 10,
-                backgroundColor: corTema,
-                opacity:
-                  origemFotoAberta && fotoCarregandoId === origemFotoAberta.id
-                    ? 0.65
-                    : 1,
+              onSelecionar={(imagem) => {
+                const exercicio = origemFotoAberta;
+                if (!exercicio) {
+                  URL.revokeObjectURL(imagem.uri);
+                  return;
+                }
+                setOrigemFotoAberta(null);
+                void adicionarOuTrocarFoto(
+                  exercicio,
+                  "biblioteca",
+                  imagem,
+                ).finally(() => URL.revokeObjectURL(imagem.uri));
               }}
             >
-              <Text
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Escolher uma foto da galeria"
+                onPress={() => {
+                  if (Platform.OS !== "web") escolherFonteFoto("biblioteca");
+                }}
+                disabled={Boolean(
+                  origemFotoAberta && fotoCarregandoId === origemFotoAberta.id,
+                )}
                 style={{
-                  color: "#101312",
-                  fontWeight: "800",
-                  textAlign: "center",
+                  minHeight: 50,
+                  justifyContent: "center",
+                  padding: 12,
+                  borderRadius: 10,
+                  backgroundColor: corTema,
+                  opacity:
+                    origemFotoAberta && fotoCarregandoId === origemFotoAberta.id
+                      ? 0.65
+                      : 1,
                 }}
               >
-                {origemFotoAberta?.photo_path
-                  ? "Escolher outra foto na galeria"
-                  : "Escolher foto da galeria"}
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={{
+                    color: "#101312",
+                    fontWeight: "800",
+                    textAlign: "center",
+                  }}
+                >
+                  {origemFotoAberta?.photo_path
+                    ? "Escolher outra foto na galeria"
+                    : "Escolher foto da galeria"}
+                </Text>
+              </TouchableOpacity>
+            </SeletorGaleriaWeb>
             <TouchableOpacity
               accessibilityRole="button"
               onPress={() => escolherFonteFoto("camera")}

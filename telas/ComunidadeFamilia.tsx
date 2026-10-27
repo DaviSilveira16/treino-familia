@@ -26,6 +26,7 @@ import {
   type CursorData,
 } from "../servicos/paginacaoHistorico";
 
+import SeletorGaleriaWeb from "../componentes/SeletorGaleriaWeb";
 import MinhasFamilias from "../componentes/MinhasFamilias";
 import {
   criarFamiliaComId,
@@ -1385,20 +1386,43 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
             />
             {tipoPublicacao === "foto" ? (
               <View style={estilos.fotoArea}>
-                <TouchableOpacity
-                  style={[estilos.botaoSecundario, { borderColor: corTema }]}
+                <SeletorGaleriaWeb
                   disabled={
                     publicando ||
                     atualizando ||
                     criandoFamilia ||
                     entrandoFamilia
                   }
-                  onPress={escolherFoto}
+                  onSelecionar={(imagem) => {
+                    if (
+                      publicandoRef.current ||
+                      mutandoFamiliaRef.current ||
+                      carregandoInicialRef.current
+                    ) {
+                      if (imagem.uri.startsWith("blob:"))
+                        URL.revokeObjectURL(imagem.uri);
+                      return;
+                    }
+                    setFotoSelecionada(imagem);
+                  }}
                 >
-                  <Text style={{ color: corTema, fontWeight: "800" }}>
-                    {fotoSelecionada ? "Trocar foto" : "Escolher foto"}
-                  </Text>
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[estilos.botaoSecundario, { borderColor: corTema }]}
+                    disabled={
+                      publicando ||
+                      atualizando ||
+                      criandoFamilia ||
+                      entrandoFamilia
+                    }
+                    onPress={() => {
+                      if (Platform.OS !== "web") void escolherFoto();
+                    }}
+                  >
+                    <Text style={{ color: corTema, fontWeight: "800" }}>
+                      {fotoSelecionada ? "Trocar foto" : "Escolher foto"}
+                    </Text>
+                  </TouchableOpacity>
+                </SeletorGaleriaWeb>
                 {fotoSelecionada ? (
                   <Image
                     source={{ uri: fotoSelecionada.uri }}
