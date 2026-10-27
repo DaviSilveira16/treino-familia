@@ -17,6 +17,7 @@ import RepetirCarga from "../componentes/RepetirCarga";
 import * as ImagePicker from "expo-image-picker";
 import type { ImagePickerAsset, ImagePickerOptions } from "expo-image-picker";
 import { prepararFotoExercicio } from "../servicos/fotoExercicio";
+import { selecionarImagemDaGaleriaWeb } from "../servicos/seletorGaleriaWeb";
 import { supabase } from "../supabase";
 import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import {
@@ -749,10 +750,23 @@ export default function MeusTreinos({
     if (!exercicio) return;
 
     if (origem === "biblioteca" && Platform.OS === "web") {
-      // O ImagePicker é acionado diretamente no toque do botão, como exige o navegador.
-      // Chamamos antes de fechar o modal para preservar a ativação do usuário.
-      void adicionarOuTrocarFoto(exercicio, "biblioteca");
+      // O seletor é aberto com input.click() diretamente no toque do usuário,
+      // evitando o clique sintético usado pelo expo-image-picker web.
+      const selecao = selecionarImagemDaGaleriaWeb();
       setOrigemFotoAberta(null);
+      void selecao
+        .then((imagem) => {
+          if (imagem)
+            void adicionarOuTrocarFoto(exercicio, "biblioteca", imagem);
+        })
+        .catch((erro: unknown) => {
+          mostrarMensagem(
+            "Não foi possível abrir a galeria",
+            erro instanceof Error
+              ? erro.message
+              : "Tente novamente pelo navegador.",
+          );
+        });
       return;
     }
 
@@ -929,6 +943,13 @@ export default function MeusTreinos({
           : "Não foi possível selecionar ou enviar a foto.",
       );
     } finally {
+      if (
+        Platform.OS === "web" &&
+        fotoCapturada?.uri.startsWith("blob:") &&
+        typeof URL !== "undefined"
+      ) {
+        URL.revokeObjectURL(fotoCapturada.uri);
+      }
       setFotoCarregandoId(null);
     }
   }

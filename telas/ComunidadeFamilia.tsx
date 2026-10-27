@@ -14,6 +14,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
+import { selecionarImagemDaGaleriaWeb } from "../servicos/seletorGaleriaWeb";
 import ImagemLeve from "./ImagemLeve";
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../supabase";
@@ -847,7 +848,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
     }
   }
 
-  async function escolherFoto() {
+  function escolherFoto() {
     if (
       publicandoRef.current ||
       mutandoFamiliaRef.current ||
@@ -855,19 +856,48 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
     )
       return;
     const destino = familiaAtivaIdRef.current;
-    const resultado = await ImagePicker.launchImageLibraryAsync({
+
+    if (Platform.OS === "web") {
+      // Abrir a galeria no mesmo toque real do botão, sem aguardar outra Promise.
+      const selecao = selecionarImagemDaGaleriaWeb();
+      void selecao
+        .then((imagem) => {
+          if (imagem && destino === familiaAtivaIdRef.current) {
+            setFotoSelecionada(imagem);
+          }
+        })
+        .catch((problema: unknown) => {
+          avisar(
+            "Não foi possível abrir a galeria",
+            problema instanceof Error
+              ? problema.message
+              : "Tente novamente pelo navegador.",
+          );
+        });
+      return;
+    }
+
+    void ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
       allowsMultipleSelection: false,
       allowsEditing: false,
       quality: 1,
-      aspect: [4, 5],
-    });
-    if (
-      destino === familiaAtivaIdRef.current &&
-      !resultado.canceled &&
-      resultado.assets[0]
-    )
-      setFotoSelecionada(resultado.assets[0]);
+    })
+      .then((resultado) => {
+        if (
+          destino === familiaAtivaIdRef.current &&
+          !resultado.canceled &&
+          resultado.assets[0]
+        ) {
+          setFotoSelecionada(resultado.assets[0]);
+        }
+      })
+      .catch((problema: unknown) => {
+        avisar(
+          "Não foi possível abrir a galeria",
+          problema instanceof Error ? problema.message : "Tente novamente.",
+        );
+      });
   }
 
   async function obterTreinoCompartilhado(): Promise<{
