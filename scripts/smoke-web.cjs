@@ -319,6 +319,19 @@ function filtered(table, search) {
     };
     const errors = [];
     const page = await context.newPage();
+    await page.addInitScript(() => {
+      window.__smokePickerCalls = [];
+      const abrir = HTMLInputElement.prototype.showPicker;
+      if (abrir) HTMLInputElement.prototype.showPicker = function () {
+        if (this.type === "file") window.__smokePickerCalls.push({
+          activated: navigator.userActivation.isActive,
+          inBody: this.parentElement === document.body,
+        });
+        if (this.type === "file" && window.__smokeForcePickerFallback)
+          throw new DOMException("Teste da alternativa compatível", "NotSupportedError");
+        return abrir.call(this);
+      };
+    });
     activePage = page;
     page.on("pageerror", (error) => {
       // WebKit relata a falha nativa de fetch como ErrorEvent ao forçar offline,
@@ -670,35 +683,40 @@ function filtered(table, search) {
     await page
       .getByText("Olá, Conta de!", { exact: true })
       .waitFor({ timeout: 15000 });
-    const choosePhoto = async (input, files = photoFixture) => {
-      await input.scrollIntoViewIfNeeded();
-      assert.equal(await input.isVisible(), true);
-      const control = await input.evaluate((element) => ({
+    const choosePhoto = async (button, files = photoFixture) => {
+      await button.scrollIntoViewIfNeeded();
+      assert.equal(await button.isVisible(), true);
+      const control = await button.evaluate((element) => ({
         opacity: getComputedStyle(element).opacity,
         height: element.getBoundingClientRect().height,
-        accept: element.accept,
       }));
-      assert.equal(control.opacity, "1", "O seletor precisa estar visível");
-      assert.ok(control.height >= 44, "O campo deve permitir o toque no celular");
-      assert.equal(control.accept, "image/*");
+      assert.equal(control.opacity, "1", "O botão precisa estar visível");
+      assert.ok(control.height >= 44, "O botão deve permitir o toque no celular");
       const choosing = page.waitForEvent("filechooser");
-      await input.tap();
+      const before = await page.evaluate(() => window.__smokePickerCalls.length);
+      await button.tap();
       const chooser = await choosing;
       assert.equal(chooser.isMultiple(), false);
+      assert.equal(await chooser.element().getAttribute("accept"), "image/*");
+      assert.equal(
+        await chooser.element().getAttribute("capture"),
+        (await button.getAttribute("aria-label")).startsWith("Tirar foto") ? "environment" : null,
+      );
+      assert.equal(await chooser.element().evaluate((element) => element.parentElement === document.body), true);
+      const calls = await page.evaluate(() => window.__smokePickerCalls);
+      if (calls.length > before) assert.deepEqual(calls.at(-1), { activated: true, inBody: true });
       await chooser.setFiles(files);
     };
     const exercisePhotoRegression = async () => {
       phase = "exercise photos";
       const input = page.getByLabel("Escolher foto de Agachamento teste", { exact: true });
       await input.waitFor();
-      const camera = page.getByLabel("Tirar foto de Agachamento teste", { exact: true });
-      assert.equal(await camera.getAttribute("capture"), "environment");
-      assert.equal(await input.getAttribute("capture"), null, "Galeria não força a câmera");
+      assert.equal(await page.locator('input[type="file"]:visible').count(), 0, "Os campos de arquivo não aparecem no cartão");
       const initialUploads = photoUploads.length;
       await choosePhoto(input, []);
-      await choosePhoto(camera, []);
       assert.equal(photoUploads.length, initialUploads, "Cancelar não envia foto");
       for (let attempt = 0; attempt < 2; attempt++) {
+        await page.evaluate((fallback) => { window.__smokeForcePickerFallback = fallback; }, attempt === 1);
         const saved = page.waitForRequest(
           (request) => request.method() === "PATCH" &&
             request.url().includes("/rest/v1/exercises") &&
@@ -706,25 +724,25 @@ function filtered(table, search) {
         );
         await choosePhoto(input);
         await saved;
-        await page.waitForFunction((label) => !document.querySelector(`input[aria-label="${label}"]`)?.disabled,
+        await page.waitForFunction((label) => !document.querySelector(`button[aria-label="${label}"]`)?.disabled,
           "Escolher foto de Agachamento teste");
-        assert.equal(await input.inputValue(), "", "Permite selecionar a mesma foto outra vez");
+        assert.equal(await page.locator('body > input[type="file"]').count(), 0, "Remove o seletor após escolher a foto");
         const photo = photoUploads.at(-1);
         assert.ok(photo.path.startsWith(`exercise-photos/${uid}/${eid}/`));
         assert.equal(photo.contentType, "image/jpeg");
         assert.deepEqual([...photo.body.subarray(0, 3)], [255, 216, 255], "PNG convertido para JPEG válido");
         assert.ok(tables.exercises.find((item) => item.id === eid).photo_path.endsWith(".jpg"));
       }
+      await page.evaluate(() => { window.__smokeForcePickerFallback = false; });
       assert.equal(photoUploads.length, initialUploads + 2, "A mesma foto pode ser salva duas vezes");
       await page.screenshot({ path: path.join(output, "web-foto-exercicio.png") });
     };
     const communityPhotoSelection = async (files = photoFixture) => {
       const input = page.getByLabel("Escolher foto da comunidade", { exact: true });
       const camera = page.getByLabel("Tirar foto para a comunidade", { exact: true });
-      assert.equal(await camera.getAttribute("capture"), "environment");
-      assert.equal(await input.getAttribute("capture"), null);
       await choosePhoto(camera, []);
       const preview = page.getByRole("img", { name: "Prévia da foto da comunidade", exact: true });
+      await page.getByRole("textbox", { name: "Texto para a família selecionada", exact: true }).focus();
       await choosePhoto(input, files);
       await preview.waitFor();
       const previewUri = () => preview.evaluate((element) =>
@@ -736,7 +754,7 @@ function filtered(table, search) {
       await choosePhoto(input, files);
       await preview.waitFor();
       assert.notEqual(await previewUri(), selectedUri, "A mesma foto pode ser selecionada novamente");
-      assert.equal(await input.inputValue(), "");
+      assert.equal(await page.locator('body > input[type="file"]').count(), 0);
       return preview;
     };
     if (process.env.SMOKE_PHOTOS_ONLY) {

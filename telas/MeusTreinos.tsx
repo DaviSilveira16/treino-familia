@@ -740,7 +740,6 @@ export default function MeusTreinos({
       const imagem = fotoCapturada ?? resultado!.assets[0];
       const { arquivoImagem, contentType, extensao } =
         await prepararFotoExercicio(imagem);
-      // eslint-disable-next-line react-hooks/purity -- Timestamp is created in the async photo button handler, never during render.
       const novoCaminho = `${usuarioId}/${exercicio.id}/${Date.now()}.${extensao}`;
       const { error: erroUpload } = await supabase.storage
         .from("exercise-photos")
@@ -1286,29 +1285,49 @@ export default function MeusTreinos({
                         >
                           <Text style={estilos.textoAcao}>Cargas</Text>
                         </TouchableOpacity>
-                        {Platform.OS !== "web" || exercicio.photo_url ? (
+                        {Platform.OS === "web" ? (
+                          <EntradaGaleriaWeb
+                            rotulo={`Escolher foto de ${exercicio.name}`}
+                            texto={
+                              fotoCarregandoId === exercicio.id
+                                ? "Enviando…"
+                                : exercicio.photo_path
+                                  ? "Trocar foto"
+                                  : "Foto"
+                            }
+                            corTema={corTema}
+                            disabled={Boolean(fotoCarregandoId)}
+                            onSelecionar={(imagem) => {
+                              void adicionarOuTrocarFoto(
+                                exercicio,
+                                "biblioteca",
+                                imagem,
+                              );
+                            }}
+                            onErro={(erro) =>
+                              mostrarMensagem(
+                                "Não foi possível escolher a foto",
+                                erro.message,
+                              )
+                            }
+                          />
+                        ) : (
                           <TouchableOpacity
                             style={estilos.botaoAcao}
                             onPress={() => escolherOrigemFoto(exercicio)}
                             disabled={Boolean(fotoCarregandoId)}
                             accessibilityRole="button"
-                            accessibilityLabel={
-                              Platform.OS === "web"
-                                ? `Ampliar foto de ${exercicio.name}`
-                                : "Escolher câmera ou fototeca"
-                            }
+                            accessibilityLabel="Escolher câmera ou fototeca"
                           >
                             <Text style={estilos.textoAcao}>
                               {fotoCarregandoId === exercicio.id
                                 ? "Enviando foto…"
-                                : Platform.OS === "web"
-                                  ? "Visualizar foto"
-                                  : exercicio.photo_path
-                                    ? "Trocar foto"
-                                    : "Adicionar foto"}
+                                : exercicio.photo_path
+                                  ? "Trocar foto"
+                                  : "Adicionar foto"}
                             </Text>
                           </TouchableOpacity>
-                        ) : null}
+                        )}
                         <TouchableOpacity
                           style={estilos.botaoExcluir}
                           onPress={() => excluirExercicio(exercicio)}
@@ -1316,58 +1335,6 @@ export default function MeusTreinos({
                           <Text style={estilos.textoExcluir}>Excluir</Text>
                         </TouchableOpacity>
                       </View>
-
-                      {Platform.OS === "web" ? (
-                        <View style={estilos.seletoresFoto}>
-                          <View style={estilos.seletorFoto}>
-                            <EntradaGaleriaWeb
-                              rotulo={`Escolher foto de ${exercicio.name}`}
-                              disabled={Boolean(fotoCarregandoId)}
-                              onSelecionar={(imagem) => {
-                                void adicionarOuTrocarFoto(
-                                  exercicio,
-                                  "biblioteca",
-                                  imagem,
-                                );
-                              }}
-                              onErro={(erro) =>
-                                mostrarMensagem(
-                                  "Não foi possível escolher a foto",
-                                  erro.message,
-                                )
-                              }
-                            />
-                          </View>
-                          <View style={estilos.seletorFoto}>
-                            <EntradaGaleriaWeb
-                              rotulo={`Tirar foto de ${exercicio.name}`}
-                              capture="environment"
-                              disabled={Boolean(fotoCarregandoId)}
-                              onSelecionar={(imagem) => {
-                                void adicionarOuTrocarFoto(
-                                  exercicio,
-                                  "camera",
-                                  imagem,
-                                );
-                              }}
-                              onErro={(erro) =>
-                                mostrarMensagem(
-                                  "Não foi possível escolher a foto",
-                                  erro.message,
-                                )
-                              }
-                            />
-                          </View>
-                          {fotoCarregandoId === exercicio.id ? (
-                            <Text
-                              accessibilityRole="alert"
-                              style={estilos.textoSecundario}
-                            >
-                              Enviando foto…
-                            </Text>
-                          ) : null}
-                        </View>
-                      ) : null}
 
                       {exercicioEditando?.id === exercicio.id && (
                         <View style={estilos.formularioInterno}>
@@ -1945,11 +1912,6 @@ const criarEstilos = (corTema: string) =>
       gap: 6,
       flexWrap: "wrap",
     },
-    seletoresFoto: {
-      width: "100%",
-      gap: 10,
-    },
-    seletorFoto: { width: "100%", minWidth: 0 },
     botaoAcao: {
       paddingVertical: 8,
       paddingHorizontal: 10,

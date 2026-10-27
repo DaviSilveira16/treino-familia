@@ -1393,9 +1393,13 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
               {tipoPublicacao === "foto" ? (
                 <View style={estilos.fotoArea}>
                   {Platform.OS === "web" ? (
-                    <>
+                    <View
+                      style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}
+                    >
                       <EntradaGaleriaWeb
                         rotulo="Escolher foto da comunidade"
+                        texto={fotoSelecionada ? "Trocar foto" : "Escolher foto"}
+                        corTema={corTema}
                         disabled={
                           publicando ||
                           atualizando ||
@@ -1413,6 +1417,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
                       />
                       <EntradaGaleriaWeb
                         rotulo="Tirar foto para a comunidade"
+                        texto="Câmera"
+                        corTema={corTema}
                         capture="environment"
                         disabled={
                           publicando ||
@@ -1429,7 +1435,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
                           avisar("Não foi possível escolher a foto", erro.message)
                         }
                       />
-                    </>
+                    </View>
                   ) : (
                     <TouchableOpacity
                       style={[estilos.botaoSecundario, { borderColor: corTema }]}

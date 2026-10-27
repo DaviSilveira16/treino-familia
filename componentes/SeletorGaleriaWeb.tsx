@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import type { ImagePickerAsset } from "expo-image-picker";
-import { prepararArquivoDaGaleriaWeb } from "../servicos/seletorGaleriaWeb";
+import { abrirSeletorDeFotosWeb } from "../servicos/seletorGaleriaWeb";
 
 type Props = {
   disabled?: boolean;
@@ -9,84 +9,85 @@ type Props = {
   onErro: (erro: Error) => void;
   onAbrir?: () => void;
   rotulo?: string;
+  texto?: string;
+  corTema?: string;
 };
 
-/**
- * Seleção direta pelo controle NATIVO de arquivos do navegador.
- *
- * O toque chega ao input visível, sem botões sobrepostos ou abertura
- * programática. A galeria não recebe `capture`; a câmera usa o app do aparelho.
- */
 export function EntradaGaleriaWeb({
   disabled = false,
   capture,
   onSelecionar,
   onErro,
   onAbrir,
-  rotulo = "Selecionar foto do dispositivo",
+  rotulo = "Escolher foto",
+  texto = "Adicionar foto",
+  corTema = "#35D07F",
 }: Props) {
-  const entrada = React.createElement("input", {
-    type: "file",
-    accept: "image/*",
-    capture,
-    disabled,
-    multiple: false,
-    title: rotulo,
-    "aria-label": rotulo,
-    onClick: () => onAbrir?.(),
-    onChange: (evento: React.ChangeEvent<HTMLInputElement>) => {
-      const entrada = evento.currentTarget;
-      const arquivo = entrada.files?.item(0);
-      entrada.value = ""; // permite escolher a mesma foto mais de uma vez
-      if (!arquivo) return;
-      try {
-        onSelecionar(prepararArquivoDaGaleriaWeb(arquivo));
-      } catch (problema) {
-        onErro(
-          problema instanceof Error
-            ? problema
-            : new Error("Não foi possível ler a imagem selecionada."),
-        );
-      }
-    },
-    style: {
-      // O próprio controle do Chrome fica visível e recebe o toque.
-      // Evitar position:absolute, opacity:0 e display:none.
-      display: "block",
-      position: "relative",
-      boxSizing: "border-box",
-      width: "100%",
-      maxWidth: "100%",
-      minWidth: 0,
-      minHeight: 48,
-      padding: "10px 8px",
-      borderRadius: 9,
-      border: "1px solid #66766C",
-      backgroundColor: "#243129",
-      color: "#F3F7F4",
-      fontSize: 13,
-      lineHeight: "22px",
-      opacity: disabled ? 0.55 : 1,
-      cursor: disabled ? "not-allowed" : "pointer",
-      // A seleção é feita pelo botão nativo "Escolher arquivo" do Chrome.
-      // Não existe overlay de React Native para interceptar o toque.
-      pointerEvents: disabled ? "none" : "auto",
-    },
-  });
+  const limparRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => limparRef.current?.(), []);
+
   return (
-    <label
+    <button
+      type="button"
+      aria-label={rotulo}
+      disabled={disabled}
+      onClick={(evento) => {
+        evento.stopPropagation();
+        limparRef.current?.();
+        onAbrir?.();
+        // Síncrono: o Chrome recebe a abertura dentro do próprio clique.
+        limparRef.current = abrirSeletorDeFotosWeb({
+          capture,
+          onSelecionar,
+          onErro,
+        });
+      }}
       style={{
-        display: "block",
-        minWidth: 0,
-        width: "100%",
-        color: "#F3F7F4",
-        fontFamily: "system-ui, sans-serif",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 7,
+        minHeight: 44,
+        padding: "9px 12px",
+        border: `1px solid ${corTema}55`,
+        borderRadius: 10,
+        color: corTema,
+        backgroundColor: `${corTema}14`,
+        fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
         fontSize: 13,
+        fontWeight: 700,
         lineHeight: "20px",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+        touchAction: "manipulation",
+        WebkitTapHighlightColor: "transparent",
       }}
     >
-      <span style={{ display: "block", marginBottom: 4 }}>{rotulo}</span>
-      {entrada}
-    </label>
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {capture ? (
+          <>
+            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
+            <circle cx="12" cy="13" r="4" />
+          </>
+        ) : (
+          <>
+            <rect x="3" y="3" width="18" height="18" rx="4" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <path d="m21 15-5-5L5 21" />
+          </>
+        )}
+      </svg>
+      {texto}
+    </button>
   );
 }
