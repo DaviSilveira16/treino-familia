@@ -1398,19 +1398,48 @@ export default function MeusTreinos({
                         >
                           <Text style={estilos.textoAcao}>Cargas</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                          style={estilos.botaoAcao}
-                          onPress={() => escolherOrigemFoto(exercicio)}
-                          disabled={fotoCarregandoId === exercicio.id}
-                        >
-                          <Text style={estilos.textoAcao}>
-                            {fotoCarregandoId === exercicio.id
-                              ? "Enviando foto…"
-                              : exercicio.photo_path
-                                ? "Trocar foto"
-                                : "Adicionar foto"}
-                          </Text>
-                        </TouchableOpacity>
+                        {Platform.OS === "web" ? (
+                          <View style={{ width: "100%", gap: 5, marginTop: 4 }}>
+                            <Text style={estilos.textoAcao}>
+                              {fotoCarregandoId === exercicio.id
+                                ? "Enviando foto…"
+                                : exercicio.photo_path
+                                  ? "Trocar foto do exercício (Chrome)"
+                                  : "Adicionar foto do exercício (Chrome)"}
+                            </Text>
+                            <EntradaGaleriaWeb
+                              rotulo={`Selecionar foto de ${exercicio.name}`}
+                              disabled={fotoCarregandoId === exercicio.id}
+                              onSelecionar={(imagem) => {
+                                void adicionarOuTrocarFoto(
+                                  exercicio,
+                                  "biblioteca",
+                                  imagem,
+                                );
+                              }}
+                              onErro={(erro) =>
+                                mostrarMensagem(
+                                  "Não foi possível escolher a foto",
+                                  erro.message,
+                                )
+                              }
+                            />
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={estilos.botaoAcao}
+                            onPress={() => escolherOrigemFoto(exercicio)}
+                            disabled={fotoCarregandoId === exercicio.id}
+                          >
+                            <Text style={estilos.textoAcao}>
+                              {fotoCarregandoId === exercicio.id
+                                ? "Enviando foto…"
+                                : exercicio.photo_path
+                                  ? "Trocar foto"
+                                  : "Adicionar foto"}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
                         <TouchableOpacity
                           style={estilos.botaoExcluir}
                           onPress={() => excluirExercicio(exercicio)}
@@ -1667,33 +1696,11 @@ export default function MeusTreinos({
                 </Text>
               </View>
             )}
-            <View
-              style={{
-                minHeight: 50,
-                justifyContent: "center",
-                padding: 12,
-                borderRadius: 10,
-                backgroundColor: corTema,
-                position: "relative",
-                overflow: "hidden",
-                opacity:
-                  origemFotoAberta && fotoCarregandoId === origemFotoAberta.id
-                    ? 0.65
-                    : 1,
-              }}
-            >
-              <Text
-                style={{
-                  color: "#101312",
-                  fontWeight: "800",
-                  textAlign: "center",
-                }}
-              >
-                {origemFotoAberta?.photo_path
-                  ? "Escolher outra foto na galeria"
-                  : "Escolher foto da galeria"}
-              </Text>
-              {Platform.OS === "web" ? (
+            {Platform.OS === "web" ? (
+              <View style={{ gap: 7 }}>
+                <Text style={{ color: "#F0F3F1", fontWeight: "700" }}>
+                  Selecionar foto no Chrome Android
+                </Text>
                 <EntradaGaleriaWeb
                   disabled={Boolean(
                     origemFotoAberta &&
@@ -1706,11 +1713,7 @@ export default function MeusTreinos({
                       return;
                     }
                     setOrigemFotoAberta(null);
-                    void adicionarOuTrocarFoto(
-                      exercicio,
-                      "biblioteca",
-                      imagem,
-                    ).finally(() => URL.revokeObjectURL(imagem.uri));
+                    void adicionarOuTrocarFoto(exercicio, "biblioteca", imagem);
                   }}
                   onErro={(erro) =>
                     mostrarMensagem(
@@ -1719,19 +1722,33 @@ export default function MeusTreinos({
                     )
                   }
                 />
-              ) : (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel="Escolher uma foto da galeria"
-                  style={StyleSheet.absoluteFill}
-                  disabled={Boolean(
-                    origemFotoAberta &&
-                    fotoCarregandoId === origemFotoAberta.id,
-                  )}
-                  onPress={() => escolherFonteFoto("biblioteca")}
-                />
-              )}
-            </View>
+                <Text style={{ color: "#A4ADA7", fontSize: 12 }}>
+                  Se o seletor não abrir nesta janela, feche a visualização e
+                  use o campo Escolher arquivo no cartão do exercício.
+                </Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Escolher uma foto da galeria"
+                style={{
+                  minHeight: 50,
+                  justifyContent: "center",
+                  alignItems: "center",
+                  padding: 12,
+                  borderRadius: 10,
+                  backgroundColor: corTema,
+                }}
+                disabled={Boolean(
+                  origemFotoAberta && fotoCarregandoId === origemFotoAberta.id,
+                )}
+                onPress={() => escolherFonteFoto("biblioteca")}
+              >
+                <Text style={{ color: "#101312", fontWeight: "800" }}>
+                  Escolher foto da galeria
+                </Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               accessibilityRole="button"
               onPress={() => escolherFonteFoto("camera")}

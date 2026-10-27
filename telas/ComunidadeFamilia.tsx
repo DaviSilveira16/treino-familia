@@ -1397,22 +1397,15 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
             />
             {tipoPublicacao === "foto" ? (
               <View style={estilos.fotoArea}>
-                <View
-                  style={[
-                    estilos.botaoSecundario,
-                    {
-                      borderColor: corTema,
-                      position: "relative",
-                      overflow: "hidden",
-                    },
-                  ]}
-                >
-                  <Text style={{ color: corTema, fontWeight: "800" }}>
-                    {fotoSelecionada ? "Trocar foto" : "Escolher foto"}
-                  </Text>
-                  {Platform.OS === "web" ? (
+                {Platform.OS === "web" ? (
+                  <View style={{ width: "100%", gap: 8 }}>
+                    <Text style={{ color: corTema, fontWeight: "800" }}>
+                      {fotoSelecionada
+                        ? "Trocar foto da publicação (Chrome)"
+                        : "Adicionar foto da publicação (Chrome)"}
+                    </Text>
                     <EntradaGaleriaWeb
-                      rotulo="Escolher foto para a publicação"
+                      rotulo="Selecionar foto para publicar na comunidade"
                       disabled={
                         publicando ||
                         atualizando ||
@@ -1437,21 +1430,25 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
                         avisar("Não foi possível escolher a foto", erro.message)
                       }
                     />
-                  ) : (
-                    <TouchableOpacity
-                      accessibilityRole="button"
-                      accessibilityLabel="Escolher foto para a publicação"
-                      style={StyleSheet.absoluteFill}
-                      disabled={
-                        publicando ||
-                        atualizando ||
-                        criandoFamilia ||
-                        entrandoFamilia
-                      }
-                      onPress={() => void escolherFoto()}
-                    />
-                  )}
-                </View>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[estilos.botaoSecundario, { borderColor: corTema }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Escolher foto para a publicação"
+                    disabled={
+                      publicando ||
+                      atualizando ||
+                      criandoFamilia ||
+                      entrandoFamilia
+                    }
+                    onPress={() => void escolherFoto()}
+                  >
+                    <Text style={{ color: corTema, fontWeight: "800" }}>
+                      {fotoSelecionada ? "Trocar foto" : "Escolher foto"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 {fotoSelecionada ? (
                   <Image
                     source={{ uri: fotoSelecionada.uri }}
