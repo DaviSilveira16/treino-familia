@@ -3,6 +3,7 @@ import { useVoltarDoModal } from "../servicos/voltarModal";
 import {
   ActivityIndicator,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,7 +15,7 @@ import {
 import { Alert } from "../servicos/alerta";
 import RepetirCarga from "../componentes/RepetirCarga";
 import * as ImagePicker from "expo-image-picker";
-import type { ImagePickerOptions } from "expo-image-picker";
+import type { ImagePickerAsset, ImagePickerOptions } from "expo-image-picker";
 import { prepararFotoExercicio } from "../servicos/fotoExercicio";
 import { supabase } from "../supabase";
 import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
@@ -125,6 +126,17 @@ export default function MeusTreinos({
   const [repetirCarga, setRepetirCarga] = useState(false);
   const cargasAntesDeRepetir = useRef<SerieCarga[]>([]);
   const [fotoCarregandoId, setFotoCarregandoId] = useState<string | null>(null);
+  const [origemFotoAberta, setOrigemFotoAberta] = useState<Exercicio | null>(
+    null,
+  );
+  const [cameraAberta, setCameraAberta] = useState(false);
+  const [cameraPronta, setCameraPronta] = useState(false);
+  const [exercicioFotoCamera, setExercicioFotoCamera] =
+    useState<Exercicio | null>(null);
+  const [erroCamera, setErroCamera] = useState("");
+  const cameraContainerRef = useRef<HTMLElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
   useVoltarDoModal(Boolean(treinoSelecionado), () => {
     setTreinoSelecionado(null);
     setExercicioEditando(null);
@@ -140,9 +152,71 @@ export default function MeusTreinos({
   useVoltarDoModal(Boolean(exercicioParaCarga), () =>
     setExercicioParaCarga(null),
   );
+  useVoltarDoModal(Boolean(origemFotoAberta), () => setOrigemFotoAberta(null));
+  useVoltarDoModal(cameraAberta, () => {
+    setCameraAberta(false);
+    setExercicioFotoCamera(null);
+  });
   const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView> | null>(
     null,
   );
+
+  useEffect(() => {
+    if (!cameraAberta || Platform.OS !== "web") return;
+    let ativo = true;
+    let video: HTMLVideoElement | null = null;
+    setCameraPronta(false);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setErroCamera(
+        "Este navegador não liberou o uso da câmera. Abra o app por uma conexão segura (HTTPS) e tente novamente.",
+      );
+      return () => {
+        ativo = false;
+      };
+    }
+    void navigator.mediaDevices
+      .getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      })
+      .then((stream) => {
+        if (!ativo) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        cameraStreamRef.current = stream;
+        video = document.createElement("video");
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        video.srcObject = stream;
+        Object.assign(video.style, {
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+        });
+        cameraVideoRef.current = video;
+        cameraContainerRef.current?.replaceChildren(video);
+        setCameraPronta(true);
+        void video.play().catch(() => {});
+      })
+      .catch((erro) => {
+        if (ativo)
+          setErroCamera(
+            erro instanceof Error && erro.name === "NotAllowedError"
+              ? "O Android bloqueou a câmera. Permita o acesso à câmera para este app nas configurações do navegador e tente novamente."
+              : "Não foi possível abrir a câmera neste aparelho. Confira a permissão e tente de novo.",
+          );
+      });
+    return () => {
+      ativo = false;
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+      cameraVideoRef.current = null;
+      setCameraPronta(false);
+      if (video?.parentElement) video.parentElement.removeChild(video);
+    };
+  }, [cameraAberta]);
 
   useEffect(() => {
     let ativo = true;
@@ -667,46 +741,72 @@ export default function MeusTreinos({
   }
 
   function escolherOrigemFoto(exercicio: Exercicio) {
+    setOrigemFotoAberta(exercicio);
+  }
+
+  function escolherFonteFoto(origem: "biblioteca" | "camera") {
+    const exercicio = origemFotoAberta;
+    setOrigemFotoAberta(null);
+    if (!exercicio) return;
     if (
+      origem === "camera" &&
       Platform.OS === "web" &&
       typeof navigator !== "undefined" &&
       /Android/i.test(navigator.userAgent)
     ) {
-      const usarCamera =
-        typeof window !== "undefined" &&
-        window.confirm(
-          "Para fotografar agora, confirme. Para escolher uma imagem da galeria, cancele.",
-        );
-      void adicionarOuTrocarFoto(
-        exercicio,
-        usarCamera ? "camera" : "biblioteca",
+      setExercicioFotoCamera(exercicio);
+      setErroCamera("");
+      setCameraAberta(true);
+      return;
+    }
+    void adicionarOuTrocarFoto(exercicio, origem);
+  }
+
+  function capturarFotoDaCamera() {
+    const video = cameraVideoRef.current,
+      exercicio = exercicioFotoCamera;
+    if (!video || !exercicio || !video.videoWidth || !video.videoHeight) {
+      setErroCamera(
+        "A câmera ainda está iniciando. Aguarde um instante e tente novamente.",
       );
       return;
     }
-    if (Platform.OS !== "android") {
-      void adicionarOuTrocarFoto(exercicio, "biblioteca");
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const contexto = canvas.getContext("2d");
+    if (!contexto) {
+      setErroCamera("Não foi possível preparar a foto. Tente novamente.");
       return;
     }
-    Alert.alert(
-      "Foto do exercício",
-      "Escolha de onde deseja adicionar a foto.",
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Biblioteca de fotos",
-          onPress: () => void adicionarOuTrocarFoto(exercicio, "biblioteca"),
-        },
-        {
-          text: "Câmera",
-          onPress: () => void adicionarOuTrocarFoto(exercicio, "camera"),
-        },
-      ],
+    contexto.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          setErroCamera("Não foi possível capturar a imagem. Tente novamente.");
+          return;
+        }
+        const imagem = {
+          uri: "camera-capture://photo",
+          file: blob,
+          fileSize: blob.size,
+          width: canvas.width,
+          height: canvas.height,
+          type: "image",
+        } as ImagePickerAsset;
+        setCameraAberta(false);
+        setExercicioFotoCamera(null);
+        void adicionarOuTrocarFoto(exercicio, "camera", imagem);
+      },
+      "image/jpeg",
+      0.9,
     );
   }
 
   async function adicionarOuTrocarFoto(
     exercicio: Exercicio,
     origem: "biblioteca" | "camera",
+    fotoCapturada?: ImagePicker.ImagePickerAsset,
   ) {
     if (!usuarioId) {
       mostrarMensagem("Sessão inválida", "Entre novamente na sua conta.");
@@ -715,7 +815,7 @@ export default function MeusTreinos({
 
     setFotoCarregandoId(exercicio.id);
     try {
-      if (Platform.OS !== "web") {
+      if (!fotoCapturada && Platform.OS !== "web") {
         const permissao =
           origem === "camera"
             ? await ImagePicker.requestCameraPermissionsAsync()
@@ -737,14 +837,14 @@ export default function MeusTreinos({
         quality: 0.75,
         base64: Platform.OS !== "web",
       };
-      const resultado =
-        origem === "camera" && Platform.OS !== "web"
+      const resultado = fotoCapturada
+        ? null
+        : origem === "camera"
           ? await ImagePicker.launchCameraAsync(opcoesImagem)
           : await ImagePicker.launchImageLibraryAsync(opcoesImagem);
-
-      if (resultado.canceled || !resultado.assets[0]) return;
-
-      const imagem = resultado.assets[0];
+      if (resultado?.canceled || (!fotoCapturada && !resultado?.assets[0]))
+        return;
+      const imagem = fotoCapturada ?? resultado!.assets[0];
       const { arquivoImagem, contentType, extensao } =
         await prepararFotoExercicio(imagem);
       // eslint-disable-next-line react-hooks/purity -- Timestamp is created in the async photo button handler, never during render.
@@ -1469,6 +1569,187 @@ export default function MeusTreinos({
           </>
         )}
       </ScrollView>
+      <Modal
+        transparent
+        animationType="fade"
+        visible={Boolean(origemFotoAberta)}
+        onRequestClose={() => setOrigemFotoAberta(null)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "#000B",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <View
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              alignSelf: "center",
+              backgroundColor: "#191E1B",
+              borderRadius: 18,
+              padding: 20,
+              gap: 12,
+            }}
+          >
+            <Text style={{ color: "#F0F3F1", fontSize: 20, fontWeight: "800" }}>
+              Adicionar foto
+            </Text>
+            <Text style={{ color: "#A4ADA7", lineHeight: 21 }}>
+              Escolha a câmera ou a galeria. O Android solicitará a permissão
+              necessária e abrirá a opção escolhida.
+            </Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={() => escolherFonteFoto("camera")}
+              style={{
+                minHeight: 50,
+                justifyContent: "center",
+                padding: 12,
+                borderRadius: 10,
+                backgroundColor: corTema,
+              }}
+            >
+              <Text
+                style={{
+                  color: "#101312",
+                  fontWeight: "800",
+                  textAlign: "center",
+                }}
+              >
+                Abrir câmera
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={() => escolherFonteFoto("biblioteca")}
+              style={{
+                minHeight: 50,
+                justifyContent: "center",
+                padding: 12,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: corTema,
+              }}
+            >
+              <Text
+                style={{
+                  color: corTema,
+                  fontWeight: "800",
+                  textAlign: "center",
+                }}
+              >
+                Abrir galeria
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={() => setOrigemFotoAberta(null)}
+              style={{ minHeight: 44, justifyContent: "center" }}
+            >
+              <Text style={{ color: "#A4ADA7", textAlign: "center" }}>
+                Cancelar
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        transparent
+        animationType="slide"
+        visible={cameraAberta}
+        onRequestClose={() => {
+          setCameraAberta(false);
+          setExercicioFotoCamera(null);
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "#101312",
+            justifyContent: "center",
+            padding: 18,
+            gap: 16,
+          }}
+        >
+          <Text
+            style={{
+              color: "#F0F3F1",
+              fontSize: 20,
+              fontWeight: "800",
+              textAlign: "center",
+            }}
+          >
+            Permitir acesso à câmera
+          </Text>
+          <Text style={{ color: "#A4ADA7", textAlign: "center" }}>
+            Quando o Android perguntar, toque em Permitir. A câmera será aberta
+            aqui para tirar a foto.
+          </Text>
+          <View
+            ref={(node) => {
+              cameraContainerRef.current =
+                node as unknown as HTMLElement | null;
+            }}
+            style={{
+              width: "100%",
+              maxWidth: 480,
+              height: 360,
+              alignSelf: "center",
+              backgroundColor: "#000",
+              borderRadius: 16,
+              overflow: "hidden",
+            }}
+          />
+          {erroCamera ? (
+            <Text
+              accessibilityRole="alert"
+              style={{ color: "#FFB5B5", textAlign: "center" }}
+            >
+              {erroCamera}
+            </Text>
+          ) : null}
+          <TouchableOpacity
+            accessibilityRole="button"
+            disabled={!cameraPronta || Boolean(erroCamera)}
+            onPress={capturarFotoDaCamera}
+            style={{
+              width: "100%",
+              maxWidth: 480,
+              minHeight: 52,
+              alignSelf: "center",
+              justifyContent: "center",
+              backgroundColor:
+                cameraPronta && !erroCamera ? corTema : "#45544A",
+              borderRadius: 12,
+            }}
+          >
+            <Text
+              style={{
+                color: "#101312",
+                fontWeight: "900",
+                textAlign: "center",
+              }}
+            >
+              {cameraPronta ? "Tirar foto" : "Aguardando permissão…"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={() => {
+              setCameraAberta(false);
+              setExercicioFotoCamera(null);
+            }}
+            style={{ minHeight: 44, justifyContent: "center" }}
+          >
+            <Text style={{ color: "#A4ADA7", textAlign: "center" }}>
+              Cancelar
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </View>
   );
 }
