@@ -1,4 +1,4 @@
-import React, { memo, useState } from "react";
+import React, { memo, useRef, useState } from "react";
 import RepetirCarga from "./RepetirCarga";
 import {
   ActivityIndicator,
@@ -21,7 +21,11 @@ type Props = {
   bloqueado: boolean;
   chaveSalvando: string | null;
   onCampo: (chave: string, campo: "reps" | "weight_kg", valor: string) => void;
-  onRepetirCarga: (exercicioId: string, carga: string) => void;
+  onRepetirCarga: (
+    exercicioId: string,
+    carga: string,
+    cargasAnteriores?: Record<string, string>,
+  ) => void;
   onAlternar: (serie: SerieRascunho) => void;
   onCopiar: (id: string) => void;
   onEditar?: (id: string) => void;
@@ -161,6 +165,7 @@ export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
 }: Props) {
   const [recolhido, setRecolhido] = useState(false);
   const [repetir, setRepetir] = useState(false);
+  const cargasAntesDeRepetir = useRef<Record<string, string>>({});
   const mudarCampo: Props["onCampo"] = (chave, campo, valor) => {
     if (campo === "weight_kg" && repetir) onRepetirCarga(exercicio.id, valor);
     else onCampo(chave, campo, valor);
@@ -267,9 +272,17 @@ export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
             bloqueado={bloqueado}
             rotulo={`Repetir carga nas séries abertas de ${exercicio.name}`}
             onAlterar={(valor) => {
+              if (valor) {
+                const abertas = series.filter(
+                  (s) => !s.concluida && !s.excluida && !s.pendente,
+                );
+                cargasAntesDeRepetir.current = Object.fromEntries(
+                  abertas.map((s) => [s.chave, s.weight_kg]),
+                );
+                onRepetirCarga(exercicio.id, abertas[0]?.weight_kg ?? "");
+              } else
+                onRepetirCarga(exercicio.id, "", cargasAntesDeRepetir.current);
               setRepetir(valor);
-              if (valor)
-                onRepetirCarga(exercicio.id, series[0]?.weight_kg ?? "");
             }}
           />
           {series.map((serie) => (

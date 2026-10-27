@@ -33,7 +33,12 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { Alert } from "./servicos/alerta";
 import { fecharModalAtivo } from "./servicos/voltarModal";
-import { prepararAuthAndroid, abrirGoogleAndroid, cancelarAuthAndroid, processarRetornoAndroid } from "./servicos/authAndroid";
+import {
+  prepararAuthAndroid,
+  abrirGoogleAndroid,
+  cancelarAuthAndroid,
+  processarRetornoAndroid,
+} from "./servicos/authAndroid";
 import BarraTreinoAtivo from "./telas/BarraTreinoAtivo";
 // Importado apenas quando o usuário abre a respectiva tela.
 const Perfil = React.lazy(() => import("./telas/Perfil"));
@@ -68,7 +73,7 @@ type Rotas = {
   cardios: undefined;
   evolucao: undefined;
   historico: undefined;
-  frequencia: undefined;
+  frequencia: { cardioId?: string } | undefined;
   evolucaoTreinos: undefined;
   treinoAtivo: { planId: string; planName: string };
   comunidade: undefined;
@@ -227,20 +232,53 @@ function AppConteudo() {
 
   // The existing APK emits this cancelable event before its compatibility fallback.
   const tratarVoltaAndroid = useRef<() => boolean>(() => false);
-  useEffect(() => { tratarVoltaAndroid.current = () => {
-    if (fecharModalAtivo()) return true;
-    if (!sessao && modo !== "login") { setModo("login"); return true; }
-    if (!referenciaNavegacao.isReady()) return false;
-    if (referenciaNavegacao.canGoBack()) { voltarComSeguranca(); return true; }
-    const rota = referenciaNavegacao.getCurrentRoute()?.name;
-    if (rota && rota !== "Inicio") { referenciaNavegacao.navigate("Inicio"); return true; }
-    return false;
-  }; });
+  useEffect(() => {
+    tratarVoltaAndroid.current = () => {
+      if (fecharModalAtivo()) return true;
+      if (!sessao && modo !== "login") {
+        setModo("login");
+        return true;
+      }
+      if (!referenciaNavegacao.isReady()) return true;
+      if (referenciaNavegacao.canGoBack()) {
+        referenciaNavegacao.goBack();
+        return true;
+      }
+      const rota = referenciaNavegacao.getCurrentRoute()?.name;
+      if (rota && rota !== "Inicio") {
+        referenciaNavegacao.navigate("Inicio");
+        return true;
+      }
+      return true; // Na raiz, permanece no app.
+    };
+  });
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const voltar = (evento: Event) => { if (tratarVoltaAndroid.current()) evento.preventDefault(); };
+    const voltar = (evento: Event) => {
+      if (tratarVoltaAndroid.current()) evento.preventDefault();
+    };
     window.addEventListener("treino-familia:android-back-v1", voltar);
-    return () => window.removeEventListener("treino-familia:android-back-v1", voltar);
+    return () =>
+      window.removeEventListener("treino-familia:android-back-v1", voltar);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !/Android/i.test(navigator.userAgent))
+      return;
+    const guardarNaNavegacao = () =>
+      window.history.pushState(
+        { treinoFamiliaAndroid: true },
+        "",
+        window.location.href,
+      );
+    const aoVoltar = () => {
+      tratarVoltaAndroid.current();
+      guardarNaNavegacao();
+    };
+    guardarNaNavegacao();
+    guardarNaNavegacao();
+    window.addEventListener("popstate", aoVoltar);
+    return () => window.removeEventListener("popstate", aoVoltar);
   }, []);
 
   // IMPORTANTE: não usar pushState/popstate para simular o botão Voltar
@@ -249,11 +287,12 @@ function AppConteudo() {
   // o controle ao React. As telas internas usam somente a pilha do app.
 
   useEffect(() => {
-    if (Platform.OS !== "android" || !sessao) {
+    if (Platform.OS !== "android") {
       return;
     }
 
     const assinatura = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (fecharModalAtivo()) return true;
       if (!referenciaNavegacao.isReady()) {
         return true;
       }
@@ -269,18 +308,7 @@ function AppConteudo() {
         return true;
       }
 
-      Alert.alert(
-        "Sair do Treino Família?",
-        "Deseja realmente sair do aplicativo?",
-        [
-          { text: "Continuar no app", style: "cancel" },
-          {
-            text: "Sair",
-            style: "destructive",
-            onPress: () => BackHandler.exitApp(),
-          },
-        ],
-      );
+      // O botão do sistema nunca fecha o aplicativo. Na raiz, não há página anterior.
       return true;
     });
 
@@ -402,12 +430,31 @@ function AppConteudo() {
   }, []);
 
   useEffect(() => {
-    if (typeof location === "undefined" || location.pathname !== "/auth/android/callback") return;
+    if (
+      typeof location === "undefined" ||
+      location.pathname !== "/auth/android/callback"
+    )
+      return;
     let ativo = true;
-    void processarRetornoAndroid().then((retorno) => { if (ativo && retorno.recovery) setRedefinirSenha(true); })
-      .catch((erro) => { if (ativo) Alert.alert("Retorno ao aplicativo", erro instanceof Error ? erro.message : "Inicie um novo pedido no app."); })
-      .finally(() => { if (ativo) history.replaceState(null, "", "/"); });
-    return () => { ativo = false; };
+    void processarRetornoAndroid()
+      .then((retorno) => {
+        if (ativo && retorno.recovery) setRedefinirSenha(true);
+      })
+      .catch((erro) => {
+        if (ativo)
+          Alert.alert(
+            "Retorno ao aplicativo",
+            erro instanceof Error
+              ? erro.message
+              : "Inicie um novo pedido no app.",
+          );
+      })
+      .finally(() => {
+        if (ativo) history.replaceState(null, "", "/");
+      });
+    return () => {
+      ativo = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -558,7 +605,12 @@ function AppConteudo() {
       }
     } catch (erro) {
       await cancelarAuthAndroid().catch(() => {});
-      Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível iniciar o login com Google.");
+      Alert.alert(
+        "Erro",
+        erro instanceof Error
+          ? erro.message
+          : "Não foi possível iniciar o login com Google.",
+      );
     } finally {
       setEnviando(false);
     }
@@ -674,16 +726,28 @@ function AppConteudo() {
 
   async function salvarNovaSenha() {
     if (novaSenha.length < 8 || novaSenha !== confirmarSenha) {
-      Alert.alert("Confira a senha", "Use ao menos 8 caracteres e repita a mesma senha."); return;
+      Alert.alert(
+        "Confira a senha",
+        "Use ao menos 8 caracteres e repita a mesma senha.",
+      );
+      return;
     }
     setEnviando(true);
     try {
       const { error } = await supabase.auth.updateUser({ password: novaSenha });
       if (error) throw error;
-      setNovaSenha(""); setConfirmarSenha(""); setRedefinirSenha(false);
+      setNovaSenha("");
+      setConfirmarSenha("");
+      setRedefinirSenha(false);
       Alert.alert("Senha atualizada", "Sua nova senha foi salva.");
-    } catch { Alert.alert("Não foi possível alterar", "Tente novamente ou solicite outro link de recuperação."); }
-    finally { setEnviando(false); }
+    } catch {
+      Alert.alert(
+        "Não foi possível alterar",
+        "Tente novamente ou solicite outro link de recuperação.",
+      );
+    } finally {
+      setEnviando(false);
+    }
   }
 
   if (carregando) {
@@ -699,15 +763,63 @@ function AppConteudo() {
   }
 
   if (redefinirSenha && sessao) {
-    return <KeyboardAvoidingView style={estilos.carregando} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <View style={[estilos.cartaoAutenticacao, { width: "90%", maxWidth: 460 }]}>
-        <Text style={estilos.tituloFormulario}>Defina sua nova senha</Text>
-        <TextInput accessibilityLabel="Nova senha" style={estilos.input} placeholder="Ao menos 8 caracteres" placeholderTextColor="#828A85" secureTextEntry autoCapitalize="none" value={novaSenha} onChangeText={setNovaSenha} />
-        <TextInput accessibilityLabel="Confirme a nova senha" style={[estilos.input, { marginTop: 12 }]} placeholder="Repita a nova senha" placeholderTextColor="#828A85" secureTextEntry autoCapitalize="none" value={confirmarSenha} onChangeText={setConfirmarSenha} />
-        <TouchableOpacity accessibilityRole="button" style={[estilos.botaoPrincipal, { backgroundColor: corTema, marginTop: 16 }]} disabled={enviando} onPress={() => void salvarNovaSenha()}><Text style={estilos.textoBotaoPrincipal}>{enviando ? "Salvando..." : "Salvar nova senha"}</Text></TouchableOpacity>
-        <TouchableOpacity accessibilityRole="button" style={estilos.linkContainer} onPress={() => { setRedefinirSenha(false); void sair(); }}><Text style={[estilos.link, { color: corTema }]}>Cancelar e sair da conta</Text></TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>;
+    return (
+      <KeyboardAvoidingView
+        style={estilos.carregando}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View
+          style={[estilos.cartaoAutenticacao, { width: "90%", maxWidth: 460 }]}
+        >
+          <Text style={estilos.tituloFormulario}>Defina sua nova senha</Text>
+          <TextInput
+            accessibilityLabel="Nova senha"
+            style={estilos.input}
+            placeholder="Ao menos 8 caracteres"
+            placeholderTextColor="#828A85"
+            secureTextEntry
+            autoCapitalize="none"
+            value={novaSenha}
+            onChangeText={setNovaSenha}
+          />
+          <TextInput
+            accessibilityLabel="Confirme a nova senha"
+            style={[estilos.input, { marginTop: 12 }]}
+            placeholder="Repita a nova senha"
+            placeholderTextColor="#828A85"
+            secureTextEntry
+            autoCapitalize="none"
+            value={confirmarSenha}
+            onChangeText={setConfirmarSenha}
+          />
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={[
+              estilos.botaoPrincipal,
+              { backgroundColor: corTema, marginTop: 16 },
+            ]}
+            disabled={enviando}
+            onPress={() => void salvarNovaSenha()}
+          >
+            <Text style={estilos.textoBotaoPrincipal}>
+              {enviando ? "Salvando..." : "Salvar nova senha"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
+            style={estilos.linkContainer}
+            onPress={() => {
+              setRedefinirSenha(false);
+              void sair();
+            }}
+          >
+            <Text style={[estilos.link, { color: corTema }]}>
+              Cancelar e sair da conta
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    );
   }
 
   if (!sessao) {
@@ -1032,7 +1144,11 @@ function AppConteudo() {
 
                   <TreinoDoDia
                     onAbrirProgramacao={() => navigation.navigate("frequencia")}
-                    onAbrirTreino={(plano) => plano ? navigation.navigate("treinoAtivo", plano) : navigation.navigate("treinos")}
+                    onAbrirTreino={(plano) =>
+                      plano
+                        ? navigation.navigate("treinoAtivo", plano)
+                        : navigation.navigate("treinos")
+                    }
                     corTema={corTema}
                   />
 
@@ -1137,6 +1253,9 @@ function AppConteudo() {
               >
                 <Suspense fallback={<TelaCarregando cor={corTema} />}>
                   <MeusCardios
+                    onRegistrar={(cardioId) =>
+                      navigation.navigate("frequencia", { cardioId })
+                    }
                     onVoltar={voltarComSeguranca}
                     corTema={corTema}
                   />
@@ -1178,13 +1297,17 @@ function AppConteudo() {
           </Pilha.Screen>
 
           <Pilha.Screen name="frequencia">
-            {({ navigation }) => (
+            {({ navigation, route }) => (
               <NavegacaoVoltarGlobal
                 onVoltar={voltarComSeguranca}
                 ativo={navigation.canGoBack()}
               >
                 <Suspense fallback={<TelaCarregando cor={corTema} />}>
-                  <Frequencia onVoltar={voltarComSeguranca} corTema={corTema} />
+                  <Frequencia
+                    cardioInicialId={route.params?.cardioId}
+                    onVoltar={voltarComSeguranca}
+                    corTema={corTema}
+                  />
                 </Suspense>
               </NavegacaoVoltarGlobal>
             )}
@@ -1236,11 +1359,23 @@ function AppConteudo() {
             )}
           </Pilha.Screen>
         </Pilha.Navigator>
-        {sessao ? <BarraTreinoAtivo key={sessao.user.id} usuarioId={sessao.user.id} corTema={corTema} visivel={rotaAtual !== "treinoAtivo"} onRetomar={plano => { if (referenciaNavegacao.isReady()) referenciaNavegacao.navigate("treinoAtivo", plano); }} /> : null}
+        {sessao ? (
+          <BarraTreinoAtivo
+            key={sessao.user.id}
+            usuarioId={sessao.user.id}
+            corTema={corTema}
+            visivel={rotaAtual !== "treinoAtivo"}
+            onRetomar={(plano) => {
+              if (referenciaNavegacao.isReady())
+                referenciaNavegacao.navigate("treinoAtivo", plano);
+            }}
+          />
+        ) : null}
         {semInternet ? (
           <View style={estilos.avisoSemInternet} accessibilityRole="alert">
             <Text style={estilos.textoSemInternet}>
-              Sem internet · alterações do treino ficam neste aparelho até sincronizar.
+              Sem internet · alterações do treino ficam neste aparelho até
+              sincronizar.
             </Text>
           </View>
         ) : null}

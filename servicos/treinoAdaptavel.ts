@@ -9,15 +9,27 @@ export function repetirCargaNasSeries(
   series: SerieRascunho[],
   exercicioId: string,
   carga: string,
+  cargasAnteriores?: Record<string, string>,
 ) {
-  return series.map((serie) =>
-    serie.exercise_id === exercicioId &&
-    !serie.concluida &&
-    !serie.excluida &&
-    !serie.pendente
-      ? { ...serie, weight_kg: carga }
-      : serie,
-  );
+  return series.map((serie) => {
+    if (
+      serie.exercise_id !== exercicioId ||
+      serie.concluida ||
+      serie.excluida ||
+      serie.pendente
+    )
+      return serie;
+    return {
+      ...serie,
+      weight_kg:
+        cargasAnteriores &&
+        Object.prototype.hasOwnProperty.call(cargasAnteriores, serie.chave)
+          ? cargasAnteriores[serie.chave]
+          : cargasAnteriores
+            ? serie.weight_kg
+            : carga,
+    };
+  });
 }
 
 export function criarExercicioSessao(

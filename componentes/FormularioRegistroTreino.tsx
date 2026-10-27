@@ -216,8 +216,10 @@ export default function FormularioRegistroTreino({
               bloqueado={salvando}
               chaveSalvando={null}
               onCopiar={() => {}}
-              onRepetirCarga={(id, carga) =>
-                setSeries((atuais) => repetirCargaNasSeries(atuais, id, carga))
+              onRepetirCarga={(id, carga, anteriores) =>
+                setSeries((atuais) =>
+                  repetirCargaNasSeries(atuais, id, carga, anteriores),
+                )
               }
               onCampo={(chave, campo, valor) =>
                 setSeries((atuais) =>

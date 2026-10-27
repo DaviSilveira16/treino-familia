@@ -37,7 +37,6 @@ const TIPOS = [
   "Elíptico",
   "Pilates",
 ];
-
 function permiteDistancia(tipo: string) {
   return ["esteira", "caminhada", "corrida", "bicicleta"].includes(
     categoriaDoCardio(tipo),
@@ -217,32 +216,6 @@ export default function MeusCardios({
           no Histórico.
         </Text>
         <View style={estilos.cartao}>
-          <Text style={estilos.tituloCartao}>Usar um cardio pronto</Text>
-          <Text style={estilos.subtitulo}>
-            Escolha a modalidade, informe seus valores de referência e salve.
-            Para registrar uma atividade realizada, use “Registrar sessão” em um
-            cardio salvo.
-          </Text>
-          <View style={estilos.tipos}>
-            {TIPOS.map((item) => (
-              <TouchableOpacity
-                key={item}
-                accessibilityRole="button"
-                accessibilityLabel={`Usar modelo de ${item}`}
-                disabled={salvando}
-                onPress={() => {
-                  limparFormulario();
-                  setNome(item);
-                  setTipo(item);
-                }}
-                style={estilos.tipo}
-              >
-                <Text style={estilos.tipoTexto}>{item}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-        <View style={estilos.cartao}>
           <Text style={estilos.tituloCartao}>
             {editando ? "Editar cardio" : "Criar ou salvar modelo de cardio"}
           </Text>
@@ -382,20 +355,6 @@ export default function MeusCardios({
                 >
                   <Text style={[estilos.acao, { color: corTema }]}>
                     Registrar sessão
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel={`Salvar cópia de ${cardio.nome}`}
-                  disabled={salvando}
-                  onPress={() => {
-                    editar(cardio);
-                    setEditando(null);
-                    setNome(`${cardio.nome} (cópia)`);
-                  }}
-                >
-                  <Text style={[estilos.acao, { color: corTema }]}>
-                    Salvar como novo
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => editar(cardio)}>

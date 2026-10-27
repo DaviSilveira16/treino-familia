@@ -61,6 +61,7 @@ import {
 import { CartaoExercicioTreino } from "../componentes/CartaoExercicioTreino";
 import {
   comFilaTreinoPausada,
+  excluirSessaoTreino,
   liberarTreinosEncerrados,
   recuperarConclusaoRemota,
   reenviarConclusaoLocal,
@@ -1073,13 +1074,25 @@ export default function TreinoAtivo({
     },
     [],
   );
-  const repetirCarga = useCallback((exercicioId: string, carga: string) => {
-    if (finalizacaoRef.current || bloqueioRef.current || salvandoRef.current)
-      return;
-    const novas = repetirCargaNasSeries(seriesRef.current, exercicioId, carga);
-    seriesRef.current = novas;
-    setSeries(novas);
-  }, []);
+  const repetirCarga = useCallback(
+    (
+      exercicioId: string,
+      carga: string,
+      cargasAnteriores?: Record<string, string>,
+    ) => {
+      if (finalizacaoRef.current || bloqueioRef.current || salvandoRef.current)
+        return;
+      const novas = repetirCargaNasSeries(
+        seriesRef.current,
+        exercicioId,
+        carga,
+        cargasAnteriores,
+      );
+      seriesRef.current = novas;
+      setSeries(novas);
+    },
+    [],
+  );
   const alterarDescanso = useCallback((valor: DescansoTreino) => {
     if (finalizacaoRef.current) return;
     descansoRef.current = valor;
@@ -1559,6 +1572,55 @@ export default function TreinoAtivo({
     }
   }
 
+  async function sairSemSalvar() {
+    const atual = sessaoRef.current;
+    if (
+      !atual ||
+      finalizacaoRef.current ||
+      bloqueioRef.current ||
+      salvandoRef.current
+    )
+      return;
+    const primeira = await confirmar(
+      "Sair do treino sem salvar?",
+      "Este treino e as séries registradas nele serão descartados.",
+    );
+    if (!primeira) return;
+    const segunda = await confirmar(
+      "Apagar este treino e suas séries?",
+      "Esta ação remove esta sessão do histórico. Seus planos e outros treinos não serão alterados.",
+    );
+    if (!segunda) return;
+    salvandoRef.current = true;
+    setSalvando(true);
+    try {
+      await excluirSessaoTreino(usuarioId, atual.id);
+      await apagarRascunho(usuarioId, planId);
+      prontoRef.current = false;
+      sessaoRef.current = null;
+      finalizacaoRef.current = undefined;
+      setSessao(null);
+      setFinalizacao(undefined);
+      setSeries([]);
+      seriesRef.current = [];
+      setExercicios([]);
+      exerciciosRef.current = [];
+      setSalvando(false);
+      salvandoRef.current = false;
+      onVoltar();
+    } catch (erro) {
+      avisar(
+        "Não foi possível concluir",
+        erro instanceof Error
+          ? erro.message
+          : "A sessão permanece protegida. Verifique a conexão e tente novamente.",
+      );
+    } finally {
+      salvandoRef.current = false;
+      setSalvando(false);
+    }
+  }
+
   if (carregando)
     return (
       <View style={estilos.centro}>
@@ -1581,6 +1643,25 @@ export default function TreinoAtivo({
             ‹ Voltar
           </Text>
         </TouchableOpacity>
+        {sessao && !finalizacao && !bloqueioSessao ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            disabled={salvando || sincronizando}
+            onPress={() => void sairSemSalvar()}
+            style={[
+              estilos.botaoSecundario,
+              {
+                alignSelf: "flex-start",
+                borderColor: "#A64B4B",
+                marginBottom: 10,
+              },
+            ]}
+          >
+            <Text style={[estilos.textoBotaoSecundario, { color: "#F29B9B" }]}>
+              {salvando ? "Saindo…" : "Sair sem salvar"}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
         <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
         <Text style={estilos.titulo}>{planName}</Text>
         <Text style={estilos.subtitulo}>
