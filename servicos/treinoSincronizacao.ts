@@ -59,6 +59,33 @@ function mensagemErro(erro: unknown): string {
     ? erro.message
     : "Não foi possível enviar o treino. Seus dados continuam guardados neste aparelho.";
 }
+
+// Rascunhos gravados por versões antigas podem conter frações em colunas
+// inteiras, como duration_minutes = 0.6. Corrige e persiste antes de enviar.
+function normalizarMetricasInteiras(
+  metricas: Record<string, string | number | null>,
+) {
+  const resultado = { ...metricas };
+  for (const chave of [
+    "duration_minutes",
+    "active_calories",
+    "age_snapshot",
+    "exercises_count",
+    "sets_completed",
+    "reps_completed",
+  ]) {
+    const valor = resultado[chave];
+    if (valor === null || valor === undefined || valor === "") continue;
+    const numero = Number(valor);
+    if (!Number.isFinite(numero)) continue;
+    resultado[chave] =
+      chave === "duration_minutes"
+        ? Math.max(1, Math.round(numero))
+        : Math.round(numero);
+  }
+  return resultado;
+}
+
 function mensagemEstado(sessao: SessaoRemota | null): string {
   if (!sessao)
     return "Esta sessão não foi encontrada no servidor. Use Enviar treino salvo neste aparelho para restaurar suas séries e o horário original.";
@@ -497,6 +524,32 @@ async function enviar(
     local = await lerRascunho(usuarioId, planId);
     if (local?.finalizacao && !local.series.some((serie) => serie.pendente)) {
       await garantirEnvioPermitido(usuarioId, sessaoId);
+      const metricasNormalizadas = normalizarMetricasInteiras(
+        local.finalizacao.metricas,
+      );
+      if (
+        Object.entries(metricasNormalizadas).some(
+          ([chave, valor]) => valor !== local!.finalizacao!.metricas[chave],
+        )
+      ) {
+        const finalizacaoOriginal = local.finalizacao;
+        local = await atualizarRascunho(usuarioId, planId, (atual) =>
+          atual.sessao.id === sessaoId &&
+          atual.finalizacao?.finishedAt === finalizacaoOriginal.finishedAt
+            ? {
+                ...atual,
+                finalizacao: {
+                  ...atual.finalizacao,
+                  metricas: metricasNormalizadas,
+                },
+              }
+            : atual,
+        );
+        if (!local || local.sessao.id !== sessaoId || !local.finalizacao)
+          throw new Error(
+            "Não foi possível corrigir os detalhes no rascunho. Seus dados continuam guardados neste aparelho.",
+          );
+      }
       const finalizacao = local.finalizacao;
       // O plano e os exercícios devem existir antes de a confirmação tirar a tela.
       // IDs persistidos permitem retomar uma resposta perdida sem duplicar o plano.
