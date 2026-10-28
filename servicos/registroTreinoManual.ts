@@ -9,7 +9,7 @@ export function montarRegistroManual(dados: { usuarioId: string; planId: string;
   if (!Number.isFinite(fim.getTime()) || fim.getFullYear() !== Number(dados.dia.slice(0, 4)) || fim.getMonth() + 1 !== Number(dados.dia.slice(5, 7)) || fim.getDate() !== Number(dados.dia.slice(8))) throw new Error("Data inválida.");
   const feitas = dados.series.filter(s => s.concluida && !s.excluida);
   const metricas = metricasRegistroTreino(dados.perfil, dados.duracao, dados.intensidade, feitas.map(s => ({ exercise_id: s.exercise_id, exercise_name: s.exercise_name, set_number: s.set_number, reps: Number(s.reps), weight_kg: s.weight_kg.trim() ? Number(s.weight_kg.replace(",", ".")) : Number.NaN })));
-  const iniciada = new Date(fim.getTime() - dados.duracao * 60000).toISOString();
+  const iniciada = new Date(fim.getTime() - Number(metricas.duration_minutes) * 60000).toISOString();
   return { versao: 1, usuarioId: dados.usuarioId, planId: dados.planId, planName: dados.planName,
     sessao: { id: novoIdSerie(), plan_id: dados.planId, started_at: iniciada }, exercicios: dados.exercicios,
     series: feitas.map(s => ({ ...s, registroId: novoIdSerie(), pendente: "salvar" })), intensidade: dados.intensidade, esforco: dados.esforco,

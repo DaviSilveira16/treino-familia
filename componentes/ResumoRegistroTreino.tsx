@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import {
   estimarCaloriasAtivasTreino,
+  normalizarDuracaoMinutos,
   type IntensidadeTreino,
   type PerfilCalculoTreino,
   type SerieCalculoTreino,
@@ -38,6 +39,7 @@ export default function ResumoRegistroTreino({
   bloqueado?: boolean;
 }) {
   const minutos = Number(duracao.replace(",", "."));
+  const minutosNormalizados = normalizarDuracaoMinutos(minutos);
   const valoresValidos = series.every(
     (s) =>
       Number.isInteger(s.reps) &&
@@ -51,7 +53,7 @@ export default function ResumoRegistroTreino({
     perfil && intensidade && valoresValidos
       ? estimarCaloriasAtivasTreino({
           ...perfil,
-          duracaoMinutos: minutos,
+          duracaoMinutos: minutosNormalizados ?? minutos,
           intensidade,
           series,
         })
@@ -70,6 +72,9 @@ export default function ResumoRegistroTreino({
         placeholderTextColor="#828A85"
         style={s.input}
       />
+      <Text style={s.ajuda}>
+        Valores decimais são arredondados para o minuto inteiro mais próximo.
+      </Text>
       <Text style={s.texto}>Intensidade da musculação</Text>
       <View style={s.linha}>
         {(

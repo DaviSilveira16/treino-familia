@@ -270,6 +270,16 @@ async function concluir() {
   assert.equal(metricas.volume_kg, 200);
   assert.ok(metricas.active_calories > 0);
   assert.equal(metricas.duration_minutes, 30);
+  const duracaoDecimal = calorias.metricasRegistroTreino(perfil, 0.6, "moderada", [
+    { exercise_name: "A", set_number: 1, reps: 10, weight_kg: 0 },
+  ]);
+  assert.equal(duracaoDecimal.duration_minutes, 1);
+  assert.equal(
+    duracaoDecimal.active_calories,
+    calorias.metricasRegistroTreino(perfil, 1, "moderada", [
+      { exercise_name: "A", set_number: 1, reps: 10, weight_kg: 0 },
+    ]).active_calories,
+  );
   assert.ok(
     calorias.metricasRegistroTreino(perfil, 30, "intensa", [
       { exercise_name: "A", set_number: 1, reps: 10, weight_kg: 0 },
