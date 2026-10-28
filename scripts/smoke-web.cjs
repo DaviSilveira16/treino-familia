@@ -285,9 +285,11 @@ function filtered(table, search) {
     server.listen(fixturePort, "127.0.0.1", resolve),
   );
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await (
-    process.env.SMOKE_BROWSER === "webkit" ? webkit : chromium
-  ).launch({ headless: true });
+  const engine = process.env.SMOKE_BROWSER === "webkit" ? webkit : chromium;
+  const opcoesNavegador = { headless: true };
+  if (engine === chromium && process.env.SMOKE_BROWSER_CHANNEL)
+    opcoesNavegador.channel = process.env.SMOKE_BROWSER_CHANNEL;
+  const browser = await engine.launch(opcoesNavegador);
   let activePage;
   try {
     const context = await browser.newContext({
@@ -1582,6 +1584,8 @@ function filtered(table, search) {
     );
     phase = "history";
     await page.getByText("Histórico", { exact: true }).click();
+    await page.getByText("Academia da viagem", { exact: true }).waitFor();
+    await page.getByText(/kcal ativas estimadas/).first().waitFor();
     // A nova sessão criada da cópia pode ter o mesmo volume; a restaurada é a mais antiga.
     await page
       .getByText("Volume registrado: 2.400 kg·reps", { exact: true })
@@ -1909,6 +1913,8 @@ function filtered(table, search) {
     await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByText("Frequência", { exact: true }).click();
     await page.getByText("Registrar cardio", { exact: true }).waitFor();
+    await page.getByText("Academia da viagem").first().waitFor();
+    await page.getByText(/kcal ativas estimadas/).first().waitFor();
     assert.equal(
       await page.evaluate(
         () =>

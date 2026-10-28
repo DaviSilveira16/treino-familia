@@ -467,9 +467,13 @@ async function enviar(
         let encerrar = supabase
           .from("workout_sessions")
           .update({
+            ...finalizacao.metricas,
             finished_at: finalizacao.finishedAt,
             status: "concluido",
             notes: finalizacao.notes,
+            ...(finalizacao.modelo?.modo === "novo"
+              ? { plan_id: finalizacao.modelo.planId }
+              : {}),
           })
           .eq("id", sessaoId)
           .eq("plan_id", planId)
@@ -507,7 +511,12 @@ async function enviar(
       await garantirEnvioPermitido(usuarioId, sessaoId);
       const { data: detalhes, error: erroDetalhes } = await supabase
         .from("workout_sessions")
-        .update(finalizacao.metricas)
+        .update({
+          ...finalizacao.metricas,
+          ...(finalizacao.modelo?.modo === "novo"
+            ? { plan_id: finalizacao.modelo.planId }
+            : {}),
+        })
         .eq("id", sessaoId)
         .eq("user_id", usuarioId)
         .eq("status", "concluido")

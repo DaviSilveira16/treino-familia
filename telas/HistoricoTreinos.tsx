@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   ActivityIndicator,
   RefreshControl,
@@ -12,6 +13,7 @@ import {
 } from "react-native";
 import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
+import { assinarMudancasDeDados } from "../servicos/revisaoDados";
 import {
   carregarTodasPorId,
   criarControleConsultas,
@@ -442,10 +444,23 @@ export default function HistoricoTreinos({
       consulta.concluir();
     }
   }
-  useEffect(() => {
-    void carregarHistorico();
-    return () => controleConsultas.current.cancelar();
-  }, [carregarHistorico]);
+  useFocusEffect(
+    useCallback(() => {
+      let esperaAtualizacao: ReturnType<typeof setTimeout> | undefined;
+      const cancelarInscricao = assinarMudancasDeDados(() => {
+        if (esperaAtualizacao) clearTimeout(esperaAtualizacao);
+        esperaAtualizacao = setTimeout(() => {
+          void carregarHistorico(true);
+        }, 120);
+      });
+      void carregarHistorico(dadosCarregadosRef.current);
+      return () => {
+        cancelarInscricao();
+        if (esperaAtualizacao) clearTimeout(esperaAtualizacao);
+        controleConsultas.current.cancelar();
+      };
+    }, [carregarHistorico]),
+  );
   function alternarDetalhes(sessao: TreinoHistorico) {
     setSessaoExpandida((atual) => (atual === sessao.id ? null : sessao.id));
     void carregarDetalhes(sessao);

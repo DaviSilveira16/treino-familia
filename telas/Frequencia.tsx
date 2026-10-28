@@ -20,6 +20,7 @@ import {
 import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
 import {
+  assinarMudancasDeDados,
   obterRevisaoDeDados,
   registrarMudancaDeDados,
 } from "../servicos/revisaoDados";
@@ -168,7 +169,7 @@ export default function Frequencia({
   const mesCarregadoRef = useRef("");
   const consultaAtivaRef = useRef(0);
   const controladorConsultaRef = useRef<AbortController | null>(null);
-  const carregarDados = useCallback(async () => {
+  const carregarDados = useCallback(async (ignorarCache = false) => {
     controladorConsultaRef.current?.abort();
     const controlador = new AbortController();
     controladorConsultaRef.current = controlador;
@@ -233,7 +234,7 @@ export default function Frequencia({
         modelosCardio: CardioModelo[];
         sessoesCardio: SessaoCardio[];
       }>(usuario.user.id, `frequencia:${chaveMes}`);
-      if (dadosCache) {
+      if (dadosCache && !ignorarCache) {
         setTreinos(dadosCache.treinos);
         setSessoes(dadosCache.sessoes);
         setModelosCardio(dadosCache.modelosCardio);
@@ -344,18 +345,30 @@ export default function Frequencia({
   }, [chaveMes]);
   useFocusEffect(
     useCallback(() => {
+      let esperaAtualizacao: ReturnType<typeof setTimeout> | undefined;
+      const cancelarInscricao = assinarMudancasDeDados(() => {
+        if (esperaAtualizacao) clearTimeout(esperaAtualizacao);
+        esperaAtualizacao = setTimeout(() => {
+          void carregarDados(true);
+        }, 120);
+      });
       // Evita quatro novas consultas quando se entra e sai da tela rapidamente.
       if (
         mesCarregadoRef.current === chaveMes &&
         Date.now() - ultimaConsultaRef.current < 12000 &&
         ultimaRevisaoRef.current === obterRevisaoDeDados()
       )
-        return;
+        return () => {
+          cancelarInscricao();
+          if (esperaAtualizacao) clearTimeout(esperaAtualizacao);
+        };
       const espera = setTimeout(() => {
         void carregarDados();
       }, 80);
       return () => {
         clearTimeout(espera);
+        cancelarInscricao();
+        if (esperaAtualizacao) clearTimeout(esperaAtualizacao);
         // Ignorar resposta de um mês que deixou de estar em foco.
         controladorConsultaRef.current?.abort();
         consultaAtivaRef.current++;

@@ -320,6 +320,8 @@ async function concluir() {
   assert.equal(db.exercises.filter((e) => e.plan_id === novo.planId).length, 2);
   assert.equal(db.workout_sessions[0].plan_id, novo.planId);
   assert.equal(db.workout_sessions[0].finished_at, fim);
+  assert.equal(db.workout_sessions[0].active_calories, metricas.active_calories);
+  assert.equal(db.workout_sessions[0].duration_minutes, metricas.duration_minutes);
   assert.equal(
     db.exercise_load_defaults.find((e) => e.exercise_id === "e1").weight_kg,
     99,
