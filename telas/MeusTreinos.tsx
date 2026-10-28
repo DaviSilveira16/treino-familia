@@ -124,6 +124,7 @@ export default function MeusTreinos({
   const [carregando, setCarregando] = useState(true);
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const reordenandoRef = useRef(false);
   const [repetirCarga, setRepetirCarga] = useState(false);
   const cargasAntesDeRepetir = useRef<SerieCarga[]>([]);
   const [fotoCarregandoId, setFotoCarregandoId] = useState<string | null>(null);
@@ -528,7 +529,11 @@ export default function MeusTreinos({
           name: nome,
           sets_goal: series,
           reps_goal: reps,
-          position: exercicios.length,
+          position:
+            exercicios.reduce(
+              (maior, exercicio) => Math.max(maior, exercicio.position),
+              -1,
+            ) + 1,
         })
         .select("id, plan_id, name, sets_goal, reps_goal, position, photo_path")
         .single();
@@ -548,6 +553,64 @@ export default function MeusTreinos({
     } catch {
       Alert.alert("Erro", "Não foi possível salvar o exercício.");
     } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function moverExercicio(indice: number, direcao: -1 | 1) {
+    const treino = treinoSelecionado;
+    const destino = indice + direcao;
+    if (
+      !treino ||
+      !usuarioId ||
+      salvando ||
+      reordenandoRef.current ||
+      destino < 0 ||
+      destino >= exercicios.length
+    )
+      return;
+
+    const ordem = [...exercicios];
+    [ordem[indice], ordem[destino]] = [ordem[destino], ordem[indice]];
+    reordenandoRef.current = true;
+    setSalvando(true);
+    try {
+      // Uma única gravação atualiza todas as posições juntas e elimina lacunas
+      // deixadas por exercícios excluídos.
+      const atualizacoes = ordem.map((exercicio, position) => ({
+        id: exercicio.id,
+        user_id: usuarioId,
+        plan_id: treino.id,
+        position,
+      }));
+      const { data, error } = await supabase
+        .from("exercises")
+        .upsert(atualizacoes, { onConflict: "id" })
+        .select("id, position");
+
+      if (error) throw error;
+      if (!data || data.length !== ordem.length)
+        throw new Error("O servidor não confirmou a nova ordem dos exercícios.");
+
+      const posicoes = new Map(
+        data.map((exercicio) => [exercicio.id, exercicio.position]),
+      );
+      setExercicios(
+        ordem.map((exercicio) => ({
+          ...exercicio,
+          position: posicoes.get(exercicio.id) ?? exercicio.position,
+        })),
+      );
+      registrarMudancaDeDados();
+    } catch (erro) {
+      mostrarMensagem(
+        "Não foi possível mudar a ordem",
+        erro instanceof Error
+          ? erro.message
+          : "Confira a conexão e tente novamente. A ordem anterior foi mantida na tela.",
+      );
+    } finally {
+      reordenandoRef.current = false;
       setSalvando(false);
     }
   }
@@ -1257,14 +1320,19 @@ export default function MeusTreinos({
                           <Text style={estilos.numeroTexto}>
                             {fotoCarregandoId === exercicio.id
                               ? "…"
-                              : indice + 1}
+                              : "📷"}
                           </Text>
                         )}
                       </TouchableOpacity>
                       <View style={estilos.infoExercicio}>
-                        <Text style={estilos.nomeExercicio}>
-                          {exercicio.name}
-                        </Text>
+                        <View style={estilos.tituloExercicio}>
+                          <Text style={estilos.ordemExercicio}>
+                            {indice + 1}.
+                          </Text>
+                          <Text style={estilos.nomeExercicio}>
+                            {exercicio.name}
+                          </Text>
+                        </View>
                         <Text style={estilos.detalheExercicio}>
                           {exercicio.sets_goal} séries · {exercicio.reps_goal}{" "}
                           repetições
@@ -1275,6 +1343,34 @@ export default function MeusTreinos({
                             ? `${maioresCargas[exercicio.id]} kg`
                             : "Ainda não registrada"}
                         </Text>
+                      </View>
+                      <View style={estilos.acoesOrdem}>
+                        <TouchableOpacity
+                          accessibilityRole="button"
+                          accessibilityLabel={`Mover ${exercicio.name} para cima`}
+                          disabled={salvando || indice === 0}
+                          onPress={() => void moverExercicio(indice, -1)}
+                          style={[
+                            estilos.botaoOrdem,
+                            (salvando || indice === 0) &&
+                              estilos.botaoOrdemDesabilitado,
+                          ]}
+                        >
+                          <Text style={estilos.textoOrdem}>↑</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          accessibilityRole="button"
+                          accessibilityLabel={`Mover ${exercicio.name} para baixo`}
+                          disabled={salvando || indice === exercicios.length - 1}
+                          onPress={() => void moverExercicio(indice, 1)}
+                          style={[
+                            estilos.botaoOrdem,
+                            (salvando || indice === exercicios.length - 1) &&
+                              estilos.botaoOrdemDesabilitado,
+                          ]}
+                        >
+                          <Text style={estilos.textoOrdem}>↓</Text>
+                        </TouchableOpacity>
                       </View>
                       <View style={estilos.acoesExercicio}>
                         <TouchableOpacity
@@ -1899,6 +1995,16 @@ const criarEstilos = (corTema: string) =>
     },
     numeroTexto: { color: corTema, fontWeight: "800", fontSize: 18 },
     infoExercicio: { flex: 1, minWidth: 0, flexShrink: 1 },
+    tituloExercicio: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 5,
+    },
+    ordemExercicio: {
+      color: corTema,
+      fontSize: 14,
+      fontWeight: "800",
+    },
     nomeExercicio: {
       color: "#F0F3F1",
       fontSize: 14,
@@ -1917,6 +2023,31 @@ const criarEstilos = (corTema: string) =>
       flexDirection: "row",
       alignItems: "stretch",
       gap: 6,
+    },
+    acoesOrdem: {
+      flexDirection: "column",
+      gap: 5,
+      flexShrink: 0,
+    },
+    botaoOrdem: {
+      width: 44,
+      height: 44,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: `${corTema}66`,
+      backgroundColor: `${corTema}14`,
+      borderRadius: 10,
+    },
+    botaoOrdemDesabilitado: {
+      opacity: 0.35,
+    },
+    textoOrdem: {
+      color: corTema,
+      fontSize: 21,
+      lineHeight: 24,
+      fontWeight: "800",
+      textAlign: "center",
     },
     botaoAcao: {
       flex: 1,
