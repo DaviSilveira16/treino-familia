@@ -131,8 +131,15 @@ export default function MeusTreinos({
   const [origemFotoAberta, setOrigemFotoAberta] = useState<Exercicio | null>(
     null,
   );
+  function selecionarTreino(treino: Treino | null) {
+    if (treinoSelecionado?.id !== treino?.id) {
+      setExercicios([]);
+      setExercicioParaCarga(null);
+    }
+    setTreinoSelecionado(treino);
+  }
   useVoltarDoModal(Boolean(treinoSelecionado), () => {
-    setTreinoSelecionado(null);
+    selecionarTreino(null);
     setExercicioEditando(null);
     setExercicioParaCarga(null);
     setMostrarFormularioExercicio(false);
@@ -215,8 +222,6 @@ export default function MeusTreinos({
     const controlador = new AbortController();
     const treino = treinoSelecionado;
     if (!treino) {
-      setExercicios([]);
-      setExercicioParaCarga(null);
       return () => {
         ativo = false;
         controlador.abort();
@@ -233,23 +238,23 @@ export default function MeusTreinos({
       lista: Exercicio[];
       cargas: Record<string, number>;
     };
-    const exibicao = lerCacheParaExibicao<CacheExercicios>(usuarioId, chave);
-    if (exibicao) {
-      setExercicios(exibicao.lista);
-      setMaioresCargas((atuais) => ({ ...atuais, ...exibicao.cargas }));
-      setCarregandoExercicios(false);
-    }
-    const anterior = lerCache<CacheExercicios>(usuarioId, chave);
-    if (anterior) {
-      setExercicios(anterior.lista);
-      setMaioresCargas((atuais) => ({ ...atuais, ...anterior.cargas }));
-      setCarregandoExercicios(false);
-      return () => {
-        ativo = false;
-        controlador.abort();
-      };
-    }
     async function carregarExercicios() {
+      const exibicao = await Promise.resolve().then(() =>
+        lerCacheParaExibicao<CacheExercicios>(usuarioId, chave),
+      );
+      if (!ativo || controlador.signal.aborted) return;
+      if (exibicao) {
+        setExercicios(exibicao.lista);
+        setMaioresCargas((atuais) => ({ ...atuais, ...exibicao.cargas }));
+        setCarregandoExercicios(false);
+      }
+      const anterior = lerCache<CacheExercicios>(usuarioId, chave);
+      if (anterior) {
+        setExercicios(anterior.lista);
+        setMaioresCargas((atuais) => ({ ...atuais, ...anterior.cargas }));
+        setCarregandoExercicios(false);
+        return;
+      }
       if (!exibicao) setCarregandoExercicios(true);
       const revisaoInicial = obterRevisaoDeDados();
       try {
@@ -370,7 +375,7 @@ export default function MeusTreinos({
       setTreinos((atuais) =>
         [...atuais, novoTreino].sort((a, b) => a.name.localeCompare(b.name)),
       );
-      setTreinoSelecionado(novoTreino);
+      selecionarTreino(novoTreino);
       setMostrarFormularioExercicio(false);
       setNomeNovoTreino("");
     } catch {
@@ -469,9 +474,8 @@ export default function MeusTreinos({
       setTreinos((atuais) => atuais.filter((item) => item.id !== treino.id));
 
       if (treinoSelecionado?.id === treino.id) {
-        setTreinoSelecionado(null);
+        selecionarTreino(null);
         setMostrarFormularioExercicio(false);
-        setExercicios([]);
         setExercicioEditando(null);
         setExercicioParaCarga(null);
       }
@@ -1060,7 +1064,7 @@ export default function MeusTreinos({
                   <TouchableOpacity
                     style={estilos.conteudoCartaoTreino}
                     onPress={() => {
-                      setTreinoSelecionado(treino);
+                      selecionarTreino(treino);
                       setMostrarFormularioExercicio(false);
                     }}
                   >
@@ -1086,7 +1090,7 @@ export default function MeusTreinos({
                     <TouchableOpacity
                       style={estilos.botaoAdicionarTreino}
                       onPress={() => {
-                        setTreinoSelecionado(treino);
+                        selecionarTreino(treino);
                         setMostrarFormularioExercicio(true);
                       }}
                     >
