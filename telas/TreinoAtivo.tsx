@@ -1840,6 +1840,19 @@ export default function TreinoAtivo({
                 </Text>
               </TouchableOpacity>
             ) : null}
+            {finalizacao || series.some((s) => s.pendente) || bloqueioSessao ? (
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Sair mantendo a cópia local do treino"
+                disabled={salvando || sincronizando}
+                style={estilos.botaoSecundario}
+                onPress={onVoltar}
+              >
+                <Text style={estilos.textoBotaoSecundario}>
+                  Sair mantendo a cópia local do treino
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : null}
         {outroTreinoAtivo ? (

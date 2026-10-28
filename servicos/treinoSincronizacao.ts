@@ -296,7 +296,10 @@ async function enviar(
         "O servidor já encerrou esta sessão, mas ainda existem séries locais pendentes. Confira a conclusão no servidor; sua cópia será preservada.",
       );
 
-    for (const item of local.series.filter((serie) => serie.pendente)) {
+    for (const seriePendente of local.series.filter(
+      (serie) => serie.pendente,
+    )) {
+      let item = seriePendente;
       await garantirEnvioPermitido(usuarioId, sessaoId);
       let busca = supabase
         .from("workout_sets")
@@ -417,13 +420,49 @@ async function enviar(
             );
           // INSERT com UUID estável: uma resposta perdida é reconhecida na consulta acima.
           // Evita upsert sobrescrever uma linha que surgiu depois da leitura.
-          const { data, error } = await supabase
+          let insercao = await supabase
             .from("workout_sets")
             .insert({ id: item.registroId, ...dados })
             .select("id")
             .single();
-          if (error) throw error;
-          registroId = data.id;
+          if (insercao.error?.code === "23505") {
+            // Um UUID local antigo pode já pertencer a outra linha (por exemplo,
+            // após restaurar uma cópia). Nunca altere essa linha: gere e persista
+            // outro ID antes de repetir o INSERT para que uma falha continue retomável.
+            const registroIdAnterior = item.registroId;
+            const novoRegistroId = novoIdSerie();
+            const atualizado = await atualizarRascunho(
+              usuarioId,
+              planId,
+              (atual) =>
+                atual.sessao.id !== sessaoId
+                  ? atual
+                  : {
+                      ...atual,
+                      series: atual.series.map((serie) =>
+                        mesmaOperacao(serie, item)
+                          ? { ...serie, registroId: novoRegistroId }
+                          : serie,
+                      ),
+                    },
+            );
+            if (!atualizado || atualizado.sessao.id !== sessaoId)
+              throw new Error(
+                "Não foi possível atualizar o identificador da série no rascunho. Seus dados locais foram preservados.",
+              );
+            local = atualizado;
+            item = { ...item, registroId: novoRegistroId };
+            // Proteção extra: evita reutilizar por engano o ID que falhou.
+            if (item.registroId === registroIdAnterior)
+              throw new Error("Não foi possível gerar um novo ID para a série.");
+            insercao = await supabase
+              .from("workout_sets")
+              .insert({ id: novoRegistroId, ...dados })
+              .select("id")
+              .single();
+          }
+          if (insercao.error) throw insercao.error;
+          registroId = insercao.data.id;
         }
       }
       local = await atualizarRascunho(usuarioId, planId, (atual) =>
