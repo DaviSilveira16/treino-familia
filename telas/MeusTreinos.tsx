@@ -1529,14 +1529,6 @@ export default function MeusTreinos({
                             </Text>
                           </TouchableOpacity>
                         )}
-                        <TouchableOpacity
-                          style={[estilos.botaoAcao, estilos.botaoExcluir]}
-                          onPress={() => excluirExercicio(exercicio)}
-                        >
-                          <Text numberOfLines={1} style={estilos.textoExcluir}>
-                            Excluir
-                          </Text>
-                        </TouchableOpacity>
                       </View>
 
                       {exercicioEditando?.id === exercicio.id && (
@@ -1587,6 +1579,16 @@ export default function MeusTreinos({
                               </Text>
                             </TouchableOpacity>
                           </View>
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            style={estilos.botaoExcluirEditor}
+                            onPress={() => void excluirExercicio(exercicio)}
+                            disabled={salvando}
+                          >
+                            <Text style={estilos.textoExcluir}>
+                              Excluir exercício
+                            </Text>
+                          </TouchableOpacity>
                         </View>
                       )}
 
@@ -2159,13 +2161,23 @@ const criarEstilos = (corTema: string) =>
       fontWeight: "700",
       textAlign: "center",
     },
-    botaoExcluir: { borderColor: "#D75A5A55", backgroundColor: "#D75A5A14" },
     textoExcluir: {
       color: "#FF8A8A",
       fontSize: 12,
       lineHeight: 18,
       fontWeight: "700",
       textAlign: "center",
+    },
+    botaoExcluirEditor: {
+      minHeight: 44,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 12,
+      marginTop: 10,
+      borderWidth: 1,
+      borderColor: "#D75A5A66",
+      backgroundColor: "#D75A5A14",
+      borderRadius: 10,
     },
     linhaBotoes: { flexDirection: "row", gap: 10, marginTop: 14 },
     botaoSecundario: {
