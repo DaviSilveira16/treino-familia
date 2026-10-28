@@ -129,6 +129,12 @@ export default function MeusTreinos({
   const cargasAntesDeRepetir = useRef<SerieCarga[]>([]);
   const [fotoCarregandoId, setFotoCarregandoId] = useState<string | null>(null);
   const fotoEmEnvioRef = useRef(false);
+  const scrollYAtualRef = useRef(0);
+  const scrollOrigemFormularioRef = useRef(0);
+  const scrollOrigemPainelRef = useRef(0);
+  const restaurarScrollRef = useRef<number | null>(null);
+  const alinharFormularioRef = useRef(false);
+  const secaoSelecionadaYRef = useRef(0);
   const [origemFotoAberta, setOrigemFotoAberta] = useState<Exercicio | null>(
     null,
   );
@@ -145,19 +151,37 @@ export default function MeusTreinos({
     setExercicioParaCarga(null);
     setMostrarFormularioExercicio(false);
   });
-  useVoltarDoModal(mostrarFormularioExercicio, () =>
-    setMostrarFormularioExercicio(false),
-  );
-  useVoltarDoModal(Boolean(exercicioEditando), () =>
-    setExercicioEditando(null),
-  );
-  useVoltarDoModal(Boolean(exercicioParaCarga), () =>
-    setExercicioParaCarga(null),
-  );
+  useVoltarDoModal(mostrarFormularioExercicio, cancelarFormularioExercicio);
+  useVoltarDoModal(Boolean(exercicioEditando), cancelarEdicao);
+  useVoltarDoModal(Boolean(exercicioParaCarga), cancelarCargas);
   useVoltarDoModal(Boolean(origemFotoAberta), () => setOrigemFotoAberta(null));
   const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView> | null>(
     null,
   );
+
+  function abrirFormularioExercicio(treino: Treino) {
+    scrollOrigemFormularioRef.current = scrollYAtualRef.current;
+    restaurarScrollRef.current = null;
+    alinharFormularioRef.current = true;
+    selecionarTreino(treino);
+    setMostrarFormularioExercicio(true);
+  }
+
+  function cancelarFormularioExercicio() {
+    alinharFormularioRef.current = false;
+    restaurarScrollRef.current = scrollOrigemFormularioRef.current;
+    setMostrarFormularioExercicio(false);
+  }
+
+  function cancelarEdicao() {
+    restaurarScrollRef.current = scrollOrigemPainelRef.current;
+    setExercicioEditando(null);
+  }
+
+  function cancelarCargas() {
+    restaurarScrollRef.current = scrollOrigemPainelRef.current;
+    setExercicioParaCarga(null);
+  }
 
   useEffect(() => {
     let ativo = true;
@@ -665,6 +689,8 @@ export default function MeusTreinos({
   }
 
   function iniciarEdicao(exercicio: Exercicio) {
+    scrollOrigemPainelRef.current = scrollYAtualRef.current;
+    restaurarScrollRef.current = null;
     setExercicioEditando(exercicio);
     setNomeEdicao(exercicio.name);
     setSeriesEdicao(String(exercicio.sets_goal));
@@ -716,6 +742,7 @@ export default function MeusTreinos({
             : item,
         ),
       );
+      restaurarScrollRef.current = scrollOrigemPainelRef.current;
       setExercicioEditando(null);
     } catch {
       Alert.alert("Erro", "Não foi possível editar o exercício.");
@@ -938,6 +965,8 @@ export default function MeusTreinos({
       return;
     }
 
+    scrollOrigemPainelRef.current = scrollYAtualRef.current;
+    restaurarScrollRef.current = null;
     setExercicioEditando(null);
     setExercicioParaCarga(exercicio);
     setRepetirCarga(false);
@@ -1071,6 +1100,7 @@ export default function MeusTreinos({
         ...atuais,
         [exercicioParaCarga.id]: maiorCargaNova,
       }));
+      restaurarScrollRef.current = scrollOrigemPainelRef.current;
       setExercicioParaCarga(null);
       mostrarMensagem(
         "Cargas salvas",
@@ -1105,12 +1135,19 @@ export default function MeusTreinos({
         contentContainerStyle={[estilos.conteudo, { flexGrow: 1 }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={(evento) => {
+          scrollYAtualRef.current = evento.nativeEvent.contentOffset.y;
+        }}
         onContentSizeChange={() => {
-          if (treinoSelecionado) {
+          const destino = restaurarScrollRef.current;
+          if (destino === null) return;
+          restaurarScrollRef.current = null;
+          requestAnimationFrame(() =>
             requestAnimationFrame(() =>
-              scrollViewRef.current?.scrollToEnd({ animated: true }),
-            );
-          }
+              scrollViewRef.current?.scrollTo({ y: destino, animated: false }),
+            ),
+          );
         }}
       >
         <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar}>
@@ -1201,10 +1238,7 @@ export default function MeusTreinos({
                   <View style={estilos.acoesTreino}>
                     <TouchableOpacity
                       style={estilos.botaoAdicionarTreino}
-                      onPress={() => {
-                        selecionarTreino(treino);
-                        setMostrarFormularioExercicio(true);
-                      }}
+                      onPress={() => abrirFormularioExercicio(treino)}
                     >
                       <Text style={estilos.textoBotaoAdicionarTreino}>
                         + Adicionar exercício
@@ -1226,7 +1260,11 @@ export default function MeusTreinos({
 
         {treinoSelecionado && (
           <>
-            <View>
+            <View
+              onLayout={(evento) => {
+                secaoSelecionadaYRef.current = evento.nativeEvent.layout.y;
+              }}
+            >
               <Text style={estilos.tituloSecao}>
                 Exercícios — {treinoSelecionado.name}
               </Text>
@@ -1259,13 +1297,31 @@ export default function MeusTreinos({
                   </TouchableOpacity>
                 )}
               {mostrarFormularioExercicio && (
-                <View style={estilos.formulario}>
+                <View
+                  style={estilos.formulario}
+                  onLayout={(evento) => {
+                    if (!alinharFormularioRef.current) return;
+                    alinharFormularioRef.current = false;
+                    const destino = Math.max(
+                      0,
+                      secaoSelecionadaYRef.current +
+                        evento.nativeEvent.layout.y -
+                        12,
+                    );
+                    requestAnimationFrame(() =>
+                      scrollViewRef.current?.scrollTo({
+                        y: destino,
+                        animated: true,
+                      }),
+                    );
+                  }}
+                >
                   <View style={estilos.cabecalhoFormulario}>
                     <Text style={estilos.rotulo}>
                       Novo exercício para {treinoSelecionado.name}
                     </Text>
                     <TouchableOpacity
-                      onPress={() => setMostrarFormularioExercicio(false)}
+                      onPress={cancelarFormularioExercicio}
                     >
                       <Text style={estilos.textoCancelarFormulario}>
                         Cancelar
@@ -1515,7 +1571,7 @@ export default function MeusTreinos({
                           <View style={estilos.linhaBotoes}>
                             <TouchableOpacity
                               style={estilos.botaoSecundario}
-                              onPress={() => setExercicioEditando(null)}
+                              onPress={cancelarEdicao}
                             >
                               <Text style={estilos.textoBotaoSecundario}>
                                 Cancelar
@@ -1618,7 +1674,7 @@ export default function MeusTreinos({
                           <View style={estilos.linhaBotoes}>
                             <TouchableOpacity
                               style={estilos.botaoSecundario}
-                              onPress={() => setExercicioParaCarga(null)}
+                              onPress={cancelarCargas}
                             >
                               <Text style={estilos.textoBotaoSecundario}>
                                 Cancelar
