@@ -572,42 +572,91 @@ export default function MeusTreinos({
 
     const ordem = [...exercicios];
     [ordem[indice], ordem[destino]] = [ordem[destino], ordem[indice]];
+    const movido = exercicios[indice];
+    const vizinho = exercicios[destino];
+    const posicaoMovido = movido.position;
+    const posicaoVizinho = vizinho.position;
+    const definirPosicao = async (exercicio: Exercicio, position: number) => {
+      const { data, error } = await supabase
+        .from("exercises")
+        .update({ position })
+        .eq("id", exercicio.id)
+        .eq("plan_id", treino.id)
+        .eq("user_id", usuarioId)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data)
+        throw new Error(`O servidor não confirmou a posição de ${exercicio.name}.`);
+    };
     reordenandoRef.current = true;
     setSalvando(true);
     try {
-      // Uma única gravação atualiza todas as posições juntas e elimina lacunas
-      // deixadas por exercícios excluídos.
-      const atualizacoes = ordem.map((exercicio, position) => ({
-        id: exercicio.id,
-        user_id: usuarioId,
-        plan_id: treino.id,
-        position,
-      }));
-      const { data, error } = await supabase
-        .from("exercises")
-        .upsert(atualizacoes, { onConflict: "id" })
-        .select("id, position");
-
-      if (error) throw error;
-      if (!data || data.length !== ordem.length)
-        throw new Error("O servidor não confirmou a nova ordem dos exercícios.");
-
-      const posicoes = new Map(
-        data.map((exercicio) => [exercicio.id, exercicio.position]),
-      );
+      // A posição temporária permite trocar dois valores sem colidir caso o
+      // banco exija posições únicas dentro do treino.
+      const temporaria =
+        Math.max(...exercicios.map((exercicio) => exercicio.position), -1) + 1;
+      await definirPosicao(movido, temporaria);
+      await definirPosicao(vizinho, posicaoMovido);
+      await definirPosicao(movido, posicaoVizinho);
       setExercicios(
-        ordem.map((exercicio) => ({
-          ...exercicio,
-          position: posicoes.get(exercicio.id) ?? exercicio.position,
-        })),
+        ordem.map((exercicio) =>
+          exercicio.id === movido.id
+            ? { ...exercicio, position: posicaoVizinho }
+            : exercicio.id === vizinho.id
+              ? { ...exercicio, position: posicaoMovido }
+              : exercicio,
+        ),
       );
       registrarMudancaDeDados();
     } catch (erro) {
+      let erroReversao: unknown;
+      try {
+        const { data, error } = await supabase
+          .from("exercises")
+          .select("id, position")
+          .eq("plan_id", treino.id)
+          .eq("user_id", usuarioId)
+          .in("id", [movido.id, vizinho.id]);
+        if (error) throw error;
+        const posicoesAtuais = new Map(
+          (data ?? []).map((exercicio) => [exercicio.id, exercicio.position]),
+        );
+        if (
+          posicoesAtuais.get(movido.id) !== posicaoMovido ||
+          posicoesAtuais.get(vizinho.id) !== posicaoVizinho
+        ) {
+          const baseTemporaria =
+            Math.max(
+              ...Array.from(posicoesAtuais.values()),
+              posicaoMovido,
+              posicaoVizinho,
+              -1,
+            ) + 1;
+          await definirPosicao(movido, baseTemporaria);
+          await definirPosicao(vizinho, baseTemporaria + 1);
+          await definirPosicao(movido, posicaoMovido);
+          await definirPosicao(vizinho, posicaoVizinho);
+        }
+      } catch (erro) {
+        erroReversao = erro;
+      }
+      const mensagemErro = (valor: unknown, alternativa: string) =>
+        valor instanceof Error
+          ? valor.message
+          : valor &&
+              typeof valor === "object" &&
+              "message" in valor &&
+              typeof valor.message === "string"
+            ? valor.message
+            : alternativa;
       mostrarMensagem(
         "Não foi possível mudar a ordem",
-        erro instanceof Error
-          ? erro.message
-          : "Confira a conexão e tente novamente. A ordem anterior foi mantida na tela.",
+        `${mensagemErro(erro, "O servidor recusou a alteração.")}${
+          erroReversao
+            ? ` A restauração também falhou: ${mensagemErro(erroReversao, "erro desconhecido")}. Reabra o treino para conferir a ordem atual.`
+            : " A ordem anterior foi restaurada."
+        }`,
       );
     } finally {
       reordenandoRef.current = false;
@@ -1320,19 +1369,14 @@ export default function MeusTreinos({
                           <Text style={estilos.numeroTexto}>
                             {fotoCarregandoId === exercicio.id
                               ? "…"
-                              : "📷"}
+                              : indice + 1}
                           </Text>
                         )}
                       </TouchableOpacity>
                       <View style={estilos.infoExercicio}>
-                        <View style={estilos.tituloExercicio}>
-                          <Text style={estilos.ordemExercicio}>
-                            {indice + 1}.
-                          </Text>
-                          <Text style={estilos.nomeExercicio}>
-                            {exercicio.name}
-                          </Text>
-                        </View>
+                        <Text style={estilos.nomeExercicio}>
+                          {`${indice + 1}.${exercicio.name}`}
+                        </Text>
                         <Text style={estilos.detalheExercicio}>
                           {exercicio.sets_goal} séries · {exercicio.reps_goal}{" "}
                           repetições
@@ -1995,16 +2039,6 @@ const criarEstilos = (corTema: string) =>
     },
     numeroTexto: { color: corTema, fontWeight: "800", fontSize: 18 },
     infoExercicio: { flex: 1, minWidth: 0, flexShrink: 1 },
-    tituloExercicio: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: 5,
-    },
-    ordemExercicio: {
-      color: corTema,
-      fontSize: 14,
-      fontWeight: "800",
-    },
     nomeExercicio: {
       color: "#F0F3F1",
       fontSize: 14,
