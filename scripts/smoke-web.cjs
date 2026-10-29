@@ -223,7 +223,8 @@ function filtered(table, search) {
       .map((row) => ({
         ...row,
         workout_sets: tables.workout_sets.filter(
-          (set) => set.session_id === row.id && set.exercise_id === eid,
+          (set) => set.session_id === row.id &&
+            (!search.get("workout_sets.exercise_id") || `eq.${set.exercise_id}` === search.get("workout_sets.exercise_id")),
         ),
       }))
       .filter((row) => row.workout_sets.length);
@@ -793,6 +794,70 @@ function filtered(table, search) {
       await context.close();
       return;
     }
+    if (process.env.SMOKE_SCROLLS_ONLY) {
+      phase = "scroll destinations";
+      tables.workout_plans[0].name = "ZZ treino de rolagem";
+      for (let indice = 1; indice <= 30; indice++) tables.workout_plans.push({
+        id: `scroll-plan-${indice}`, user_id: uid, name: `Plano ${String(indice).padStart(2, "0")}`, created_at: new Date(now).toISOString(),
+      });
+      await page.getByText("Meus treinos", { exact: true }).click();
+      await page.getByRole("button", { name: "Abrir treino ZZ treino de rolagem", exact: true }).click();
+      const esperarDestino = async (id) => page.waitForFunction((alvo) => {
+        const elemento = document.querySelector(`[data-testid="${alvo}"]`);
+        const rect = elemento?.getBoundingClientRect();
+        // Listas curtas podem atingir o fim do conteúdo antes do alinhamento
+        // ao topo; o início do alvo deve ficar legível acima da navegação.
+        return rect && rect.height > 0 && rect.top >= 0 &&
+          rect.top + Math.min(rect.height, 160) < window.innerHeight - 100;
+      }, id);
+      await esperarDestino("inicio-treino-com-cronometro");
+      const botaoInicio = await page.getByText("▶ Iniciar treino com cronômetro", { exact: true }).boundingBox();
+      assert.ok(botaoInicio && botaoInicio.y >= 0 && botaoInicio.y + botaoInicio.height < 784,
+        "O botão do cronômetro precisa estar visível sem rolagem adicional do teste");
+      await page.getByRole("button", { name: "Adicionar exercício ao treino ZZ treino de rolagem", exact: true }).click();
+      await esperarDestino("formulario-adicionar-exercicio");
+      await page.screenshot({ path: path.join(output, "web-rolagem-adicionar-exercicio.png") });
+      await page.getByText("Cancelar", { exact: true }).filter({ visible: true }).click();
+      await page.getByTestId("formulario-adicionar-exercicio").waitFor({ state: "hidden" });
+      await page.getByRole("button", { name: "Abrir treino ZZ treino de rolagem", exact: true }).click();
+      await esperarDestino("inicio-treino-com-cronometro");
+      await page.screenshot({ path: path.join(output, "web-rolagem-iniciar-treino.png") });
+      assert.deepEqual(errors, []);
+      console.log("OK UI — 31 treinos: seleção alinha cronômetro, adicionar alinha formulário e cancelar permite selecionar novamente.");
+      await context.close();
+      return;
+    }
+    if (process.env.SMOKE_RECORDS_ONLY) {
+      phase = "per-set records";
+      tables.workout_sets.find((s) => s.id === "old-set-1").weight_kg = 40;
+      tables.workout_sets.find((s) => s.id === "old-set-2").weight_kg = 50;
+      const recenteId = "98765432-1111-4111-8111-111111111111";
+      tables.workout_sessions.push({ ...oldSession, id: recenteId, started_at: new Date(now - 3600000).toISOString(), finished_at: new Date(now - 1800000).toISOString() });
+      tables.workout_sets.push(...[1, 2].map((numero) => ({ id: `record-set-${numero}`, user_id: uid, session_id: recenteId, exercise_id: eid, exercise_name: "Agachamento teste", set_number: numero, reps: 6, weight_kg: numero === 1 ? 60 : 35 })));
+      await page.getByRole("button", { name: /Continuar treino: Plano teste/ }).click();
+      const copiar = page.getByRole("button", { name: "Usar maiores cargas de Agachamento teste nas séries não concluídas", exact: true });
+      await copiar.click();
+      const carga1 = page.getByRole("textbox", { name: "Agachamento teste, série 1, carga em quilos", exact: true });
+      const carga2 = page.getByRole("textbox", { name: "Agachamento teste, série 2, carga em quilos", exact: true });
+      assert.equal(await carga1.inputValue(), "60");
+      assert.equal(await carga2.inputValue(), "50");
+      assert.equal(await page.getByRole("textbox", { name: "Agachamento teste, série 1, repetições realizadas", exact: true }).inputValue(), "6");
+      assert.equal(await page.getByRole("textbox", { name: "Agachamento teste, série 2, repetições realizadas", exact: true }).inputValue(), "8");
+      await page.getByRole("button", { name: "Concluir Agachamento teste, série 1", exact: true }).click();
+      await page.getByRole("button", { name: "Desmarcar Agachamento teste, série 1", exact: true }).waitFor();
+      await carga2.fill("1");
+      await copiar.click();
+      await page.waitForFunction(() => document.querySelector('input[aria-label="Agachamento teste, série 2, carga em quilos"]')?.value === "50");
+      assert.equal(await carga1.inputValue(), "60");
+      assert.equal(await carga1.isEditable(), false);
+      assert.equal(await carga2.inputValue(), "50");
+      await page.getByText("Maior carga por série", { exact: true }).scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(output, "web-recordes-por-serie.png") });
+      assert.deepEqual(errors, []);
+      console.log("OK UI — recordes por série em dias diferentes (60/50 kg), repetições reais e série concluída preservada ao copiar.");
+      await context.close();
+      return;
+    }
     assert.equal(
       await page.evaluate(() => {
         const event = new Event("treino-familia:android-back-v1", {
@@ -813,7 +878,7 @@ function filtered(table, search) {
     });
     await reps.waitFor();
     await page
-      .getByRole("button", { name: /Usar última sessão de Agachamento teste/ })
+      .getByRole("button", { name: /Usar maiores cargas de Agachamento teste/ })
       .click();
     await page.waitForFunction(
       () =>
@@ -979,7 +1044,15 @@ function filtered(table, search) {
         exact: true,
       })
       .click();
+    // O WebKit pode restaurar o foco do modal recém-fechado. Clique como
+    // o usuário faria antes de preencher, garantindo que o input receba texto.
+    await cargaPrincipal.click();
     await cargaPrincipal.fill("30");
+    assert.equal(await cargaPrincipal.inputValue(), "30");
+    await page.waitForFunction((key) => {
+      const salvo = JSON.parse(localStorage.getItem(key));
+      return salvo?.series[0]?.weight_kg === "30" && !salvo.series[0].concluida;
+    }, draftKey);
     await page
       .getByRole("button", {
         name: "Concluir Agachamento teste, série 1",
@@ -992,7 +1065,9 @@ function filtered(table, search) {
         exact: true,
       })
       .click();
+    await reps.click();
     await reps.fill("15");
+    assert.equal(await reps.inputValue(), "15");
     await page
       .getByRole("button", {
         name: "Concluir Agachamento teste, série 1",
@@ -1913,7 +1988,7 @@ function filtered(table, search) {
     await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByText("Frequência", { exact: true }).click();
     await page.getByText("Registrar cardio", { exact: true }).waitFor();
-    await page.getByText("Academia da viagem").first().waitFor();
+    await page.getByText("Academia da viagem").filter({ visible: true }).first().waitFor();
     await page.getByText(/kcal ativas estimadas/).first().waitFor();
     assert.equal(
       await page.evaluate(

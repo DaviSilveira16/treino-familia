@@ -133,12 +133,19 @@ export default function MeusTreinos({
   const scrollOrigemFormularioRef = useRef(0);
   const scrollOrigemPainelRef = useRef(0);
   const restaurarScrollRef = useRef<number | null>(null);
-  const alinharFormularioRef = useRef(false);
-  const secaoSelecionadaYRef = useRef(0);
+  const rolagemSolicitadaRef = useRef<{
+    treinoId: string;
+    alvo: "inicio" | "formulario";
+  } | null>(null);
+  const treinoRenderizadoRef = useRef<string | null>(null);
+  const inicioTreinoRef = useRef<React.ComponentRef<typeof View> | null>(null);
+  const formularioExercicioRef = useRef<React.ComponentRef<typeof View> | null>(null);
+  const rolagemFrameRef = useRef<number | null>(null);
   const [origemFotoAberta, setOrigemFotoAberta] = useState<Exercicio | null>(
     null,
   );
   function selecionarTreino(treino: Treino | null) {
+    rolagemSolicitadaRef.current = null;
     if (treinoSelecionado?.id !== treino?.id) {
       setExercicios([]);
       setExercicioParaCarga(null);
@@ -159,16 +166,48 @@ export default function MeusTreinos({
     null,
   );
 
+  function alinharDestinoSolicitado() {
+    if (rolagemFrameRef.current !== null)
+      cancelAnimationFrame(rolagemFrameRef.current);
+    rolagemFrameRef.current = requestAnimationFrame(() => {
+      rolagemFrameRef.current = null;
+      const pedido = rolagemSolicitadaRef.current;
+      if (!pedido || treinoRenderizadoRef.current !== pedido.treinoId) return;
+      const alvo = pedido.alvo === "formulario"
+        ? formularioExercicioRef.current
+        : inicioTreinoRef.current;
+      const scroll = scrollViewRef.current;
+      if (!alvo || !scroll) return;
+      // Ambos são medidos na janela: não soma coordenadas de pais distintos.
+      alvo.measureInWindow((_x, yAlvo, _largura, altura) => {
+        if (altura <= 0 || rolagemSolicitadaRef.current !== pedido) return;
+        scroll.measureInWindow((_sx, yScroll) => {
+          if (rolagemSolicitadaRef.current !== pedido) return;
+          const destino = Math.max(0, scrollYAtualRef.current + yAlvo - yScroll - 12);
+          rolagemSolicitadaRef.current = null;
+          scroll.scrollTo({ y: destino, animated: true });
+        });
+      });
+    });
+  }
+
+  useEffect(() => () => {
+    rolagemSolicitadaRef.current = null;
+    if (rolagemFrameRef.current !== null)
+      cancelAnimationFrame(rolagemFrameRef.current);
+  }, []);
+
   function abrirFormularioExercicio(treino: Treino) {
     scrollOrigemFormularioRef.current = scrollYAtualRef.current;
     restaurarScrollRef.current = null;
-    alinharFormularioRef.current = true;
     selecionarTreino(treino);
+    rolagemSolicitadaRef.current = { treinoId: treino.id, alvo: "formulario" };
     setMostrarFormularioExercicio(true);
+    alinharDestinoSolicitado();
   }
 
   function cancelarFormularioExercicio() {
-    alinharFormularioRef.current = false;
+    rolagemSolicitadaRef.current = null;
     restaurarScrollRef.current = scrollOrigemFormularioRef.current;
     setMostrarFormularioExercicio(false);
   }
@@ -1211,10 +1250,15 @@ export default function MeusTreinos({
                   ]}
                 >
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`Abrir treino ${treino.name}`}
                     style={estilos.conteudoCartaoTreino}
                     onPress={() => {
                       selecionarTreino(treino);
+                      restaurarScrollRef.current = null;
+                      rolagemSolicitadaRef.current = { treinoId: treino.id, alvo: "inicio" };
                       setMostrarFormularioExercicio(false);
+                      alinharDestinoSolicitado();
                     }}
                   >
                     <View
@@ -1237,6 +1281,8 @@ export default function MeusTreinos({
                   </TouchableOpacity>
                   <View style={estilos.acoesTreino}>
                     <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={`Adicionar exercício ao treino ${treino.name}`}
                       style={estilos.botaoAdicionarTreino}
                       onPress={() => abrirFormularioExercicio(treino)}
                     >
@@ -1261,10 +1307,11 @@ export default function MeusTreinos({
         {treinoSelecionado && (
           <>
             <View
-              onLayout={(evento) => {
-                secaoSelecionadaYRef.current = evento.nativeEvent.layout.y;
-              }}
+              key={treinoSelecionado.id}
+              ref={(no) => { treinoRenderizadoRef.current = no ? treinoSelecionado.id : null; }}
+              onLayout={alinharDestinoSolicitado}
             >
+              <View ref={inicioTreinoRef} collapsable={false} onLayout={alinharDestinoSolicitado} testID="inicio-treino-com-cronometro">
               <Text style={estilos.tituloSecao}>
                 Exercícios — {treinoSelecionado.name}
               </Text>
@@ -1296,25 +1343,14 @@ export default function MeusTreinos({
                     </Text>
                   </TouchableOpacity>
                 )}
+              </View>
               {mostrarFormularioExercicio && (
                 <View
+                  ref={formularioExercicioRef}
+                  collapsable={false}
+                  testID="formulario-adicionar-exercicio"
                   style={estilos.formulario}
-                  onLayout={(evento) => {
-                    if (!alinharFormularioRef.current) return;
-                    alinharFormularioRef.current = false;
-                    const destino = Math.max(
-                      0,
-                      secaoSelecionadaYRef.current +
-                        evento.nativeEvent.layout.y -
-                        12,
-                    );
-                    requestAnimationFrame(() =>
-                      scrollViewRef.current?.scrollTo({
-                        y: destino,
-                        animated: true,
-                      }),
-                    );
-                  }}
+                  onLayout={alinharDestinoSolicitado}
                 >
                   <View style={estilos.cabecalhoFormulario}>
                     <Text style={estilos.rotulo}>

@@ -54,7 +54,9 @@ function filtrar(rows, params) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browserType = process.env.SMOKE_BROWSER === "webkit" ? webkit : chromium;
   const browser = await browserType.launch({ headless: true, ...(process.env.SMOKE_BROWSER_CHANNEL ? { channel: process.env.SMOKE_BROWSER_CHANNEL } : {}) });
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "America/Sao_Paulo", isMobile: true, hasTouch: true });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "America/Sao_Paulo", isMobile: true, hasTouch: true, userAgent: browserType === webkit
+    ? "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+    : "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36" });
   const page = await context.newPage();
   page.on("pageerror", (erro) => erros.push(erro.message));
   page.on("dialog", (dialog) => dialog.accept());
@@ -83,14 +85,22 @@ function filtrar(rows, params) {
     if (table === "nutrition_foods") rows = tables.nutrition_foods;
     return route.fulfill({ json: req.headers().accept?.includes("application/vnd.pgrst.object+json") ? rows[0] || null : rows });
   });
-  await context.addInitScript(({ authKey, sessao }) => { if (!localStorage.getItem(authKey)) localStorage.setItem(authKey, JSON.stringify(sessao)); }, { authKey, sessao });
+  await context.addInitScript(({ authKey, sessao, standalone }) => {
+    if (!localStorage.getItem(authKey)) localStorage.setItem(authKey, JSON.stringify(sessao));
+    if (standalone) Object.defineProperty(navigator, "standalone", { configurable: true, value: true });
+  }, { authKey, sessao, standalone: browserType === webkit });
   try {
     await page.goto(origin);
     await page.getByRole("button", { name: "Abrir nutrição", exact: true }).click();
-    await page.getByRole("button", { name: "Metas e ajustes", exact: true }).click();
+    for (const area of ["Minha dieta", "Alimentação de hoje", "Análise", "Histórico alimentar", "Minhas metas"])
+      await page.getByRole("button", { name: `Abrir ${area}`, exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Adicionar alimento em Café da manhã", exact: true }).count(), 0);
+    await page.screenshot({ path: path.join(output, "painel-nutricao.png"), fullPage: true });
+    await page.getByRole("button", { name: "Abrir Minhas metas", exact: true }).click();
     await page.getByRole("textbox", { name: "Meta alimentar (kcal/dia)", exact: true }).fill("2000");
     await page.getByRole("textbox", { name: "Gasto diário base sem treinos (kcal)", exact: true }).fill("2500");
     await page.getByRole("button", { name: "Salvar metas", exact: true }).click();
+    await page.getByRole("button", { name: "Abrir Alimentação de hoje", exact: true }).click();
     await page.getByRole("button", { name: "Adicionar alimento em Café da manhã", exact: true }).click();
     await page.getByRole("button", { name: `Escolher ${alimento.nome}`, exact: true }).click();
     await page.getByRole("textbox", { name: "Quantidade em gramas", exact: true }).fill("500");
@@ -107,7 +117,31 @@ function filtrar(rows, params) {
     await page.getByText("1 dia(s) completos incluídos", { exact: true }).waitFor();
     await page.getByText("Soma dos déficits: 800 kcal", { exact: true }).waitFor();
     await page.screenshot({ path: path.join(output, "analise-semana.png"), fullPage: true });
-    await page.getByRole("button", { name: "Hoje", exact: true }).first().click();
+    await page.getByRole("button", { name: "‹ Nutrição", exact: true }).click();
+    await page.getByRole("button", { name: "Abrir Histórico alimentar", exact: true }).click();
+    const hojeLegivel = `${hoje.slice(8, 10)}/${hoje.slice(5, 7)}/${hoje.slice(0, 4)}`;
+    await page.getByRole("button", { name: `Abrir diário de ${hojeLegivel}`, exact: true }).click();
+    await page.getByRole("button", { name: "Reabrir registros para corrigir", exact: true }).waitFor();
+    await page.getByRole("button", { name: "‹ Histórico alimentar", exact: true }).click();
+    await page.getByRole("button", { name: `Abrir diário de ${hojeLegivel}`, exact: true }).waitFor();
+    await page.screenshot({ path: path.join(output, "historico-alimentar.png"), fullPage: true });
+    if (browserType === webkit) await page.evaluate(() => {
+      const alvo = document.body;
+      const disparar = (tipo, x) => {
+        const evento = new Event(tipo, { bubbles: true, cancelable: true });
+        const toque = { identifier: 1, target: alvo, clientX: x, clientY: 250 };
+        Object.defineProperties(evento, {
+          touches: { value: tipo === "touchend" ? [] : [toque] },
+          targetTouches: { value: tipo === "touchend" ? [] : [toque] },
+          changedTouches: { value: [toque] },
+        });
+        alvo.dispatchEvent(evento);
+      };
+      disparar("touchstart", 15); disparar("touchmove", 140); disparar("touchend", 140);
+    });
+    else await page.goBack();
+    await page.getByRole("button", { name: "Abrir Alimentação de hoje", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Abrir Alimentação de hoje", exact: true }).click();
     await page.getByRole("button", { name: "Salvar este dia como dieta", exact: true }).click();
     await page.getByRole("textbox", { name: "Nome da dieta", exact: true }).fill("Dieta repetida de teste");
     await page.getByRole("button", { name: "Salvar dieta", exact: true }).click();
@@ -157,6 +191,7 @@ function filtrar(rows, params) {
     await page.getByRole("button", { name: "Remover deste dia", exact: true }).click();
     await page.reload();
     await page.getByRole("button", { name: "Abrir nutrição", exact: true }).click();
+    await page.getByRole("button", { name: "Abrir Alimentação de hoje", exact: true }).click();
     assert.equal(await page.getByRole("button", { name: `Editar ${alimento.nome}`, exact: true }).count(), 0);
     offline = false;
     await page.evaluate(() => { Object.defineProperty(navigator, "onLine", { configurable: true, value: true }); window.dispatchEvent(new Event("online")); });
@@ -165,7 +200,7 @@ function filtrar(rows, params) {
     assert.equal(tables.nutrition_days.find((r) => r.document.data === hoje).document.refeicoes[0].itens.length, 0);
     assert.deepEqual(erros, []);
     await page.screenshot({ path: path.join(output, "diario-apos-exclusao.png"), fullPage: true });
-    console.log("OK — Nutrição web: metas, catálogo, quantidades, rótulo manual, porções e decimais, consumo, déficit com treino, dieta repetida, exceção diária e exclusão offline persistente.");
+    console.log("OK — Nutrição web: painel em blocos, áreas separadas, histórico e voltar, metas, catálogo, quantidades, rótulo manual, porções e decimais, consumo, déficit com treino, dieta repetida, exceção diária e exclusão offline persistente.");
   } catch (erro) { await page.screenshot({ path: path.join(output, "falha.png"), fullPage: true }); fs.writeFileSync(path.join(output, "falha.txt"), (await page.locator("body").innerText()) + "\n" + erros.join("\n")); throw erro; }
   finally { await browser.close(); await new Promise((resolve) => server.close(resolve)); }
 })().catch((erro) => { console.error(erro); server.close(); process.exitCode = 1; });

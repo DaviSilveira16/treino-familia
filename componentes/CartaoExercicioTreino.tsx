@@ -9,12 +9,12 @@ import {
   View,
 } from "react-native";
 import type { PlanoExercicio, SerieRascunho } from "../servicos/treinoLocal";
-import type { UltimoExercicio } from "../servicos/ultimasSeriesTreino";
+import type { RecordeExercicio } from "../servicos/maioresSeriesTreino";
 
 type Props = {
   exercicio: PlanoExercicio;
   series: SerieRascunho[];
-  anterior?: UltimoExercicio;
+  recorde?: RecordeExercicio;
   cor: string;
   proximaChave?: string;
   envioEmCurso?: boolean;
@@ -148,7 +148,7 @@ const ControleSerie = memo(function ControleSerie({
 export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
   exercicio,
   series,
-  anterior,
+  recorde,
   cor,
   proximaChave,
   bloqueado,
@@ -231,38 +231,38 @@ export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
             {series.filter((serie) => serie.concluida).length}/{series.length}{" "}
             séries concluídas · {exercicio.reps_goal} repetições previstas
           </Text>
-          {anterior ? (
+          {recorde ? (
             <View style={estilos.referencia}>
               <Text style={estilos.texto}>
-                Última sessão ·{" "}
-                {new Date(anterior.data).toLocaleDateString("pt-BR")}
+                Maior carga por série
               </Text>
               <Text style={estilos.ajuda}>
-                {[...anterior.series]
-                  .sort((a, b) => a.set_number - b.set_number)
-                  .map(
-                    (serie) =>
-                      `${serie.set_number}ª: ${serie.reps} × ${Number(serie.weight_kg).toLocaleString("pt-BR")} kg`,
-                  )
-                  .join("  ·  ")}
+                Recorde de cada série entre os treinos concluídos. As datas podem ser diferentes.
               </Text>
+              {recorde.series.map((serie) => <Text key={serie.set_number} style={estilos.ajuda}>
+                {serie.set_number}ª série: {serie.reps} × {serie.weight_kg.toLocaleString("pt-BR")} kg · {new Date(serie.data).toLocaleDateString("pt-BR")}
+              </Text>)}
+              {recorde.desatualizado ? <Text style={estilos.ajuda}>Sem conexão: recordes da última consulta neste aparelho. Conecte-se para conferir alterações em outros aparelhos.</Text> : null}
               <TouchableOpacity
                 accessibilityRole="button"
-                accessibilityLabel={`Usar última sessão de ${exercicio.name} nas séries não concluídas`}
+                accessibilityLabel={`Usar maiores cargas de ${exercicio.name} nas séries não concluídas`}
                 disabled={
                   bloqueado ||
+                  Boolean(envioEmCurso) ||
+                  chaveSalvando !== null ||
                   !series.some((serie) => !serie.concluida && !serie.pendente)
                 }
                 style={estilos.copiar}
-                onPress={() => onCopiar(exercicio.id)}
+                onPress={() => { setRepetir(false); cargasAntesDeRepetir.current = {}; onCopiar(exercicio.id); }}
               >
                 <Text style={{ color: cor, fontWeight: "800" }}>
-                  Usar nas séries não concluídas
+                  Usar maiores cargas nas séries abertas
                 </Text>
               </TouchableOpacity>
               <Text style={estilos.ajuda}>
                 A cópia substitui apenas os campos das séries abertas deste
-                rascunho. Suas cargas de referência permanecem salvas.
+                rascunho, pelo número de cada série. Ao finalizar e salvar, as
+                séries realizadas passam a ser o padrão do treino.
               </Text>
             </View>
           ) : null}

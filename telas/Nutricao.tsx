@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Platform, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { ActivityIndicator, AppState, Platform, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { Alert } from "../servicos/alerta";
 import { lerPerfilTreino } from "../servicos/caloriasTreino";
 import { assinarMudancasDeDados } from "../servicos/revisaoDados";
 import { assinarRascunhos } from "../servicos/treinoLocal";
+import { useVoltarDoModal } from "../servicos/voltarModal";
 import { analisarDia, aplicarModelo, configuracaoNaData, copiarDia, criarDia, dataLocal, deslocarDia, modeloNaData, novasRefeicoes, novoIdNutricao, planejarRefeicaoDoModelo, resumirSemana, semanaDaData, somarNutrientes, type ResumoDia } from "../servicos/nutricaoCalculos";
 import { carregarAtividadesNutricao } from "../servicos/nutricaoAtividades";
 import { carregarEstadoNutricao, lerEstadoNutricaoLocal, listarCopiasConflitosNutricao, resolverConflitoNutricao, salvarConfiguracaoNutricao, salvarDiaNutricao, salvarModeloDieta, salvarPreferenciasNutricao, sincronizarNutricao } from "../servicos/nutricaoRepositorio";
@@ -12,6 +13,15 @@ import type { AtividadeNutricional, ConfiguracaoNutricional, DiaNutricao, Estado
 import EditorRefeicoesNutricao from "../componentes/nutricao/EditorRefeicoesNutricao";
 import MetasNutricao from "../componentes/nutricao/MetasNutricao";
 import { BotaoNutricao as Botao, CampoNutricao as Campo, ModalNutricao, estilosNutricao as e, numeroKcal as kcal } from "../componentes/nutricao/NutricaoBase";
+
+type AreaNutricao = "inicio" | "hoje" | "dieta" | "analise" | "historico" | "metas";
+const areasNutricao = [
+  { id: "dieta", titulo: "Minha dieta", descricao: "Monte suas refeições e deixe seu planejamento pronto para repetir.", icone: "🍽️" },
+  { id: "hoje", titulo: "Alimentação de hoje", descricao: "Registre o que comeu e acompanhe suas calorias e macros.", icone: "🥗" },
+  { id: "analise", titulo: "Análise", descricao: "Veja alimentação, exercícios e seu saldo do dia e da semana.", icone: "📊" },
+  { id: "historico", titulo: "Histórico alimentar", descricao: "Consulte outros dias e corrija o que registrou.", icone: "📅" },
+  { id: "metas", titulo: "Minhas metas", descricao: "Ajuste calorias, macronutrientes e seu gasto estimado.", icone: "🎯" },
+] as const;
 
 type Props = { usuarioId: string; metadados: Record<string, unknown>; corTema?: string; onAbrirPerfil: () => void };
 const estadoVazio: EstadoNutricao = { dias: [], modelos: [], configuracoes: [], preferencias: { modeloPadraoId: null, repetirDiariamente: false, repetirDesde: "", favoritos: [], recentes: [] }, alimentosLocais: [], pendencias: 0, erro: null };
@@ -50,7 +60,8 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
   const hoje = dataLocal();
   const [data, setData] = useState(hoje);
   const [dataTexto, setDataTexto] = useState(hoje);
-  const [aba, setAba] = useState<"hoje" | "dieta" | "analise">("hoje");
+  const [aba, setAba] = useState<AreaNutricao>("inicio");
+  const [origemDiario, setOrigemDiario] = useState<"inicio" | "historico">("inicio");
   const [estado, setEstado] = useState<EstadoNutricao>(estadoVazio);
   const [atividades, setAtividades] = useState<AtividadeNutricional[]>([]);
   const [erroAtividades, setErroAtividades] = useState<string | null>(null);
@@ -58,7 +69,6 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
   const [periodoPronto, setPeriodoPronto] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
-  const [mostrarMetas, setMostrarMetas] = useState(false);
   const [mostrarCalculo, setMostrarCalculo] = useState(false);
   const [modeloEditando, setModeloEditando] = useState<ModeloDieta | null>(null);
   const [modeloOrigemEditando, setModeloOrigemEditando] = useState<ModeloDieta | null>(null);
@@ -74,6 +84,12 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
   const [comparacao, setComparacao] = useState<{ titulo: string; local: unknown; remoto: unknown } | null>(null);
   const consultaRef = useRef(0);
   const mutacaoRef = useRef(false);
+  const voltarArea = () => {
+    if (mutacaoRef.current) return;
+    if (aba === "hoje" && origemDiario === "historico") { setOrigemDiario("inicio"); setAba("historico"); }
+    else setAba("inicio");
+  };
+  useVoltarDoModal(aba !== "inicio", voltarArea);
   const semana = useMemo(() => semanaDaData(data), [data]);
   const inicio = semana[0], fim = semana[6];
   const contexto = `${usuarioId}:${inicio}:${fim}`;
@@ -187,10 +203,10 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
   }
   async function aplicarDieta(modelo: ModeloDieta) {
     if (dia.concluido) throw new Error("Reabra o dia antes de alterar seu planejamento.");
-    if (dia.modeloOrigemId === modelo.id) { setAba("hoje"); setAviso("Esta dieta já foi aplicada. Seus ajustes foram preservados."); return; }
+    if (dia.modeloOrigemId === modelo.id) { setOrigemDiario("inicio"); setAba("hoje"); setAviso("Esta dieta já foi aplicada. Seus ajustes foram preservados."); return; }
     if (dia.refeicoes.some((r) => r.itens.some((i) => i.consumido))) throw new Error("Este dia já tem consumo confirmado. Ajuste suas refeições diretamente para preservar os registros.");
     if (dia.refeicoes.some((r) => r.itens.length) && !await confirmar("Trocar planejamento?", "As refeições previstas neste dia serão substituídas. A dieta padrão e os outros dias serão preservados.")) return;
-    await guardarDia(aplicarModelo({ ...dia, refeicoes: [] }, modelo)); setAba("hoje");
+    await guardarDia(aplicarModelo({ ...dia, refeicoes: [] }, modelo)); setOrigemDiario("inicio"); setAba("hoje");
   }
   async function registrarRefeicaoModelo(refeicaoId: string) {
     if (periodoPronto !== contexto) throw new Error("Aguarde o carregamento dos registros desta semana.");
@@ -200,7 +216,7 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
     const origem = modeloOrigemEditando.refeicoes[indice];
     if (!origem) throw new Error("Salve esta refeição na dieta antes de registrá-la.");
     await guardarDia(planejarRefeicaoDoModelo(dia, modeloOrigemEditando, origem.id));
-    setModeloEditando(null); setAba("hoje"); setAviso("Refeição adicionada ao planejamento do dia selecionado. Ajuste as quantidades e confirme o que consumiu.");
+    setModeloEditando(null); setOrigemDiario("inicio"); setAba("hoje"); setAviso("Refeição adicionada ao planejamento do dia selecionado. Ajuste as quantidades e confirme o que consumiu.");
   }
   async function confirmarTudo() {
     if (data > hoje) throw new Error("Confirme o consumo apenas em datas atuais ou anteriores.");
@@ -226,17 +242,48 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
   }
   const editorProps = { usuarioId, corTema, preferencias: estado.preferencias, onPreferencias: async (preferencias: PreferenciasNutricao) => mutar(async () => guardarPreferencias(preferencias)), alimentosLocais: estado.alimentosLocais, onAlimentoSalvo: () => { void atualizarEstadoLocal().catch((falha) => setAviso(msgErro(falha))); } };
   if (carregando) return <View style={estilos.centro}><ActivityIndicator color={corTema} /><Text style={e.texto}>Preparando Nutrição…</Text></View>;
-  return <View style={estilos.container}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={estilos.conteudo}>
-    <View style={e.linha}><View style={{ flex: 1 }}><Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text><Text style={estilos.titulo}>Nutrição</Text></View><Botao titulo="Metas e ajustes" disabled={ocupado} cor={corTema} onPress={() => setMostrarMetas(true)} /></View>
-    <Text style={e.texto}>Sua alimentação, sua rotina e seus treinos no mesmo lugar.</Text>{periodoPronto !== contexto ? <Text style={e.pequeno}>Atualizando os registros desta semana…</Text> : null}
-    <View style={e.linha}>{([ ["hoje", "Hoje"], ["dieta", "Minha dieta"], ["analise", "Análise"] ] as const).map(([valor, rotulo]) => <Botao key={valor} titulo={rotulo} disabled={ocupado} cor={corTema} primario={aba === valor} onPress={() => setAba(valor)} />)}</View>
-    <View style={e.card}><View style={e.linha}><Botao titulo="‹ Dia anterior" disabled={ocupado} cor={corTema} onPress={() => { const nova = deslocarDia(data, -1); selecionarData(nova); }} /><Text style={[e.titulo, { flex: 1, textAlign: "center" }]}>{dataBonita(data)}</Text><Botao titulo="Próximo dia ›" disabled={ocupado} cor={corTema} onPress={() => { const nova = deslocarDia(data, 1); selecionarData(nova); }} /></View><View style={e.linha}><Campo titulo="Consultar data (AAAA-MM-DD)" valor={dataTexto} onChange={setDataTexto} /><Botao titulo="Ir para data" disabled={ocupado} cor={corTema} onPress={() => { try { selecionarData(deslocarDia(dataTexto, 0)); setAviso(""); } catch { setAviso("Confira a data no formato AAAA-MM-DD."); } }} /><Botao titulo="Hoje" disabled={ocupado} cor={corTema} onPress={() => { selecionarData(hoje); }} /></View></View>
+  const tituloArea = aba === "inicio" ? "Nutrição" : areasNutricao.find((area) => area.id === aba)?.titulo ?? "Nutrição";
+  function abrirArea(area: Exclude<AreaNutricao, "inicio">) {
+    if (mutacaoRef.current) return;
+    setAviso(""); setOrigemDiario("inicio");
+    if (area === "hoje") selecionarData(hoje);
+    setAba(area);
+  }
+  async function salvarMetas(nova: ConfiguracaoNutricional) {
+    await mutar(async () => {
+      const consulta = ++consultaRef.current;
+      await salvarConfiguracaoNutricao(nova); await atualizarEstadoLocal(consulta);
+      if (consulta === consultaRef.current && nova.vigenteDesde <= data && !dia.concluido && armazenado && await confirmar("Aplicar também ao dia aberto?", `Atualizar os parâmetros de ${dataBonita(data)}? Os outros dias permanecem com seus snapshots.`))
+        await guardarDia({ ...dia, configuracao: nova, alteradoEm: new Date().toISOString() });
+      setAba("inicio"); setAviso("Metas guardadas. Seus registros anteriores foram preservados.");
+    });
+  }
+  return <View style={estilos.container}><ScrollView key={aba} keyboardShouldPersistTaps="handled" contentContainerStyle={estilos.conteudo}>
+    {aba !== "inicio" ? <View style={{ alignItems: "flex-start" }}><Botao titulo={aba === "hoje" && origemDiario === "historico" ? "‹ Histórico alimentar" : "‹ Nutrição"} disabled={ocupado} cor={corTema} onPress={voltarArea} /></View> : null}
+    <View><Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text><Text style={estilos.titulo}>{tituloArea}</Text></View>
+    {aba === "inicio" ? <Text style={e.texto}>Seu espaço de alimentação. Escolha o que quer fazer agora.</Text> : null}
+    {periodoPronto !== contexto && aba !== "inicio" ? <Text style={e.pequeno}>Atualizando os registros desta semana…</Text> : null}
+    {aba === "hoje" || aba === "analise" ? <View style={e.card}><View style={e.linha}><Botao titulo="‹ Dia anterior" disabled={ocupado} cor={corTema} onPress={() => { const nova = deslocarDia(data, -1); selecionarData(nova); }} /><Text style={[e.titulo, { flex: 1, textAlign: "center" }]}>{dataBonita(data)}</Text><Botao titulo="Próximo dia ›" disabled={ocupado} cor={corTema} onPress={() => { const nova = deslocarDia(data, 1); selecionarData(nova); }} /></View><View style={e.linha}><Campo titulo="Consultar data (AAAA-MM-DD)" valor={dataTexto} onChange={setDataTexto} /><Botao titulo="Ir para data" disabled={ocupado} cor={corTema} onPress={() => { try { selecionarData(deslocarDia(dataTexto, 0)); setAviso(""); } catch { setAviso("Confira a data no formato AAAA-MM-DD."); } }} /><Botao titulo="Hoje" disabled={ocupado} cor={corTema} onPress={() => { selecionarData(hoje); }} /></View></View> : null}
     {aviso ? <Text accessibilityRole="alert" style={estilos.aviso}>{aviso}</Text> : null}
     {estado.erro ? <View style={e.card}><Text style={estilos.aviso}>{estado.erro}</Text><Text style={e.pequeno}>As alterações pendentes continuam guardadas neste aparelho.</Text></View> : null}
-    <View style={e.linha}><Text style={[e.pequeno, { flex: 1 }]}>{estado.pendencias ? `${estado.pendencias} alteração(ões) aguardando confirmação do servidor` : "Dados locais disponíveis · sincronização conferida na última leitura"}</Text><Botao titulo={ocupado ? "Aguarde…" : "Sincronizar"} disabled={ocupado} cor={corTema} onPress={() => void executar(async () => { const resultado = await sincronizarNutricao(usuarioId); if (resultado.erro) setAviso(resultado.erro); await carregar(); })} /></View>
-    <Botao titulo="Ver cópias de recuperação" disabled={ocupado} cor={corTema} onPress={() => void executar(async () => { setCopias(await listarCopiasConflitosNutricao(usuarioId)); setMostrarCopias(true); })} />
     {estado.conflitos?.map((conflito) => <View key={conflito.recursoId} style={e.card}><Text style={e.titulo}>Alterações em outro aparelho</Text><Text style={e.texto}>{conflito.mensagem}</Text><Text style={e.pequeno}>Escolha qual versão usar. A versão descartada permanece na recuperação local.</Text><Botao titulo="Comparar versões" cor={corTema} onPress={() => setComparacao({ titulo: "Comparar alterações", local: conflito.local, remoto: conflito.remoto })} /><Botao titulo="Manter minha versão local" disabled={ocupado} cor={corTema} onPress={() => void executar(async () => { await resolverConflitoNutricao(usuarioId, conflito.recursoId, "local"); await carregar(); })} /><Botao titulo="Usar versão do servidor" disabled={ocupado} cor={corTema} onPress={() => void executar(async () => { if (await confirmar("Usar os dados do servidor?", "A versão deste aparelho será preservada na recuperação local.")) { await resolverConflitoNutricao(usuarioId, conflito.recursoId, "remoto"); await carregar(); } })} /></View>)}
-    {aba === "hoje" ? <>
+    {aba === "inicio" ? <View style={estilos.listaAreas}>
+      {areasNutricao.map((area) => <TouchableOpacity key={area.id} accessibilityRole="button" accessibilityLabel={`Abrir ${area.titulo}`} disabled={ocupado} activeOpacity={0.8} onPress={() => abrirArea(area.id)} style={estilos.cartaoArea}>
+        <View style={[estilos.iconeArea, { backgroundColor: `${corTema}20` }]}><Text style={estilos.emojiArea}>{area.icone}</Text></View>
+        <View style={estilos.textoArea}><Text style={estilos.tituloArea}>{area.titulo}</Text><Text style={estilos.descricaoArea}>{area.descricao}</Text></View>
+        <Text style={[estilos.setaArea, { color: corTema }]}>›</Text>
+      </TouchableOpacity>)}
+    </View> : aba === "historico" ? <>
+      <Text style={e.texto}>Escolha uma data para ver e corrigir sua alimentação. Os dias sem consumo confirmado continuam identificados.</Text>
+      <View style={e.card}><View style={e.linha}><Botao titulo="‹ Semana anterior" disabled={ocupado} cor={corTema} onPress={() => selecionarData(deslocarDia(data, -7))} /><Text style={[e.texto, { flex: 1 }]}>{dataBonita(inicio)} a {dataBonita(fim)}</Text><Botao titulo="Próxima semana ›" disabled={ocupado} cor={corTema} onPress={() => selecionarData(deslocarDia(data, 7))} /></View>
+        <Campo titulo="Consultar data (AAAA-MM-DD)" valor={dataTexto} onChange={setDataTexto} /><Botao titulo="Consultar semana da data" disabled={ocupado} cor={corTema} onPress={() => { try { selecionarData(deslocarDia(dataTexto, 0)); setAviso(""); } catch { setAviso("Confira a data no formato AAAA-MM-DD."); } }} />
+      </View>
+      {[...resumosSemana].reverse().filter((registro) => registro.data <= hoje).map((registro) => <TouchableOpacity key={registro.data} accessibilityRole="button" accessibilityLabel={`Abrir diário de ${dataBonita(registro.data)}`} disabled={bloqueioDia} activeOpacity={0.8} style={estilos.cartaoArea} onPress={() => { selecionarData(registro.data); setOrigemDiario("historico"); setAba("hoje"); }}>
+        <View style={[estilos.iconeArea, { backgroundColor: `${corTema}20` }]}><Text style={estilos.emojiArea}>📅</Text></View>
+        <View style={estilos.textoArea}><Text style={estilos.tituloArea}>{dataBonita(registro.data)}</Text><Text style={estilos.descricaoArea}>{registro.itensConsumidos ? `${kcal(registro.consumido.kcal)} kcal confirmadas · ${estado.dias.find((d) => d.data === registro.data)?.concluido ? "registros concluídos" : "registros abertos"}` : registro.planejado.kcal > 0 ? "Somente planejamento · consumo a confirmar" : "Sem alimentação registrada"}</Text></View><Text style={[estilos.setaArea, { color: corTema }]}>›</Text>
+      </TouchableOpacity>)}
+      {inicio > hoje ? <Text style={e.texto}>Esta semana ainda não tem dias passados. O planejamento futuro fica em Alimentação de hoje.</Text> : null}
+    </> : aba === "metas" ? <MetasNutricao usuarioId={usuarioId} hoje={hoje} perfil={perfil} atual={configuracaoNaData(estado.configuracoes, hoje)} cor={corTema} onAbrirPerfil={() => { if (!mutacaoRef.current) onAbrirPerfil(); }} onSalvar={salvarMetas} /> : aba === "hoje" ? <>
       <View style={e.card}><Text style={e.titulo}>{dia.concluido ? "Registros do dia concluídos" : data > hoje ? "Somente planejamento" : "Diário de alimentação"}</Text><Text style={estilos.numero}>{kcal(resumo.consumido.kcal)} <Text style={e.texto}>kcal consumidas</Text></Text><Text style={e.texto}>Meta: {dia.configuracao?.metaKcal == null ? "não configurada" : `${kcal(dia.configuracao.metaKcal)} kcal`}</Text><Barra valor={resumo.consumido.kcal} meta={dia.configuracao?.metaKcal ?? null} cor={corTema} />{resumo.diferencaMeta !== null ? <Text style={e.texto}>{resumo.diferencaMeta > 0 ? `${kcal(resumo.diferencaMeta)} kcal acima da meta` : `Faltam ${kcal(-resumo.diferencaMeta)} kcal para a meta`}</Text> : null}<Text style={e.pequeno}>Planejamento total: {kcal(resumo.planejado.kcal)} kcal · Diferença para o confirmado: {kcal(resumo.planejado.kcal - resumo.consumido.kcal)} kcal</Text>{([ ["proteinas", "Proteínas", dia.configuracao?.metaProteinas], ["carboidratos", "Carboidratos", dia.configuracao?.metaCarboidratos], ["gorduras", "Gorduras", dia.configuracao?.metaGorduras] ] as const).map(([campo, nome, meta]) => <View key={campo}><Text style={e.texto}>{nome}: {resumo.consumido[campo].toLocaleString("pt-BR", { maximumFractionDigits: 1 })} g{meta != null ? ` / ${meta} g` : ""}</Text><Barra valor={resumo.consumido[campo]} meta={meta ?? null} cor={corTema} /></View>)}{dia.modeloOrigemId ? <Text style={e.pequeno}>Baseado em uma cópia independente da dieta · versão {dia.modeloVersao}. Seus ajustes valem apenas para {dataBonita(data)}.</Text> : null}<Text style={e.pequeno}>{!armazenado && data < hoje ? "Nenhum consumo foi registrado nesta data. Você pode preencher o histórico ou aplicar uma dieta explicitamente." : "Itens planejados só entram no consumo após sua confirmação."}</Text></View>
       <View style={e.linha}><Botao titulo="Usar minha dieta padrão" disabled={bloqueioDia || dia.concluido || !estado.preferencias.modeloPadraoId} cor={corTema} onPress={() => void executar(async () => { const modelo = modeloNaData(estado.modelos, { ...estado.preferencias, repetirDiariamente: true, repetirDesde: "0000-01-01" }, data); if (!modelo) throw new Error("Nenhuma versão dessa dieta estava disponível na data selecionada."); await aplicarDieta(modelo); })} /><Botao titulo="Repetir outro dia" disabled={bloqueioDia || dia.concluido} cor={corTema} onPress={() => { setAviso(""); setCopiarDe(deslocarDia(data, -1)); }} /><Botao titulo="Salvar este dia como dieta" disabled={bloqueioDia} cor={corTema} onPress={() => abrirModelo(undefined, true)} /></View>
       {dia.concluido ? <Botao titulo="Reabrir registros para corrigir" disabled={bloqueioDia} cor={corTema} onPress={() => void executar(async () => guardarDia({ ...dia, concluido: false, alteradoEm: new Date().toISOString() }))} /> : <>
@@ -244,8 +291,10 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
       </>}
       <EditorRefeicoesNutricao {...editorProps} refeicoes={dia.refeicoes} onAlterar={alterarRefeicoes} modo={data > hoje ? "planejamento" : "dia"} bloqueado={dia.concluido || bloqueioDia} />
       {!dia.concluido && data <= hoje ? <Botao titulo="Concluir registros do dia" primario disabled={bloqueioDia} cor={corTema} onPress={() => void executar(concluirDia)} /> : null}
+      <View style={e.linha}><Botao titulo="Minha dieta" disabled={ocupado} cor={corTema} onPress={() => abrirArea("dieta")} /><Botao titulo="Minhas metas" disabled={ocupado} cor={corTema} onPress={() => abrirArea("metas")} /></View>
       <Botao titulo="Ver balanço de alimentação e exercícios" cor={corTema} onPress={() => { setAba("analise"); setSemanaMostrada(false); }} />
     </> : aba === "dieta" ? <>
+      <Text style={e.pequeno}>Aplicar ou registrar refeições usa o dia selecionado: {dataBonita(data)}. As quantidades podem ser ajustadas antes de confirmar o consumo.</Text>
       <View style={e.card}><Text style={e.titulo}>Uma dieta, seus ajustes a cada dia</Text><Text style={e.texto}>Cadastre as refeições uma vez. Cada dia recebe seu próprio planejamento e você altera apenas o que fez diferente.</Text><View style={e.linha}><Text style={[e.texto, { flex: 1 }]}>Repetir a dieta padrão todos os dias</Text><Switch accessibilityLabel="Repetir dieta diariamente" value={estado.preferencias.repetirDiariamente} onValueChange={(valor) => void executar(async () => { if (valor && !estado.preferencias.modeloPadraoId) throw new Error("Escolha uma dieta padrão primeiro."); const desde = deslocarDia(repetirDesde, 0); await guardarPreferencias({ ...estado.preferencias, repetirDiariamente: valor, repetirDesde: desde }); })} trackColor={{ true: corTema }} /></View><Campo titulo="Repetir a partir de (AAAA-MM-DD)" valor={repetirDesde} onChange={setRepetirDesde} /><Botao titulo="Guardar data da repetição" cor={corTema} onPress={() => void executar(async () => guardarPreferencias({ ...estado.preferencias, repetirDesde: deslocarDia(repetirDesde, 0) }))} /><Botao titulo="Criar dieta" disabled={ocupado} primario cor={corTema} onPress={() => abrirModelo()} /></View>
       {estado.modelos.length === 0 ? <Text style={e.texto}>Sua primeira dieta pode ser criada aqui ou a partir de um dia já preenchido.</Text> : null}
       {[...estado.modelos].sort((a, b) => b.criadoEm.localeCompare(a.criadoEm)).map((modelo) => <View key={modelo.id} style={e.card}><Text style={e.titulo}>{modelo.nome}{estado.preferencias.modeloPadraoId === modelo.id ? " · padrão" : ""}</Text><Text style={e.pequeno}>Versão {modelo.versao} · disponível desde {dataBonita(modelo.vigenteDesde)}</Text><Text style={e.texto}>{modelo.refeicoes.length} refeições · {kcal(somarNutrientes(modelo.refeicoes, false).kcal)} kcal planejadas</Text><View style={e.linha}><Botao titulo="Ver e editar dieta" disabled={ocupado} cor={corTema} onPress={() => abrirModelo(modelo)} /><Botao titulo={`Aplicar em ${dataBonita(data)}`} disabled={ocupado} cor={corTema} onPress={() => void executar(async () => aplicarDieta(modelo))} /><Botao titulo="Definir como padrão" disabled={ocupado} cor={corTema} onPress={() => void executar(async () => definirPadrao(modelo))} /></View></View>)}
@@ -258,8 +307,12 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
         <View style={e.card}><Text style={e.titulo}>Exercícios registrados na semana</Text>{(["musculacao", "cardio"] as const).map((tipo) => { const total = totaisAtividade(atividadesDaSemana, tipo); return <Text key={tipo} style={e.texto}>{tipo === "musculacao" ? "Musculação" : "Cardio"}: {total.sessoes} sessões · {total.minutos.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} min · {kcal(total.kcal)} kcal ativas conhecidas</Text>; })}<Text style={e.texto}>{resumoSemana.sessoes} sessões · {resumoSemana.minutos.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} minutos</Text><Text style={e.texto}>{kcal(resumoSemana.atividadesCalorias)} kcal ativas conhecidas</Text><Text style={e.pequeno}>{atividadesSemCalorias} sessão(ões) sem estimativa de calorias · {atividadesPendentes} aguardando confirmação.</Text><Text style={e.pequeno}>Atividades de dias parciais também aparecem aqui; os totais de saldo acima usam somente dias completos válidos.</Text></View>
       </>}
     </>}
+    <View style={estilos.rodapeSincronizacao}>
+    <View style={e.linha}><Text style={[e.pequeno, { flex: 1 }]}>{estado.pendencias ? `${estado.pendencias} alteração(ões) aguardando confirmação do servidor` : "Dados locais disponíveis · sincronização conferida na última leitura"}</Text><Botao titulo={ocupado ? "Aguarde…" : "Sincronizar"} disabled={ocupado} cor={corTema} onPress={() => void executar(async () => { const resultado = await sincronizarNutricao(usuarioId); if (resultado.erro) setAviso(resultado.erro); await carregar(); })} /></View>
+    <Botao titulo="Ver cópias de recuperação" disabled={ocupado} cor={corTema} onPress={() => void executar(async () => { setCopias(await listarCopiasConflitosNutricao(usuarioId)); setMostrarCopias(true); })} />
+    </View>
   </ScrollView>
-  <ModalNutricao bloqueado={ocupado} visivel={mostrarMetas} titulo="Metas e gasto estimado" onFechar={() => setMostrarMetas(false)} cor={corTema}>{mostrarMetas ? <MetasNutricao usuarioId={usuarioId} hoje={hoje} perfil={perfil} atual={configuracaoNaData(estado.configuracoes, hoje)} cor={corTema} onAbrirPerfil={() => { if (mutacaoRef.current) return; setMostrarMetas(false); onAbrirPerfil(); }} onSalvar={async (nova: ConfiguracaoNutricional) => mutar(async () => { const consulta = ++consultaRef.current; await salvarConfiguracaoNutricao(nova); await atualizarEstadoLocal(consulta); if (consulta === consultaRef.current && nova.vigenteDesde <= data && !dia.concluido && armazenado && await confirmar("Aplicar também ao dia aberto?", `Atualizar os parâmetros de ${dataBonita(data)}? Os outros dias permanecem com seus snapshots.`)) await guardarDia({ ...dia, configuracao: nova, alteradoEm: new Date().toISOString() }); setMostrarMetas(false); })} /> : null}</ModalNutricao>
+
   <ModalNutricao bloqueado={ocupado} aviso={aviso} visivel={Boolean(modeloEditando)} titulo="Minha dieta · modelo" onFechar={() => setModeloEditando(null)} cor={corTema}>{modeloEditando ? <><Campo titulo="Nome da dieta" valor={nomeModelo} onChange={setNomeModelo} /><Campo titulo="Disponível a partir de (AAAA-MM-DD)" valor={dataModelo} onChange={setDataModelo} /><Text style={e.pequeno}>Salvar uma edição cria outra versão. As cópias já usadas no diário ficam preservadas.</Text><View style={e.linha}><Text style={[e.texto, { flex: 1 }]}>Definir como minha dieta padrão</Text><Switch value={tornarPadrao} onValueChange={setTornarPadrao} trackColor={{ true: corTema }} /></View><View style={e.linha}><Text style={[e.texto, { flex: 1 }]}>Repetir automaticamente como planejamento diário</Text><Switch value={repetirModelo} onValueChange={setRepetirModelo} trackColor={{ true: corTema }} /></View><EditorRefeicoesNutricao {...editorProps} refeicoes={modeloEditando.refeicoes} onAlterar={async (refeicoes) => setModeloEditando((anterior) => anterior ? { ...anterior, refeicoes } : null)} modo="modelo" onRegistrarRefeicao={modeloOrigemEditando ? async (refeicaoId) => mutar(async () => registrarRefeicaoModelo(refeicaoId)) : undefined} bloqueado={ocupado} /><Botao titulo="Salvar dieta" primario cor={corTema} disabled={ocupado} onPress={() => void executar(salvarModelo)} /></> : null}</ModalNutricao>
   <ModalNutricao bloqueado={ocupado} aviso={aviso} visivel={copiarDe !== null} titulo="Repetir refeições de outro dia" onFechar={() => setCopiarDe(null)} cor={corTema}><Campo titulo="Data de origem (AAAA-MM-DD)" valor={copiarDe ?? ""} onChange={setCopiarDe} /><Text style={e.texto}>Os alimentos serão copiados como planejamento. Confirme depois o que realmente consumiu.</Text><Botao titulo="Copiar refeições" disabled={ocupado} primario cor={corTema} onPress={() => void executar(copiarOutroDia)} /></ModalNutricao>
   <ModalNutricao visivel={mostrarCopias} titulo="Cópias de recuperação" cor={corTema} onFechar={() => setMostrarCopias(false)}>{copias.length === 0 ? <Text style={e.texto}>Ainda não há cópias de conflitos neste aparelho.</Text> : [...copias].reverse().map((copia, indice) => <View key={`${copia.recursoId}:${copia.data}:${indice}`} style={e.card}><Text style={e.pequeno}>{copia.origem === "local" ? "Versão deste aparelho" : "Versão do servidor"} · {new Date(copia.data).toLocaleString("pt-BR")}</Text><ResumoDocumento documento={copia.documento} /></View>)}</ModalNutricao>
@@ -267,4 +320,14 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
   <ModalNutricao visivel={mostrarCalculo} titulo="Entenda este cálculo" onFechar={() => setMostrarCalculo(false)} cor={corTema}><Text style={e.texto}>Saldo energético = consumo confirmado − gasto total estimado. Negativo indica déficit; positivo indica superávit.</Text><Text style={e.texto}>Gasto total = base da rotina sem treinos + calorias ativas das sessões. O repouso já está dentro da base e não é somado novamente.</Text><Text style={e.texto}>A diferença para a meta alimentar mede o cumprimento da meta. Ultrapassá-la pode coexistir com um déficit energético.</Text><Text style={e.texto}>A faixa de manutenção é uma convenção de apresentação, configurada nas metas. Não é uma margem de precisão fisiológica.</Text><Text style={e.texto}>O gasto em repouso segue Mifflin–St Jeor. A base e os exercícios são estimativas. Dados ausentes e dias abertos mantêm o resultado parcial.</Text><Text style={e.pequeno}>Alimentos do catálogo: TACO, NEPA/UNICAMP, 4ª edição, 2011. Consulte a fonte de cada item; alimentos próprios usam os valores do rótulo informado.</Text></ModalNutricao>
   </View>;
 }
-const estilos = StyleSheet.create({ container: { flex: 1, backgroundColor: "#101312", minHeight: 0 }, conteudo: { width: "100%", maxWidth: 860, alignSelf: "center", padding: 18, paddingBottom: 42, gap: 16 }, centro: { flex: 1, backgroundColor: "#101312", alignItems: "center", justifyContent: "center", gap: 12 }, titulo: { fontSize: 30, color: "#F0F3F1", fontWeight: "800", marginTop: 5 }, marca: { fontSize: 11, letterSpacing: 2, fontWeight: "800" }, numero: { color: "#F0F3F1", fontSize: 30, fontWeight: "800" }, trilho: { height: 7, backgroundColor: "#333E36", borderRadius: 5, overflow: "hidden" }, aviso: { color: "#FFD090", lineHeight: 21, fontSize: 14 } });
+const estilos = StyleSheet.create({
+  listaAreas: { gap: 14 },
+  cartaoArea: { backgroundColor: "#191E1B", borderRadius: 18, padding: 18, flexDirection: "row", alignItems: "center", gap: 14, borderWidth: 1, borderColor: "#303A33", minHeight: 106 },
+  iconeArea: { width: 54, height: 54, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  emojiArea: { fontSize: 27 },
+  textoArea: { flex: 1, gap: 6 },
+  tituloArea: { fontSize: 18, fontWeight: "800", color: "#F0F3F1" },
+  descricaoArea: { fontSize: 13, lineHeight: 19, color: "#A9B6AD" },
+  setaArea: { fontSize: 29, fontWeight: "700" },
+  rodapeSincronizacao: { gap: 12, marginTop: 12, paddingTop: 14, borderTopWidth: 1, borderTopColor: "#303A33" },
+  container: { flex: 1, backgroundColor: "#101312", minHeight: 0 }, conteudo: { width: "100%", maxWidth: 860, alignSelf: "center", padding: 18, paddingBottom: 42, gap: 16 }, centro: { flex: 1, backgroundColor: "#101312", alignItems: "center", justifyContent: "center", gap: 12 }, titulo: { fontSize: 30, color: "#F0F3F1", fontWeight: "800", marginTop: 5 }, marca: { fontSize: 11, letterSpacing: 2, fontWeight: "800" }, numero: { color: "#F0F3F1", fontSize: 30, fontWeight: "800" }, trilho: { height: 7, backgroundColor: "#333E36", borderRadius: 5, overflow: "hidden" }, aviso: { color: "#FFD090", lineHeight: 21, fontSize: 14 } });

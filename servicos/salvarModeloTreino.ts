@@ -11,6 +11,10 @@ export async function salvarModeloDoTreino(
   if (!modelo || !local.finalizacao) return;
   const usuarioId = local.usuarioId,
     sessaoId = local.sessao.id;
+  // A conclusão transacional pode reduzir as referências às séries realmente
+  // realizadas. Depois dela não se reinsere o planejamento antigo nem se trata
+  // a atualização automática (ou uma edição posterior) como conflito do modelo.
+  const validarReferenciasPlanejadas = !local.encerradaNoServidor;
   const { data: plano, error: erroPlano } = await supabase
     .from("workout_plans")
     .select("id, name")
@@ -44,8 +48,9 @@ export async function salvarModeloDoTreino(
       if (
         existente.plan_id !== modelo.planId ||
         existente.name !== exercicio.name ||
-        Number(existente.sets_goal) !== exercicio.sets_goal ||
-        String(existente.reps_goal) !== exercicio.reps_goal
+        (validarReferenciasPlanejadas &&
+          (Number(existente.sets_goal) !== exercicio.sets_goal ||
+            String(existente.reps_goal) !== exercicio.reps_goal))
       )
         throw new ConflitoModeloTreino(
           "Um exercício do novo modelo foi alterado. Seus dados locais foram preservados.",
@@ -76,7 +81,7 @@ export async function salvarModeloDoTreino(
         });
       if (error) throw error;
     }
-    for (const serie of exercicio.series) {
+    for (const serie of validarReferenciasPlanejadas ? exercicio.series : []) {
       const { data: referencia, error: erroReferencia } = await supabase
         .from("exercise_load_defaults")
         .select("reps, weight_kg")

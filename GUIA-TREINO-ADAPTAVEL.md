@@ -11,8 +11,10 @@
 ### Escolha ao concluir
 
 - **Criar novo treino**: informe outro nome. Cria um plano com os exercícios visíveis e as referências de carga/repetições desta sessão. A conclusão fica vinculada ao novo plano; o original permanece preservado.
-- **Adicionar novos exercícios ao original**: acrescenta somente os exercícios criados na sessão. Mantém os exercícios e as cargas de referência que já existiam no plano original. Retirar um exercício da sessão não o exclui do plano.
-- **Usar só nesta sessão**: guarda o que foi realizado no histórico, sem modificar planos. É a opção inicialmente selecionada.
+- **Adicionar novos exercícios ao original**: acrescenta os exercícios criados na sessão. As séries, repetições e cargas realizadas dos exercícios cadastrados passam a ser o padrão do próximo treino. Retirar um exercício da sessão não o exclui do plano.
+- **Usar só nesta sessão**: mantém as adaptações de exercícios apenas no histórico. As séries, repetições e cargas realizadas dos exercícios já cadastrados passam a ser o padrão do próximo treino. É a opção inicialmente selecionada.
+
+Essa atualização automática depende da migração [202610290001_ultimas_cargas_treino.sql](supabase/migrations/202610290001_ultimas_cargas_treino.sql). Veja [GUIA-CARGAS-ULTIMA-SESSAO.md](GUIA-CARGAS-ULTIMA-SESSAO.md) para aplicar e conhecer a proteção contra reenvios antigos.
 
 Exercícios avulsos ficam guardados com seu nome e valores no histórico. Para trocar o nome/aparelho depois de registrar séries, adicione outro exercício: isso preserva a identificação do que já foi realizado.
 
@@ -46,7 +48,7 @@ O registro manual também é guardado antes do envio. Se já existir outro trein
 
 ## Publicação e testes
 
-Esta atualização é do site: chega pela Vercel ao recarregar/reabrir no APK existente e no Safari. **Não precisa gerar outro APK.** Não há migração de tabelas ou alteração de políticas Supabase nesta entrega.
+Esta atualização é do site: chega após publicar a versão web e recarregar/reabrir no APK existente e no Safari. **Não precisa gerar outro APK.** A atualização automática das cargas exige aplicar a migração SQL indicada acima no projeto Supabase.
 
 ```sh
 npm run check

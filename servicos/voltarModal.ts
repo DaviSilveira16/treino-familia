@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 import { useIsFocused } from "@react-navigation/native";
 const modais: { id: symbol; fechar: () => void }[] = [];
+export function temRetornoInternoAtivo(): boolean {
+  return modais.length > 0;
+}
 export function fecharModalAtivo(): boolean {
   const modal = modais[modais.length - 1];
   if (!modal) return false;

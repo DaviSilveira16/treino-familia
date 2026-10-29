@@ -2,6 +2,18 @@
 
 O módulo registra a alimentação por data, mantém a dieta padrão separada do consumo confirmado e relaciona o diário aos treinos e cardios existentes. Os dados pessoais de nutrição são privados e não são publicados na Comunidade.
 
+## Organização em blocos
+
+A aba Nutrição abre um painel no mesmo padrão de cartões da área de Treinos:
+
+- **Minha dieta**: criar modelos, organizar refeições e configurar a repetição diária.
+- **Alimentação de hoje**: confirmar o consumo, ajustar quantidades e concluir o diário.
+- **Análise**: comparar alimentação e exercícios no dia e na semana.
+- **Histórico alimentar**: consultar semanas e abrir os registros de cada data para corrigir.
+- **Minhas metas**: revisar os dados e configurar metas e gasto base.
+
+Cada cartão abre sua área com botão de retorno. Ao abrir um diário pelo histórico, voltar retorna à lista de datas. O botão do Android e o gesto no iPhone em modo app seguem esse mesmo retorno interno, sem criar entradas de histórico do Safari.
+
 ## Instalação no Supabase
 
 1. Faça uma cópia de segurança do banco do projeto.
@@ -92,7 +104,7 @@ PGlite não foi adicionado às dependências do aplicativo. A execução no proj
 
 ## Resultado da validação desta entrega
 
-- `npm run check`: TypeScript aprovado, 19 arquivos de testes aprovados e lint sem erros. Permanecem 43 avisos nos arquivos preexistentes do aplicativo.
+- `npm run check`: TypeScript aprovado, 21 arquivos de testes aprovados e lint sem erros. Permanecem 42 avisos nos arquivos preexistentes do aplicativo.
 - `npm run build:web`: exportação web aprovada. A tela de Nutrição é carregada sob demanda; o catálogo não integra o JavaScript do cliente.
 - `npm run test:nutricao:ui`: aprovado em Chrome e WebKit com viewport móvel de 390 × 844. O cenário cobre metas, catálogo, alimento manual com vírgula/ponto decimal, porções com peso conhecido, consumo explícito, saldo diário/semanal com treino, dieta repetida, exceção de um dia, registro de uma refeição sem duplicar e exclusão offline após recarregar/sincronizar.
 - `npm run test:ui`: regressão dos treinos aprovada em Chrome, incluindo conclusão offline, cópias, histórico, exclusão persistente, famílias e gesto de voltar. O seletor do teste de histórico foi ajustado para considerar o texto visível, pois a navegação mantém telas anteriores montadas.

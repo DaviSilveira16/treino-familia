@@ -32,7 +32,7 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { Alert } from "./servicos/alerta";
-import { fecharModalAtivo } from "./servicos/voltarModal";
+import { fecharModalAtivo, temRetornoInternoAtivo } from "./servicos/voltarModal";
 import {
   prepararAuthAndroid,
   abrirGoogleAndroid,
@@ -337,6 +337,7 @@ function AppConteudo() {
     if (typeof document === "undefined" || !modoTelaInicialSafari()) return;
 
     const podeVoltar = () => {
+      if (temRetornoInternoAtivo()) return true;
       if (!referenciaNavegacao.isReady() || !referenciaNavegacao.canGoBack()) {
         return false;
       }

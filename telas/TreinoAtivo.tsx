@@ -68,9 +68,9 @@ import {
   sincronizarRascunho,
 } from "../servicos/treinoSincronizacao";
 import {
-  carregarUltimasSeries,
-  type UltimoExercicio,
-} from "../servicos/ultimasSeriesTreino";
+  carregarMaioresSeries,
+  type RecordeExercicio,
+} from "../servicos/maioresSeriesTreino";
 import EditorExercicioSessao, {
   type DadosEditorExercicio,
 } from "../componentes/EditorExercicioSessao";
@@ -159,8 +159,8 @@ export default function TreinoAtivo({
   const [finalizacao, setFinalizacao] = useState<
     FinalizacaoTreino | undefined
   >();
-  const [ultimasSeries, setUltimasSeries] = useState<
-    Record<string, UltimoExercicio>
+  const [maioresSeries, setMaioresSeries] = useState<
+    Record<string, RecordeExercicio>
   >({});
   const [erroReferencia, setErroReferencia] = useState("");
   const [mensagem, setMensagem] = useState("");
@@ -836,28 +836,38 @@ export default function TreinoAtivo({
     };
   }, []);
   useEffect(() => {
-    if (!usuarioId || !exercicios.length) return;
+    if (!estaEmFoco || !usuarioId || !exercicios.length) return;
     let ativo = true;
-    setErroReferencia("");
-    carregarUltimasSeries(
-      usuarioId,
-      exercicios
-        .filter((e) => !e.avulso && !e.removido)
-        .map((exercicio) => exercicio.id),
-    )
-      .then((referencias) => {
-        if (ativo) setUltimasSeries(referencias);
-      })
-      .catch(() => {
-        if (ativo)
-          setErroReferencia(
-            "Não foi possível consultar a última sessão. Seus campos atuais continuam disponíveis.",
-          );
+    let consulta = 0;
+    const carregarRecordes = () => {
+      const atual = ++consulta;
+      setErroReferencia("");
+      setMaioresSeries({});
+      void carregarMaioresSeries(
+        usuarioId,
+        exercicios.filter((e) => !e.avulso && !e.removido).map((exercicio) => exercicio.id),
+      ).then((referencias) => {
+        if (ativo && atual === consulta) setMaioresSeries(referencias);
+      }).catch((erro: unknown) => {
+        if (ativo && atual === consulta) setErroReferencia(
+          erro && typeof erro === "object" && "message" in erro ? String(erro.message)
+            : "Não foi possível consultar as maiores cargas. Seus campos atuais continuam disponíveis.",
+        );
       });
+    };
+    let timer = setTimeout(carregarRecordes, 0);
+    const agendar = () => { clearTimeout(timer); timer = setTimeout(carregarRecordes, 250); };
+    // As séries em andamento não disputam recordes. Reconsultar todo o
+    // histórico a cada série salva repetiria a mesma leitura; foco e retorno
+    // da conexão já conferem conclusões/exclusões feitas nas outras telas.
+    if (typeof window !== "undefined") window.addEventListener("online", agendar);
     return () => {
       ativo = false;
+      consulta++;
+      clearTimeout(timer);
+      if (typeof window !== "undefined") window.removeEventListener("online", agendar);
     };
-  }, [usuarioId, exercicios]);
+  }, [estaEmFoco, usuarioId, exercicios]);
   const seriesPorExercicio = useMemo(() => {
     const grupos = new Map<string, SerieAtiva[]>();
     for (const serie of series) {
@@ -1122,7 +1132,7 @@ export default function TreinoAtivo({
       segundosPausados: 0,
     });
   }, [alterarDescanso]);
-  const copiarUltimaSessao = useCallback(
+  const copiarMaioresCargas = useCallback(
     (id: string) => {
       if (
         finalizacaoRef.current ||
@@ -1132,7 +1142,7 @@ export default function TreinoAtivo({
         sincronizandoRef.current
       )
         return;
-      const anterior = ultimasSeries[id];
+      const anterior = maioresSeries[id];
       if (!anterior) return;
       const atualizadas = copiarSeriesAnteriores(
         seriesRef.current,
@@ -1142,10 +1152,10 @@ export default function TreinoAtivo({
       seriesRef.current = atualizadas;
       setSeries(atualizadas);
       setMensagem(
-        "Valores da última sessão copiados para as séries abertas deste rascunho. Confira antes de concluir.",
+        "Maiores cargas de cada série copiadas para as séries abertas deste treino. Elas podem ter sido realizadas em dias diferentes; confira antes de concluir.",
       );
     },
-    [ultimasSeries],
+    [maioresSeries],
   );
 
   const alternarSerie = useCallback(
@@ -1867,8 +1877,8 @@ export default function TreinoAtivo({
             <Text style={estilos.tituloCartao}>Pronto para começar?</Text>
             <Text style={estilos.secundario}>
               O tempo começa quando você iniciar. Suas séries concluídas serão
-              salvas como cópia desta sessão, sem alterar as cargas de
-              referência.
+              salvas no histórico. Ao finalizar, as cargas e séries realizadas
+              passam a ser o padrão do treino salvo.
             </Text>
             <TouchableOpacity
               onPress={() => void iniciarSessao()}
@@ -1968,7 +1978,7 @@ export default function TreinoAtivo({
                   key={exercicio.id}
                   exercicio={exercicio}
                   series={seriesPorExercicio.get(exercicio.id) ?? []}
-                  anterior={ultimasSeries[exercicio.id]}
+                  recorde={maioresSeries[exercicio.id]}
                   cor={corTema}
                   proximaChave={proximaSerie?.chave}
                   bloqueado={salvando || bloqueioSessao || Boolean(finalizacao)}
@@ -1977,7 +1987,7 @@ export default function TreinoAtivo({
                   onCampo={atualizarCampo}
                   onRepetirCarga={repetirCarga}
                   onAlternar={alternarSerie}
-                  onCopiar={copiarUltimaSessao}
+                  onCopiar={copiarMaioresCargas}
                   onEditar={editarExercicio}
                   onRetirar={(id) => void removerExercicio(id)}
                   onAdicionarSerie={(id) => void adicionarSerie(id)}
@@ -2244,8 +2254,8 @@ export default function TreinoAtivo({
                 {destinoModelo === "novo"
                   ? "Cria um plano com os exercícios e cargas desta sessão e vincula esta conclusão a ele. O original é preservado."
                   : destinoModelo === "adicionar"
-                    ? "Acrescenta somente exercícios novos. Não exclui exercícios nem troca as cargas de referência que já existiam no original."
-                    : "Guarda o que você realizou no histórico, sem mudar nenhum plano."}
+                    ? "Acrescenta os exercícios novos ao original e atualiza as cargas e séries dos exercícios realizados para usar no próximo treino."
+                    : "Guarda as adaptações de exercícios só nesta sessão. As cargas e séries realizadas dos exercícios já cadastrados passam a ser o padrão do treino."}
               </Text>
               {seriesDoResumo.some((serie) => serie.weight_kg === 0) ? (
                 <View style={{ gap: 10 }}>
