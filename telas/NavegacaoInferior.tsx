@@ -88,24 +88,6 @@ export default function NavegacaoInferior({
 
       <TouchableOpacity
         accessibilityRole="button"
-        accessibilityLabel="Abrir nutrição"
-        accessibilityState={{ selected: nutricaoAtiva }}
-        onPress={() => { if (!nutricaoAtiva) onNavegar("nutricao"); }}
-        style={estilos.item}
-        activeOpacity={0.85}
-      >
-        <View style={estilos.areaIcone}>
-          <View style={[estilos.iconeBase, nutricaoAtiva && { backgroundColor: `${corTema}1A`, borderColor: `${corTema}90` }]}>
-            <Text style={estilos.emoji}>🍎</Text>
-          </View>
-        </View>
-        <Text style={[estilos.rotulo, nutricaoAtiva && { color: corTema }]}>Nutrição</Text>
-      </TouchableOpacity>
-
-      <View style={estilos.divisor} />
-
-      <TouchableOpacity
-        accessibilityRole="button"
         accessibilityLabel="Ir para treinos"
         accessibilityState={{ selected: treinosAtivo }}
         onPress={() => {
@@ -131,6 +113,24 @@ export default function NavegacaoInferior({
         <Text style={[estilos.rotulo, treinosAtivo && { color: corTema }]}>
           Treinos
         </Text>
+      </TouchableOpacity>
+
+      <View style={estilos.divisor} />
+
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Abrir nutrição"
+        accessibilityState={{ selected: nutricaoAtiva }}
+        onPress={() => { if (!nutricaoAtiva) onNavegar("nutricao"); }}
+        style={estilos.item}
+        activeOpacity={0.85}
+      >
+        <View style={estilos.areaIcone}>
+          <View style={[estilos.iconeBase, nutricaoAtiva && { backgroundColor: `${corTema}1A`, borderColor: `${corTema}90` }]}>
+            <Text style={estilos.emoji}>🍎</Text>
+          </View>
+        </View>
+        <Text style={[estilos.rotulo, nutricaoAtiva && { color: corTema }]}>Nutrição</Text>
       </TouchableOpacity>
     </View>
   );

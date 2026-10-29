@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useIsFocused } from "@react-navigation/native";
 import { useVoltarDoModal } from "../servicos/voltarModal";
 import {
   ActivityIndicator,
@@ -63,6 +64,7 @@ export default function MeusTreinos({
   onIniciarTreino,
   corTema = "#0878D1",
 }: Props) {
+  const focado = useIsFocused();
   const estilos = criarEstilos(corTema);
   function mostrarMensagem(titulo: string, mensagem: string) {
     if (Platform.OS === "web" && typeof window !== "undefined") {
@@ -223,6 +225,7 @@ export default function MeusTreinos({
   }
 
   useEffect(() => {
+    if (!focado) return;
     let ativo = true;
     const controlador = new AbortController();
     async function carregarTreinos() {
@@ -247,7 +250,6 @@ export default function MeusTreinos({
         if (armazenados) {
           setTreinos(armazenados);
           setCarregando(false);
-          return;
         }
         const revisaoInicial = obterRevisaoDeDados();
         const { data, error } = await medir("meusTreinos.planos", () =>
@@ -279,9 +281,10 @@ export default function MeusTreinos({
       ativo = false;
       controlador.abort();
     };
-  }, []);
+  }, [focado]);
 
   useEffect(() => {
+    if (!focado) return;
     let ativo = true;
     const controlador = new AbortController();
     const treino = treinoSelecionado;
@@ -317,10 +320,9 @@ export default function MeusTreinos({
         setExercicios(anterior.lista);
         setMaioresCargas((atuais) => ({ ...atuais, ...anterior.cargas }));
         setCarregandoExercicios(false);
-        return;
       }
-      if (!exibicao) setCarregandoExercicios(true);
-      const revisaoInicial = obterRevisaoDeDados();
+      if (!exibicao && !anterior) setCarregandoExercicios(true);
+      let revisaoInicial = obterRevisaoDeDados();
       try {
         const { data, error } = await medir("meusTreinos.exercicios", () =>
           supabase
@@ -339,6 +341,96 @@ export default function MeusTreinos({
           return;
         }
         const listaBase = (data ?? []) as Exercicio[];
+        // Reaplica as referências a partir da sessão concluída mais recente.
+        // Isso também recupera sessões antigas caso a migração do gatilho ainda
+        // não estivesse aplicada quando o treino foi finalizado.
+        const { data: ultimaSessao, error: erroUltimaSessao } =
+          await supabase
+            .from("workout_sessions")
+            .select("id")
+            .eq("plan_id", treinoId)
+            .eq("user_id", usuarioId)
+            .eq("status", "concluido")
+            .not("finished_at", "is", null)
+            .order("finished_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        if (!ativo || controlador.signal.aborted) return;
+        if (erroUltimaSessao) {
+          mostrarMensagem(
+            "Erro ao sincronizar cargas",
+            erroUltimaSessao.message,
+          );
+          return;
+        }
+        if (ultimaSessao && listaBase.length > 0) {
+          const { data: seriesHistoricas, error: erroSeriesHistoricas } =
+            await supabase
+              .from("workout_sets")
+              .select("exercise_id, set_number, reps, weight_kg")
+              .eq("session_id", ultimaSessao.id)
+              .eq("user_id", usuarioId)
+              .in("exercise_id", listaBase.map((exercicio) => exercicio.id))
+              .gt("set_number", 0)
+              .gt("reps", 0)
+              .gte("weight_kg", 0)
+              .lte("weight_kg", 2000)
+              .order("set_number", { ascending: true });
+          if (!ativo || controlador.signal.aborted) return;
+          if (erroSeriesHistoricas) {
+            mostrarMensagem(
+              "Erro ao sincronizar cargas",
+              erroSeriesHistoricas.message,
+            );
+            return;
+          }
+          const exerciciosHistoricos = new Map<
+            string,
+            { reps: number; weight_kg: number }[]
+          >();
+          for (const serie of seriesHistoricas ?? []) {
+            if (!serie.exercise_id) continue;
+            const lista = exerciciosHistoricos.get(serie.exercise_id) ?? [];
+            lista.push({
+              reps: Number(serie.reps),
+              weight_kg: Number(serie.weight_kg),
+            });
+            exerciciosHistoricos.set(serie.exercise_id, lista);
+          }
+          for (const [exerciseId, series] of exerciciosHistoricos) {
+            const referencias = series.map((serie, indice) => ({
+              user_id: usuarioId,
+              exercise_id: exerciseId,
+              set_number: indice + 1,
+              reps: serie.reps,
+              weight_kg: serie.weight_kg,
+              updated_at: new Date().toISOString(),
+            }));
+            const { error: erroSalvar } = await supabase
+              .from("exercise_load_defaults")
+              .upsert(referencias, {
+                onConflict: "user_id,exercise_id,set_number",
+              });
+            if (erroSalvar) {
+              mostrarMensagem("Erro ao sincronizar cargas", erroSalvar.message);
+              return;
+            }
+            const { error: erroLimpar } = await supabase
+              .from("exercise_load_defaults")
+              .delete()
+              .eq("user_id", usuarioId)
+              .eq("exercise_id", exerciseId)
+              .gt("set_number", referencias.length);
+            if (erroLimpar) {
+              mostrarMensagem("Erro ao sincronizar cargas", erroLimpar.message);
+              return;
+            }
+          }
+          if (exerciciosHistoricos.size > 0) {
+            registrarMudancaDeDados();
+            revisaoInicial = obterRevisaoDeDados();
+          }
+        }
         const [urlsFotos, resultadoReferencias] = await medir(
           "meusTreinos.fotosECargas",
           () =>
@@ -401,7 +493,7 @@ export default function MeusTreinos({
       ativo = false;
       controlador.abort();
     };
-  }, [treinoSelecionado, usuarioId]);
+  }, [focado, treinoSelecionado, usuarioId]);
 
   async function criarTreino() {
     const nome = nomeNovoTreino.trim();

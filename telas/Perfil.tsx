@@ -178,12 +178,6 @@ function converterDataCampo(texto: string): Date | null {
   return data;
 }
 
-function formatarDataIsoParaCampo(valor: string): string {
-  const correspondencia = valor.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!correspondencia) return "";
-  return `${correspondencia[3]}/${correspondencia[2]}/${correspondencia[1]}`;
-}
-
 function formatarDataCampoParaIso(valor: string): string {
   const correspondencia = valor.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!correspondencia) return "";
@@ -563,6 +557,14 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
     }
     if (inicioSelecionado.getTime() > fimSelecionado.getTime()) {
       const mensagem = "A data inicial não pode ser posterior à data final.";
+      if (Platform.OS === "web" && typeof window !== "undefined")
+        window.alert(mensagem);
+      else Alert.alert("Período inválido", mensagem);
+      return;
+    }
+    const hojeRelatorio = converterDataCampo(dataPadraoRelatorio(0));
+    if (hojeRelatorio && fimSelecionado.getTime() > hojeRelatorio.getTime()) {
+      const mensagem = "A data final não pode ser futura.";
       if (Platform.OS === "web" && typeof window !== "undefined")
         window.alert(mensagem);
       else Alert.alert("Período inválido", mensagem);
@@ -1336,16 +1338,17 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
           </Text>
           <View style={estilos.gradeDatasRelatorio}>
             <View style={estilos.campoDataRelatorio}>
-              <Text style={estilos.rotulo}>Data inicial</Text>
+              <Text style={estilos.rotulo}>Data inicial (DD/MM/AAAA)</Text>
               {Platform.OS === "web" ? (
                 React.createElement("input" as any, {
-                  type: "date",
-                  value: formatarDataCampoParaIso(dataInicioRelatorio),
-                  max: formatarDataCampoParaIso(dataFimRelatorio) || undefined,
+                  type: "text",
+                  inputMode: "numeric",
+                  value: dataInicioRelatorio,
                   onChange: (evento: any) =>
                     setDataInicioRelatorio(
-                      formatarDataIsoParaCampo(evento?.target?.value ?? ""),
+                      formatarEntradaData(evento?.target?.value ?? ""),
                     ),
+                  placeholder: "DD/MM/AAAA",
                   "aria-label": "Data inicial do relatório",
                   style: {
                     display: "block",
@@ -1382,18 +1385,17 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
               )}
             </View>
             <View style={estilos.campoDataRelatorio}>
-              <Text style={estilos.rotulo}>Data final</Text>
+              <Text style={estilos.rotulo}>Data final (DD/MM/AAAA)</Text>
               {Platform.OS === "web" ? (
                 React.createElement("input" as any, {
-                  type: "date",
-                  value: formatarDataCampoParaIso(dataFimRelatorio),
-                  min:
-                    formatarDataCampoParaIso(dataInicioRelatorio) || undefined,
-                  max: formatarDataCampoParaIso(dataPadraoRelatorio(0)),
+                  type: "text",
+                  inputMode: "numeric",
+                  value: dataFimRelatorio,
                   onChange: (evento: any) =>
                     setDataFimRelatorio(
-                      formatarDataIsoParaCampo(evento?.target?.value ?? ""),
+                      formatarEntradaData(evento?.target?.value ?? ""),
                     ),
+                  placeholder: "DD/MM/AAAA",
                   "aria-label": "Data final do relatório",
                   style: {
                     display: "block",

@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
+import { dataBrasileiraParaIso, mascararDataBrasileira } from "../servicos/datas";
 
 const estiloRolagemWeb =
   Platform.OS === "web"
@@ -74,7 +75,7 @@ function dataHojeLocal(): string {
   const ano = data.getFullYear();
   const mes = String(data.getMonth() + 1).padStart(2, "0");
   const dia = String(data.getDate()).padStart(2, "0");
-  return `${ano}-${mes}-${dia}`;
+  return `${dia}/${mes}/${ano}`;
 }
 
 function formatarValor(valor: number | null, unidade: string) {
@@ -201,17 +202,15 @@ export default function EvolucaoFisica({
       return;
     }
 
-    if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(dataMedicao) ||
-      Number.isNaN(new Date(`${dataMedicao}T12:00:00`).getTime())
-    ) {
-      Alert.alert("Data inválida", "Informe a data no formato AAAA-MM-DD.");
+    const dataMedicaoIso = dataBrasileiraParaIso(dataMedicao);
+    if (!dataMedicaoIso) {
+      Alert.alert("Data inválida", "Informe uma data válida no formato DD/MM/AAAA.");
       return;
     }
 
     const dados = {
       user_id: usuarioId,
-      measured_at: dataMedicao,
+      measured_at: dataMedicaoIso,
       weight_kg: peso,
       body_fat_percentage: converterNumero(campos.body_fat_percentage),
       chest_cm: converterNumero(campos.chest_cm),
@@ -371,13 +370,13 @@ export default function EvolucaoFisica({
       <View style={styles.cartao}>
         <Text style={styles.tituloCartao}>Nova medição</Text>
 
-        <Text style={styles.rotulo}>Data da medição (AAAA-MM-DD)</Text>
+        <Text style={styles.rotulo}>Data da medição (DD/MM/AAAA)</Text>
 
         <TextInput
           style={styles.inputData}
           value={dataMedicao}
-          onChangeText={setDataMedicao}
-          placeholder="AAAA-MM-DD"
+          onChangeText={(valor) => setDataMedicao(mascararDataBrasileira(valor))}
+          placeholder="DD/MM/AAAA"
           placeholderTextColor="#6F7972"
           keyboardType="numbers-and-punctuation"
           maxLength={10}
