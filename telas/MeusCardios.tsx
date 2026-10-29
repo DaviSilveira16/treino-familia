@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
-  ScrollView,
+  FlatList,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +13,7 @@ import { Alert } from "../servicos/alerta";
 import { supabase } from "../supabase";
 import { registrarMudancaDeDados } from "../servicos/revisaoDados";
 import { categoriaDoCardio } from "../servicos/caloriasCardio";
+import { medir } from "../servicos/performance";
 
 type Cardio = {
   id: string;
@@ -59,19 +60,21 @@ export default function MeusCardios({
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
-  const carregar = useCallback(async () => {
-    setCarregando(true);
+  const carregar = useCallback(async (mostrarCarregando = true) => {
+    if (mostrarCarregando) setCarregando(true);
     try {
       const { data: usuarioData, error: erroUsuario } =
         await supabase.auth.getUser();
       if (erroUsuario || !usuarioData.user)
         throw new Error("Entre novamente na sua conta.");
       setUsuarioId(usuarioData.user.id);
-      const { data, error } = await supabase
-        .from("cardio_activities")
-        .select("id, nome, tipo, duracao_min, distancia_km, observacoes")
-        .eq("user_id", usuarioData.user.id)
-        .order("created_at", { ascending: true });
+      const { data, error } = await medir("cardios.lista", () =>
+        supabase
+          .from("cardio_activities")
+          .select("id, nome, tipo, duracao_min, distancia_km, observacoes")
+          .eq("user_id", usuarioData.user.id)
+          .order("created_at", { ascending: true }),
+      );
       if (error) throw error;
       setCardios((data ?? []) as Cardio[]);
     } catch (erro) {
@@ -87,7 +90,7 @@ export default function MeusCardios({
   }, []);
 
   useEffect(() => {
-    carregar();
+    void carregar(false);
   }, [carregar]);
 
   function limparFormulario() {
@@ -199,11 +202,56 @@ export default function MeusCardios({
 
   return (
     <View style={estilos.container}>
-      <ScrollView
+      <FlatList
+        accessibilityRole="list"
+        accessibilityLabel="Cardios cadastrados"
+        style={{ flex: 1 }}
         contentContainerStyle={estilos.conteudo}
         keyboardShouldPersistTaps="handled"
-      >
-        <TouchableOpacity style={estilos.voltar} onPress={onVoltar}>
+        data={carregando ? [] : cardios}
+        keyExtractor={(cardio) => cardio.id}
+        renderItem={({ item: cardio }) => (
+                      <View style={estilos.item}>
+              <View style={{ flex: 1 }}>
+                <Text style={estilos.nomeCardio}>{cardio.nome}</Text>
+                <Text style={estilos.detalhes}>
+                  {cardio.tipo}
+                  {cardio.duracao_min != null
+                    ? ` · ${cardio.duracao_min} min`
+                    : ""}
+                  {permiteDistancia(cardio.tipo) && cardio.distancia_km != null
+                    ? ` · ${cardio.distancia_km} km`
+                    : ""}
+                </Text>
+                {cardio.observacoes ? (
+                  <Text style={estilos.detalhes}>{cardio.observacoes}</Text>
+                ) : null}
+              </View>
+              <View style={estilos.acoes}>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={`Registrar sessão de ${cardio.nome}`}
+                  disabled={salvando}
+                  onPress={() => onRegistrar(cardio.id)}
+                >
+                  <Text style={[estilos.acao, { color: corTema }]}>
+                    Registrar sessão
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Editar ${cardio.nome}`} onPress={() => editar(cardio)}>
+                  <Text style={[estilos.acao, { color: corTema }]}>Editar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Excluir ${cardio.nome}`} onPress={() => excluir(cardio)}>
+                  <Text style={[estilos.acao, { color: "#F29B9B" }]}>
+                    Excluir
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+        )}
+        ListHeaderComponent={
+          <View>
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Voltar" style={estilos.voltar} onPress={onVoltar}>
           <Text style={{ color: corTema, fontSize: 16, fontWeight: "700" }}>
             ‹ Voltar
           </Text>
@@ -221,6 +269,7 @@ export default function MeusCardios({
           </Text>
           <Text style={estilos.rotulo}>Nome</Text>
           <TextInput
+            accessibilityLabel="Nome do cardio"
             style={estilos.input}
             value={nome}
             onChangeText={setNome}
@@ -232,6 +281,9 @@ export default function MeusCardios({
             {TIPOS.map((item) => (
               <TouchableOpacity
                 key={item}
+                accessibilityRole="radio"
+                accessibilityLabel={`Tipo de cardio: ${item}`}
+                accessibilityState={{ checked: tipo === item || (tipo === "Escada" && item === "Escadas") }}
                 onPress={() => {
                   setTipo(item);
                   if (!permiteDistancia(item)) setDistancia("");
@@ -261,6 +313,7 @@ export default function MeusCardios({
           </View>
           <Text style={estilos.rotulo}>Duração (minutos)</Text>
           <TextInput
+            accessibilityLabel="Duração em minutos"
             style={estilos.input}
             value={duracao}
             onChangeText={setDuracao}
@@ -272,6 +325,7 @@ export default function MeusCardios({
             <>
               <Text style={estilos.rotulo}>Distância (km, opcional)</Text>
               <TextInput
+                accessibilityLabel="Distância em quilômetros, opcional"
                 style={estilos.input}
                 value={distancia}
                 onChangeText={setDistancia}
@@ -288,6 +342,7 @@ export default function MeusCardios({
           </Text>
           <Text style={estilos.rotulo}>Observações (opcional)</Text>
           <TextInput
+            accessibilityLabel="Observações do cardio, opcional"
             style={[estilos.input, estilos.multilinha]}
             value={observacoes}
             onChangeText={setObservacoes}
@@ -296,6 +351,8 @@ export default function MeusCardios({
             placeholderTextColor="#7D8881"
           />
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={editando ? "Salvar alterações do cardio" : "Salvar modelo de cardio"}
             style={[
               estilos.botao,
               { backgroundColor: corTema },
@@ -322,58 +379,24 @@ export default function MeusCardios({
           )}
         </View>
         <Text style={estilos.tituloLista}>Cardios cadastrados</Text>
-        {carregando ? (
-          <ActivityIndicator color={corTema} size="large" />
-        ) : cardios.length === 0 ? (
-          <Text style={estilos.vazio}>
-            Nenhum cardio cadastrado. Crie seu primeiro acima.
-          </Text>
-        ) : (
-          cardios.map((cardio) => (
-            <View key={cardio.id} style={estilos.item}>
-              <View style={{ flex: 1 }}>
-                <Text style={estilos.nomeCardio}>{cardio.nome}</Text>
-                <Text style={estilos.detalhes}>
-                  {cardio.tipo}
-                  {cardio.duracao_min != null
-                    ? ` · ${cardio.duracao_min} min`
-                    : ""}
-                  {permiteDistancia(cardio.tipo) && cardio.distancia_km != null
-                    ? ` · ${cardio.distancia_km} km`
-                    : ""}
-                </Text>
-                {cardio.observacoes ? (
-                  <Text style={estilos.detalhes}>{cardio.observacoes}</Text>
-                ) : null}
-              </View>
-              <View style={estilos.acoes}>
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel={`Registrar sessão de ${cardio.nome}`}
-                  disabled={salvando}
-                  onPress={() => onRegistrar(cardio.id)}
-                >
-                  <Text style={[estilos.acao, { color: corTema }]}>
-                    Registrar sessão
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => editar(cardio)}>
-                  <Text style={[estilos.acao, { color: corTema }]}>Editar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => excluir(cardio)}>
-                  <Text style={[estilos.acao, { color: "#F29B9B" }]}>
-                    Excluir
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))
-        )}
-      </ScrollView>
+          </View>
+        }
+        ListEmptyComponent={
+          carregando ? (
+            <ActivityIndicator accessibilityLabel="Carregando cardios" color={corTema} size="large" />
+          ) : cardios.length === 0 ? (
+            <Text style={estilos.vazio}>
+              Nenhum cardio cadastrado. Crie seu primeiro acima.
+            </Text>
+          ) : undefined
+        }
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+      />
     </View>
   );
 }
-
 const estilos = StyleSheet.create({
   container: { flex: 1, minHeight: 0, backgroundColor: "#101312" },
   conteudo: {

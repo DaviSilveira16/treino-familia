@@ -7,12 +7,14 @@ import { lerPerfilTreino } from "../servicos/caloriasTreino";
 import { assinarMudancasDeDados } from "../servicos/revisaoDados";
 import { assinarRascunhos } from "../servicos/treinoLocal";
 import { useVoltarDoModal } from "../servicos/voltarModal";
-import { analisarDia, aplicarModelo, configuracaoNaData, copiarDia, criarDia, dataLocal, deslocarDia, modeloNaData, novasRefeicoes, novoIdNutricao, planejarRefeicaoDoModelo, resumirSemana, semanaDaData, somarNutrientes, type ResumoDia } from "../servicos/nutricaoCalculos";
+import { analisarDia, aplicarModelo, configuracaoNaData, copiarDia, criarDia, dataLocal, deslocarDia, modeloNaData, novasRefeicoes, novoIdNutricao, planejarRefeicaoDoModelo, resumirSemana, semanaDaData, somarNutrientes } from "../servicos/nutricaoCalculos";
 import { carregarAtividadesNutricao } from "../servicos/nutricaoAtividades";
 import { carregarEstadoNutricao, lerEstadoNutricaoLocal, listarCopiasConflitosNutricao, resolverConflitoNutricao, salvarConfiguracaoNutricao, salvarDiaNutricao, salvarModeloDieta, salvarPreferenciasNutricao, sincronizarNutricao } from "../servicos/nutricaoRepositorio";
 import type { AtividadeNutricional, ConfiguracaoNutricional, DiaNutricao, EstadoNutricao, ModeloDieta, PreferenciasNutricao, RefeicaoNutricao } from "../servicos/nutricaoTipos";
 import EditorRefeicoesNutricao from "../componentes/nutricao/EditorRefeicoesNutricao";
 import MetasNutricao from "../componentes/nutricao/MetasNutricao";
+import CartaoSaldo from "../componentes/nutricao/CartaoSaldo";
+import { medir } from "../servicos/performance";
 import { BotaoNutricao as Botao, CampoNutricao as Campo, ModalNutricao, estilosNutricao as e, numeroKcal as kcal } from "../componentes/nutricao/NutricaoBase";
 
 type AreaNutricao = "inicio" | "hoje" | "dieta" | "analise" | "historico" | "metas";
@@ -37,16 +39,6 @@ const conteudoRefeicoes = (refeicoes: RefeicaoNutricao[]) => JSON.stringify(refe
 function Barra({ valor, meta, cor }: { valor: number; meta: number | null; cor: string }) {
   return <View style={estilos.trilho}><View style={{ height: 7, borderRadius: 5, backgroundColor: cor, width: `${Math.max(0, Math.min(100, meta && meta > 0 ? valor / meta * 100 : 0))}%` }} /></View>;
 }
-function CartaoSaldo({ resumo, atividadesConferidas = true, onAbrirMetas }: { resumo: ResumoDia; atividadesConferidas?: boolean; onAbrirMetas: () => void }) {
-  const saldo = resumo.situacao === "futuro" ? null : resumo.saldo ?? (resumo.gastoTotal !== null && resumo.itensConsumidos > 0 ? resumo.consumido.kcal - resumo.gastoTotal : null);
-  const texto = !atividadesConferidas ? "Atividades aguardando conferência" : resumo.situacao === "futuro" ? "Planejamento futuro" : resumo.situacao === "insuficiente" ? "Dados insuficientes para fechar o saldo" : resumo.situacao === "parcial" ? "Balanço provisório · registros parciais" : resumo.situacao === "manutencao" ? "Próximo da manutenção" : resumo.situacao === "deficit" ? "Déficit estimado" : "Superávit estimado";
-  const motivos: string[] = [];
-  if (resumo.gastoBase === null && resumo.situacao !== "futuro") motivos.push("falta salvar o gasto base para este dia");
-  if (resumo.desconhecidas > 0) motivos.push(`${resumo.desconhecidas} atividade(s) não têm estimativa de calorias`);
-  if (!atividadesConferidas) motivos.push("não foi possível atualizar as atividades do servidor");
-  return <View style={e.card}><Text style={e.titulo}>{texto}</Text><Text style={estilos.numero}>{saldo === null ? "—" : `${saldo > 0 ? "+" : saldo < 0 ? "−" : ""}${kcal(Math.abs(saldo))} kcal`}</Text><Text style={e.texto}>Consumo confirmado: {kcal(resumo.consumido.kcal)} kcal</Text><Text style={e.texto}>Proteínas {kcal(resumo.consumido.proteinas)} g · Carboidratos {kcal(resumo.consumido.carboidratos)} g · Gorduras {kcal(resumo.consumido.gorduras)} g</Text><Text style={e.pequeno}>Total planejado nas refeições: {kcal(resumo.planejado.kcal)} kcal. Só o que foi confirmado entra no consumo.</Text><Text style={e.texto}>Gasto base do dia: {resumo.gastoBase === null ? "não informado" : `${kcal(resumo.gastoBase)} kcal`}</Text><Text style={e.texto}>Exercícios registrados: {kcal(resumo.gastoExercicio)} kcal ativas</Text><Text style={e.texto}>Gasto total estimado: {resumo.gastoTotal === null ? "indisponível" : `${kcal(resumo.gastoTotal)} kcal`}</Text>{resumo.gastoTotal === null && motivos.length > 0 ? <><Text style={estilos.aviso}>Para calcular o total, confira: {motivos.join("; ")}.</Text>{resumo.gastoBase === null ? <Botao titulo="Configurar gasto base em Minhas metas" cor="#35D07F" onPress={onAbrirMetas} /> : null}</> : null}{resumo.pendentes > 0 ? <Text style={e.pequeno}>{resumo.pendentes} atividade(s) aguardando confirmação do servidor.</Text> : null}{resumo.diferencaMeta !== null ? <Text style={e.texto}>{kcal(Math.abs(resumo.diferencaMeta))} kcal {resumo.diferencaMeta > 0 ? "acima" : "abaixo"} da meta alimentar. A meta alimentar é separada do saldo energético.</Text> : null}</View>;
-}
-
 function ResumoDocumento({ documento }: { documento: unknown }) {
   if (!documento || typeof documento !== "object") return <Text style={e.texto}>Registro ausente ou removido nesta versão.</Text>;
   const valor = documento as Record<string, unknown>;
@@ -103,7 +95,10 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
   const carregar = useCallback(async () => {
     const consulta = ++consultaRef.current;
     try {
-      const [novoEstado, resultado] = await Promise.all([carregarEstadoNutricao(usuarioId, inicio, fim), carregarAtividadesNutricao(usuarioId, inicio, fim)]);
+      const [novoEstado, resultado] = await Promise.all([
+        medir("nutricao.estado", () => carregarEstadoNutricao(usuarioId, inicio, fim)),
+        medir("nutricao.atividades", () => carregarAtividadesNutricao(usuarioId, inicio, fim)),
+      ]);
       if (consulta !== consultaRef.current) return;
       setEstado(novoEstado); setAtividades(resultado.atividades); setErroAtividades(resultado.erro);
       setPeriodoPronto(`${usuarioId}:${inicio}:${fim}`);

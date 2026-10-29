@@ -34,7 +34,14 @@ export async function medir<T>(
   const inicio = Date.now();
   try {
     const resultado = await execucao();
-    registrarTempo(operacao, inicio);
+    const erroRetornado = resultado && typeof resultado === "object"
+      ? "error" in resultado
+        ? resultado.error
+        : "erro" in resultado
+          ? resultado.erro
+          : null
+      : null;
+    registrarTempo(operacao, inicio, Boolean(erroRetornado));
     return resultado;
   } catch (erro) {
     registrarTempo(operacao, inicio, true);

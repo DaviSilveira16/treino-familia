@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabase";
 import { registrarMudancaDeDados } from "./revisaoDados";
+import { medir } from "./performance";
 import type {
   AlimentoNutricao, ConfiguracaoNutricional, DiaNutricao, EstadoNutricao,
   ModeloDieta, PreferenciasNutricao, ResultadoBuscaAlimentos,
@@ -187,7 +188,7 @@ export function salvarAlimentoNutricao(alimento: AlimentoNutricao) {
 export function sincronizarNutricao(usuarioId: string): Promise<{ pendencias: number; erro: string | null }> {
   const existente = sincronizacoes.get(usuarioId);
   if (existente) return existente;
-  const tarefa = (async () => {
+  const tarefa = medir("nutricao.sincronizacao", () => (async () => {
     try {
       if (!offline()) {
         for (let tentativa = 0; tentativa < 300; tentativa += 1) {
@@ -240,7 +241,7 @@ export function sincronizarNutricao(usuarioId: string): Promise<{ pendencias: nu
         return { pendencias: pendencias(banco), erro: banco.erro };
       });
     }
-  })().finally(() => sincronizacoes.delete(usuarioId));
+  })()).finally(() => sincronizacoes.delete(usuarioId));
   sincronizacoes.set(usuarioId, tarefa);
   return tarefa;
 }

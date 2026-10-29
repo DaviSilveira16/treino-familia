@@ -1398,10 +1398,14 @@ function AppConteudo() {
             key={sessao.user.id}
             usuarioId={sessao.user.id}
             corTema={corTema}
-            visivel={rotaAtual !== "treinoAtivo"}
+            visivel={rotaAtual !== "treinoAtivo" && rotaAtual !== "nutricao"}
             onRetomar={(plano) => {
               if (referenciaNavegacao.isReady())
                 referenciaNavegacao.navigate("treinoAtivo", plano);
+            }}
+            onAbrirNutricao={() => {
+              if (referenciaNavegacao.isReady())
+                referenciaNavegacao.navigate("nutricao");
             }}
           />
         ) : null}

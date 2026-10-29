@@ -21,6 +21,7 @@ import {
   ConflitoModeloTreino,
 } from "./salvarModeloTreino";
 import { registrarTempoFinalizacao } from "./tempoFinalizacao";
+import { medir } from "./performance";
 
 export type ResultadoSincronizacao = {
   rascunho: TreinoRascunho | null;
@@ -134,9 +135,9 @@ export function sincronizarRascunho(
   const chave = `${usuarioId}:${planId}`;
   const atual = emEnvio.get(chave);
   if (atual) return atual;
-  const tarefa = enviar(usuarioId, planId, permitirSobrescrever).finally(() =>
-    emEnvio.delete(chave),
-  );
+  const tarefa = medir("treino.sincronizacao", () =>
+    enviar(usuarioId, planId, permitirSobrescrever),
+  ).finally(() => emEnvio.delete(chave));
   emEnvio.set(chave, tarefa);
   return tarefa;
 }
