@@ -18,8 +18,9 @@ type Copia = { recursoId: string; data: string; documento: Documento; origem: "l
 type BancoLocal = {
   versao: 1; usuarioId: string; entradas: Record<string, Entrada>;
   alimentos: Record<string, AlimentoNutricao>; copias: Copia[]; erro: string | null;
+  sincronizadoAte?: Partial<Record<Tipo, string>>;
 };
-type LinhaRemota = { id: string; user_id: string | null; document: Documento; revision: number };
+type LinhaRemota = { id: string; user_id: string | null; document: Documento; revision: number; updated_at?: string };
 type RespostaRPC = { status: "ok" | "conflict"; id: string; revision: number; document?: Documento | null };
 
 const tabelas: Record<Tipo, string> = {
@@ -40,7 +41,7 @@ function novoId() {
 }
 function chave(usuarioId: string) { return `@treino-familia:nutricao:v1:${usuarioId}`; }
 function vazio(usuarioId: string): BancoLocal {
-  return { versao: 1, usuarioId, entradas: {}, alimentos: {}, copias: [], erro: null };
+  return { versao: 1, usuarioId, entradas: {}, alimentos: {}, copias: [], erro: null, sincronizadoAte: {} };
 }
 function preferenciasVazias(): PreferenciasNutricao {
   return { modeloPadraoId: null, repetirDiariamente: false, repetirDesde: "", favoritos: [], recentes: [] };
@@ -57,7 +58,7 @@ async function ler(usuarioId: string): Promise<BancoLocal> {
   const banco = JSON.parse(texto) as BancoLocal;
   if (banco.versao !== 1 || banco.usuarioId !== usuarioId || !banco.entradas)
     throw new Error("O arquivo local de nutrição não pôde ser identificado. Ele foi preservado neste aparelho.");
-  return { ...banco, alimentos: banco.alimentos ?? {}, copias: banco.copias ?? [] };
+  return { ...banco, alimentos: banco.alimentos ?? {}, copias: banco.copias ?? [], sincronizadoAte: banco.sincronizadoAte ?? {} };
 }
 async function gravar(banco: BancoLocal) {
   await AsyncStorage.setItem(chave(banco.usuarioId), JSON.stringify(banco));
@@ -191,7 +192,8 @@ export function sincronizarNutricao(usuarioId: string): Promise<{ pendencias: nu
   const tarefa = medir("nutricao.sincronizacao", () => (async () => {
     try {
       if (!offline()) {
-        for (let tentativa = 0; tentativa < 300; tentativa += 1) {
+        let tentativa = 0;
+        for (; tentativa < 300; tentativa += 1) {
           const proxima = await serializar(usuarioId, async () => {
             const banco = await ler(usuarioId);
             const recurso = Object.keys(banco.entradas).find((id) => banco.entradas[id].fila.length && !banco.entradas[id].conflito);
@@ -224,6 +226,13 @@ export function sincronizarNutricao(usuarioId: string): Promise<{ pendencias: nu
             await gravar(banco);
           });
           registrarMudancaDeDados();
+        }
+        if (tentativa === 300) {
+          await serializar(usuarioId, async () => {
+            const banco = await ler(usuarioId);
+            if (pendencias(banco)) banco.erro = "Lote de 300 alterações enviado. Ainda há alterações pendentes; toque em Sincronizar novamente para continuar.";
+            await gravar(banco);
+          });
         }
       }
       return await serializar(usuarioId, async () => {
@@ -280,16 +289,21 @@ export function listarCopiasConflitosNutricao(usuarioId: string): Promise<Copia[
   return serializar(usuarioId, async () => copiar((await ler(usuarioId)).copias));
 }
 
-async function listarRemoto(tipo: Tipo, usuarioId: string, inicio?: string, fim?: string): Promise<LinhaRemota[]> {
+async function listarRemoto(tipo: Tipo, usuarioId: string, inicio?: string, fim?: string, alteradoDesde?: string): Promise<LinhaRemota[]> {
   const linhas: LinhaRemota[] = [];
-  for (let pagina = 0; pagina < 100; pagina += 1) {
-    let consulta = supabase.from(tabelas[tipo]).select("id, user_id, document, revision").eq("user_id", usuarioId).order("id");
+  for (let pagina = 0; ; pagina += 1) {
+    let consulta = supabase.from(tabelas[tipo]).select("id, user_id, document, revision, updated_at").eq("user_id", usuarioId).order("updated_at").order("id");
     if (tipo === "day" && inicio) consulta = consulta.gte("local_date", inicio);
     if (tipo === "day" && fim) consulta = consulta.lte("local_date", fim);
-    const { data, error } = await consulta.range(pagina * 200, pagina * 200 + 199);
+    if (tipo !== "day" && alteradoDesde) {
+      // A pequena sobreposição cobre atualizações que compartilham o mesmo timestamp.
+      const desde = new Date(new Date(alteradoDesde).getTime() - 2000).toISOString();
+      consulta = consulta.gte("updated_at", desde);
+    }
+    const { data, error } = await consulta.range(pagina * 500, pagina * 500 + 499);
     if (error) throw error;
     linhas.push(...((data ?? []) as LinhaRemota[]));
-    if ((data ?? []).length < 200) break;
+    if ((data ?? []).length < 500) break;
   }
   return linhas;
 }
@@ -323,12 +337,21 @@ export async function carregarEstadoNutricao(usuarioId: string, inicio?: string,
     try {
       await autenticar(usuarioId);
       const tipos: Tipo[] = ["day", "template", "goal", "preferences", "food"];
-      const resultados = await Promise.allSettled(tipos.map((tipo) => listarRemoto(tipo, usuarioId, inicio, fim)));
+      const bancoAntes = await serializar(usuarioId, () => ler(usuarioId));
+      const resultados = await Promise.allSettled(tipos.map((tipo) => listarRemoto(
+        tipo, usuarioId, inicio, fim, tipo === "day" ? undefined : bancoAntes.sincronizadoAte?.[tipo],
+      )));
       await serializar(usuarioId, async () => {
         const banco = await ler(usuarioId);
         let erro: string | null = null;
         resultados.forEach((resultado, indice) => {
-          if (resultado.status === "fulfilled") fundir(banco, tipos[indice], resultado.value);
+          if (resultado.status === "fulfilled") {
+            fundir(banco, tipos[indice], resultado.value);
+            if (tipos[indice] !== "day") {
+              const datas = resultado.value.map((linha) => linha.updated_at).filter((data): data is string => Boolean(data));
+              if (datas.length) banco.sincronizadoAte![tipos[indice]] = datas.reduce((maior, data) => data > maior ? data : maior);
+            }
+          }
           else erro = mensagem(resultado.reason);
         });
         banco.erro = erro;

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -38,6 +38,7 @@ const TIPOS = [
   "Elíptico",
   "Pilates",
 ];
+const TAMANHO_PAGINA_CARDIOS = 50;
 function permiteDistancia(tipo: string) {
   return ["esteira", "caminhada", "corrida", "bicicleta"].includes(
     categoriaDoCardio(tipo),
@@ -58,7 +59,11 @@ export default function MeusCardios({
   const [observacoes, setObservacoes] = useState("");
   const [editando, setEditando] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
+  const [carregandoMais, setCarregandoMais] = useState(false);
+  const [temMaisCardios, setTemMaisCardios] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const offsetCardios = useRef(0);
+  const buscandoMaisCardios = useRef(false);
 
   const carregar = useCallback(async (mostrarCarregando = true) => {
     if (mostrarCarregando) setCarregando(true);
@@ -73,10 +78,15 @@ export default function MeusCardios({
           .from("cardio_activities")
           .select("id, nome, tipo, duracao_min, distancia_km, observacoes")
           .eq("user_id", usuarioData.user.id)
-          .order("created_at", { ascending: true }),
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(0, TAMANHO_PAGINA_CARDIOS - 1),
       );
       if (error) throw error;
+      offsetCardios.current = 0;
       setCardios((data ?? []) as Cardio[]);
+      offsetCardios.current = data?.length ?? 0;
+      setTemMaisCardios((data?.length ?? 0) === TAMANHO_PAGINA_CARDIOS);
     } catch (erro) {
       Alert.alert(
         "Erro",
@@ -88,6 +98,36 @@ export default function MeusCardios({
       setCarregando(false);
     }
   }, []);
+
+  const carregarMais = useCallback(async () => {
+    if (buscandoMaisCardios.current || !temMaisCardios || !usuarioId) return;
+    buscandoMaisCardios.current = true;
+    setCarregandoMais(true);
+    try {
+      const inicio = offsetCardios.current;
+      const { data, error } = await medir("cardios.proxima_pagina", () =>
+        supabase.from("cardio_activities")
+          .select("id, nome, tipo, duracao_min, distancia_km, observacoes")
+          .eq("user_id", usuarioId)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(inicio, inicio + TAMANHO_PAGINA_CARDIOS - 1),
+      );
+      if (error) throw error;
+      const novos = (data ?? []) as Cardio[];
+      offsetCardios.current = inicio + novos.length;
+      setTemMaisCardios(novos.length === TAMANHO_PAGINA_CARDIOS);
+      if (novos.length) setCardios((atuais) => {
+        const ids = new Set(atuais.map((item) => item.id));
+        return [...atuais, ...novos.filter((item) => !ids.has(item.id))];
+      });
+    } catch (erro) {
+      Alert.alert("Erro", erro instanceof Error ? erro.message : "Não foi possível carregar mais cardios.");
+    } finally {
+      buscandoMaisCardios.current = false;
+      setCarregandoMais(false);
+    }
+  }, [temMaisCardios, usuarioId]);
 
   useEffect(() => {
     void carregar(false);
@@ -209,6 +249,8 @@ export default function MeusCardios({
         contentContainerStyle={estilos.conteudo}
         keyboardShouldPersistTaps="handled"
         data={carregando ? [] : cardios}
+        onEndReached={() => void carregarMais()}
+        onEndReachedThreshold={0.4}
         keyExtractor={(cardio) => cardio.id}
         renderItem={({ item: cardio }) => (
                       <View style={estilos.item}>
@@ -390,6 +432,7 @@ export default function MeusCardios({
             </Text>
           ) : undefined
         }
+        ListFooterComponent={carregandoMais ? <ActivityIndicator accessibilityLabel="Carregando mais cardios" color={corTema} style={{ padding: 16 }} /> : undefined}
         initialNumToRender={8}
         maxToRenderPerBatch={8}
         windowSize={7}
