@@ -64,13 +64,13 @@ begin
       and ws.notes like 'Treino concluído no modo ativo;%'
       and exists (select 1 from public.workout_sets s where s.session_id = ws.id
         and s.user_id = new.user_id and s.exercise_id = v_exercise.id)
-    order by ws.started_at desc, ws.finished_at desc, ws.id desc limit 1;
+    order by ws.finished_at desc, ws.id desc limit 1;
     if v_latest is distinct from new.id then continue; end if;
 
     select * into v_previous from public.exercise_load_default_sources
       where exercise_id = v_exercise.id;
-    if found and (v_previous.session_started_at, v_previous.session_finished_at, v_previous.session_id)
-      >= (new.started_at, new.finished_at, new.id)
+    if found and (v_previous.session_finished_at, v_previous.session_id)
+      >= (new.finished_at, new.id)
     then continue; end if;
 
     select count(*), min(s.reps), max(s.reps) into v_count, v_min_reps, v_max_reps

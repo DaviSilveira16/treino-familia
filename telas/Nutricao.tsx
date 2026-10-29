@@ -322,9 +322,9 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
 }
 const estilos = StyleSheet.create({
   listaAreas: { gap: 14 },
-  cartaoArea: { backgroundColor: "#191E1B", borderRadius: 18, padding: 18, flexDirection: "row", alignItems: "center", gap: 14, borderWidth: 1, borderColor: "#303A33", minHeight: 106 },
-  iconeArea: { width: 54, height: 54, borderRadius: 16, alignItems: "center", justifyContent: "center" },
-  emojiArea: { fontSize: 27 },
+  cartaoArea: { backgroundColor: "#191E1B", borderRadius: 16, padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderColor: "#303A33", minHeight: 86 },
+  iconeArea: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  emojiArea: { fontSize: 21 },
   textoArea: { flex: 1, gap: 6 },
   tituloArea: { fontSize: 18, fontWeight: "800", color: "#F0F3F1" },
   descricaoArea: { fontSize: 13, lineHeight: 19, color: "#A9B6AD" },
