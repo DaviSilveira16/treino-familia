@@ -1,7 +1,7 @@
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-type RotaInferior = "Inicio" | "comunidade";
+type RotaInferior = "Inicio" | "comunidade" | "nutricao";
 
 type Props = {
   corTema?: string;
@@ -15,7 +15,8 @@ export default function NavegacaoInferior({
   onNavegar,
 }: Props) {
   const comunidadeAtiva = rotaAtual === "comunidade";
-  const treinosAtivo = !comunidadeAtiva;
+  const nutricaoAtiva = rotaAtual === "nutricao";
+  const treinosAtivo = !comunidadeAtiva && !nutricaoAtiva;
   const corIconeComunidade = comunidadeAtiva ? corTema : "#A3ACA5";
 
   return (
@@ -81,6 +82,24 @@ export default function NavegacaoInferior({
         <Text style={[estilos.rotulo, comunidadeAtiva && { color: corTema }]}>
           Comunidade
         </Text>
+      </TouchableOpacity>
+
+      <View style={estilos.divisor} />
+
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Abrir nutrição"
+        accessibilityState={{ selected: nutricaoAtiva }}
+        onPress={() => { if (!nutricaoAtiva) onNavegar("nutricao"); }}
+        style={estilos.item}
+        activeOpacity={0.85}
+      >
+        <View style={estilos.areaIcone}>
+          <View style={[estilos.iconeBase, nutricaoAtiva && { backgroundColor: `${corTema}1A`, borderColor: `${corTema}90` }]}>
+            <Text style={estilos.emoji}>🍎</Text>
+          </View>
+        </View>
+        <Text style={[estilos.rotulo, nutricaoAtiva && { color: corTema }]}>Nutrição</Text>
       </TouchableOpacity>
 
       <View style={estilos.divisor} />

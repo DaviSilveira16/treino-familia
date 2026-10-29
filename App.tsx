@@ -60,6 +60,7 @@ const EvolucaoTreinos = React.lazy(() => import("./telas/EvolucaoTreinos"));
 import ResumoSemanal from "./telas/ResumoSemanal";
 // Importado apenas quando o usuário abre a respectiva tela.
 const ComunidadeFamilia = React.lazy(() => import("./telas/ComunidadeFamilia"));
+const Nutricao = React.lazy(() => import("./telas/Nutricao"));
 import NavegacaoInferior from "./telas/NavegacaoInferior";
 import NavegacaoVoltarGlobal from "./telas/NavegacaoVoltarGlobal";
 import LimiteDeErro from "./telas/LimiteDeErro";
@@ -77,6 +78,7 @@ type Rotas = {
   evolucaoTreinos: undefined;
   treinoAtivo: { planId: string; planName: string };
   comunidade: undefined;
+  nutricao: undefined;
 };
 
 const Pilha = createStackNavigator<Rotas>();
@@ -229,6 +231,22 @@ function AppConteudo() {
     setSessao(novaSessao);
     setCorTema(obterCorTema(novaSessao?.user.user_metadata?.tema_cor));
   }
+
+  useEffect(() => {
+    const usuarioId = sessao?.user.id;
+    if (!usuarioId || semInternet) return;
+    let ativo = true;
+    const sincronizar = () => {
+      void import("./servicos/nutricaoRepositorio")
+        .then((modulo) => ativo ? modulo.sincronizarNutricao(usuarioId) : undefined)
+        .catch(() => { /* As pendências ficam no disco e aparecem em Nutrição. */ });
+    };
+    sincronizar();
+    const assinatura = AppState.addEventListener("change", (estado) => {
+      if (estado === "active") sincronizar();
+    });
+    return () => { ativo = false; assinatura.remove(); };
+  }, [sessao?.user.id, semInternet]);
 
   // The existing APK emits this cancelable event before its compatibility fallback.
   const tratarVoltaAndroid = useRef<() => boolean>(() => false);
@@ -1326,6 +1344,21 @@ function AppConteudo() {
             )}
           </Pilha.Screen>
 
+          <Pilha.Screen name="nutricao">
+            {({ navigation }) => (
+              <NavegacaoVoltarGlobal
+                onVoltar={voltarComSeguranca}
+                ativo={navigation.canGoBack()}
+              >
+                <Suspense fallback={<TelaCarregando cor={corTema} />}>
+                  {sessao ? <Nutricao key={sessao.user.id} usuarioId={sessao.user.id}
+                    metadados={sessao.user.user_metadata} corTema={corTema}
+                    onAbrirPerfil={() => navigation.navigate("perfil")} /> : null}
+                </Suspense>
+              </NavegacaoVoltarGlobal>
+            )}
+          </Pilha.Screen>
+
           <Pilha.Screen name="evolucaoTreinos">
             {({ navigation }) => (
               <NavegacaoVoltarGlobal
@@ -1374,7 +1407,7 @@ function AppConteudo() {
         {semInternet ? (
           <View style={estilos.avisoSemInternet} accessibilityRole="alert">
             <Text style={estilos.textoSemInternet}>
-              Sem internet · alterações do treino ficam neste aparelho até
+              Sem internet · alterações pendentes ficam neste aparelho até
               sincronizar.
             </Text>
           </View>
@@ -1385,14 +1418,14 @@ function AppConteudo() {
             rotaAtual={rotaAtual}
             onNavegar={(rota) => {
               if (!referenciaNavegacao.isReady()) return;
-              // Início e Comunidade são destinos principais, não novas telas
-              // sobrepostas: trocar de aba limpa a pilha anterior.
+              // Os destinos principais reutilizam a pilha e preservam os modais
+              // e gestos das telas internas.
               const routes =
                 rota === "Inicio"
                   ? [{ name: "Inicio" as const }]
                   : [
                       { name: "Inicio" as const },
-                      { name: "comunidade" as const },
+                      { name: rota },
                     ];
               referenciaNavegacao.dispatch(
                 CommonActions.reset({ index: routes.length - 1, routes }),

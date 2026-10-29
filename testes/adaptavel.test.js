@@ -7,7 +7,10 @@ const local = carregar("servicos/treinoLocal.ts", {
 const adaptar = carregar("servicos/treinoAdaptavel.ts", {
   "./treinoLocal": local,
 });
-const calorias = carregar("servicos/caloriasTreino.ts");
+const metabolismo = carregar("servicos/metabolismo.ts");
+const calorias = carregar("servicos/caloriasTreino.ts", {
+  "./metabolismo": metabolismo,
+});
 const perfil = { pesoKg: 80, alturaCm: 175, idade: 30, sexo: "masculino" };
 const db = {
   workout_plans: [{ id: "p1", user_id: "u1", name: "Original" }],

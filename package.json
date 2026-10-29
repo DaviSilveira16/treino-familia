@@ -39,6 +39,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.cjs",
     "test:ui": "node scripts/smoke-web.cjs",
+    "test:nutricao:ui": "node scripts/smoke-nutricao.cjs",
     "build:web": "expo export --platform web && node scripts/postbuild.cjs",
     "check": "npm run typecheck && npm run lint && npm test"
   },

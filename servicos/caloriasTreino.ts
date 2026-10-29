@@ -1,3 +1,5 @@
+import { metabolismoRepousoKcalDia } from "./metabolismo";
+
 export type IntensidadeTreino = "leve" | "moderada" | "intensa";
 export type SexoTreino = "masculino" | "feminino";
 
@@ -50,14 +52,6 @@ export type EstimativaCaloriasTreino = {
   repeticoesTotais: number;
   volumeCargaKg: number;
 };
-
-function metabolismoRepousoKcalDia(dados: DadosCalculoTreino): number {
-  const ajusteSexo = dados.sexo === "masculino" ? 5 : -161;
-  return Math.max(
-    0,
-    10 * dados.pesoKg + 6.25 * dados.alturaCm - 5 * dados.idade + ajusteSexo,
-  );
-}
 
 export function estimarCaloriasAtivasTreino(
   dados: DadosCalculoTreino,

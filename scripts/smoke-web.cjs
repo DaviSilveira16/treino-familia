@@ -1584,7 +1584,7 @@ function filtered(table, search) {
     );
     phase = "history";
     await page.getByText("Histórico", { exact: true }).click();
-    await page.getByText("Academia da viagem", { exact: true }).waitFor();
+    await page.getByText("Academia da viagem", { exact: true }).filter({ visible: true }).waitFor();
     await page.getByText(/kcal ativas estimadas/).first().waitFor();
     // A nova sessão criada da cópia pode ter o mesmo volume; a restaurada é a mais antiga.
     await page

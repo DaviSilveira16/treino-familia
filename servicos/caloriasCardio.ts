@@ -1,3 +1,5 @@
+import { metabolismoRepousoKcalDia } from "./metabolismo";
+
 export type IntensidadeCardio = "leve" | "moderada" | "intensa";
 export type SexoCardio = "masculino" | "feminino";
 export type CategoriaCardio =
@@ -114,14 +116,6 @@ function metPorEquacaoEsteira(
         3.5;
   const met = consumoOxigenio / 3.5;
   return Number.isFinite(met) && met > 1 ? met : null;
-}
-
-function metabolismoRepousoKcalDia(dados: DadosCalculoCardio): number {
-  const ajusteSexo = dados.sexo === "masculino" ? 5 : -161;
-  return Math.max(
-    0,
-    10 * dados.pesoKg + 6.25 * dados.alturaCm - 5 * dados.idade + ajusteSexo,
-  );
 }
 
 export function estimarCaloriasAtivas(
