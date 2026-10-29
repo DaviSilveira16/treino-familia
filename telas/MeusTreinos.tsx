@@ -125,7 +125,10 @@ export default function MeusTreinos({
   );
   const [carregando, setCarregando] = useState(true);
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
+  const [carregandoCargas, setCarregandoCargas] = useState(false);
   const carregandoCargasRef = useRef(false);
+  const cargasRequestIdRef = useRef(0);
+  const cargasAbortRef = useRef<AbortController | null>(null);
   const [salvando, setSalvando] = useState(false);
   const reordenandoRef = useRef(false);
   const [repetirCarga, setRepetirCarga] = useState(false);
@@ -151,6 +154,10 @@ export default function MeusTreinos({
   function selecionarTreino(treino: Treino | null) {
     rolagemSolicitadaRef.current = null;
     if (treinoSelecionado?.id !== treino?.id) {
+      cargasRequestIdRef.current += 1;
+      cargasAbortRef.current?.abort();
+      carregandoCargasRef.current = false;
+      setCarregandoCargas(false);
       setExercicios([]);
       setExercicioParaCarga(null);
     }
@@ -226,6 +233,12 @@ export default function MeusTreinos({
   }
 
   function cancelarCargas() {
+    cargasRequestIdRef.current += 1;
+    cargasAbortRef.current?.abort();
+    cargasAbortRef.current = null;
+    carregandoCargasRef.current = false;
+    setCarregandoCargas(false);
+    rolagemSolicitadaRef.current = null;
     restaurarScrollRef.current = scrollOrigemPainelRef.current;
     setExercicioParaCarga(null);
   }
@@ -312,9 +325,7 @@ export default function MeusTreinos({
       cargas: Record<string, number>;
     };
     async function carregarExercicios() {
-      const exibicao = await Promise.resolve().then(() =>
-        lerCacheParaExibicao<CacheExercicios>(usuarioId, chave),
-      );
+      const exibicao = lerCacheParaExibicao<CacheExercicios>(usuarioId, chave);
       if (!ativo || controlador.signal.aborted) return;
       if (exibicao) {
         setExercicios(exibicao.lista);
@@ -326,6 +337,7 @@ export default function MeusTreinos({
         setExercicios(anterior.lista);
         setMaioresCargas((atuais) => ({ ...atuais, ...anterior.cargas }));
         setCarregandoExercicios(false);
+        return;
       }
       if (!exibicao && !anterior) setCarregandoExercicios(true);
       let revisaoInicial = obterRevisaoDeDados();
@@ -1102,6 +1114,15 @@ export default function MeusTreinos({
       return;
     }
 
+    if (exercicioParaCarga?.id === exercicio.id) {
+      cancelarCargas();
+      return;
+    }
+
+    const pedidoId = ++cargasRequestIdRef.current;
+    cargasAbortRef.current?.abort();
+    const controlador = new AbortController();
+    cargasAbortRef.current = controlador;
     scrollOrigemPainelRef.current = scrollYAtualRef.current;
     restaurarScrollRef.current = null;
     rolagemSolicitadaRef.current = {
@@ -1111,16 +1132,27 @@ export default function MeusTreinos({
     carregandoCargasRef.current = true;
     setExercicioEditando(null);
     setExercicioParaCarga(exercicio);
+    setSeriesCarga([]);
     setRepetirCarga(false);
-    setCarregandoExercicios(true);
+    setCarregandoCargas(true);
 
+    const chaveCacheCargas = `meus-treinos-cargas:${exercicio.id}`;
     try {
+      const cargasEmCache = lerCache<SerieCarga[]>(usuarioId, chaveCacheCargas);
+      if (cargasEmCache) {
+        setSeriesCarga(cargasEmCache);
+        return;
+      }
+
       const { data: referencias, error } = await supabase
         .from("exercise_load_defaults")
         .select("set_number, reps, weight_kg")
         .eq("user_id", usuarioId)
         .eq("exercise_id", exercicio.id)
-        .order("set_number", { ascending: true });
+        .order("set_number", { ascending: true })
+        .abortSignal(controlador.signal);
+
+      if (pedidoId !== cargasRequestIdRef.current) return;
 
       if (error) {
         mostrarMensagem("Erro ao carregar cargas", error.message);
@@ -1140,13 +1172,18 @@ export default function MeusTreinos({
           carga: salva ? String(salva.weight_kg) : "",
         };
       });
+      salvarCache(usuarioId, chaveCacheCargas, series, 20000);
       setSeriesCarga(series);
     } catch {
-      mostrarMensagem("Erro", "Não foi possível carregar as cargas salvas.");
+      if (pedidoId === cargasRequestIdRef.current)
+        mostrarMensagem("Erro", "Não foi possível carregar as cargas salvas.");
     } finally {
-      carregandoCargasRef.current = false;
-      setCarregandoExercicios(false);
-      alinharDestinoSolicitado();
+      if (pedidoId === cargasRequestIdRef.current) {
+        cargasAbortRef.current = null;
+        carregandoCargasRef.current = false;
+        setCarregandoCargas(false);
+        alinharDestinoSolicitado();
+      }
     }
   }
 
@@ -1740,6 +1777,13 @@ export default function MeusTreinos({
                           onLayout={alinharDestinoSolicitado}
                           style={estilos.formularioInterno}
                         >
+                          {carregandoCargas && (
+                            <ActivityIndicator
+                              size="small"
+                              color={corTema}
+                              style={estilos.carregandoLista}
+                            />
+                          )}
                           <Text style={estilos.descricaoTreino}>
                             Cargas salvas como referência. Se não houver
                             evolução, basta consultar e fechar; altere somente
