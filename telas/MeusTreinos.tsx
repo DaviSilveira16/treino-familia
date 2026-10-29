@@ -125,6 +125,7 @@ export default function MeusTreinos({
   );
   const [carregando, setCarregando] = useState(true);
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
+  const carregandoCargasRef = useRef(false);
   const [salvando, setSalvando] = useState(false);
   const reordenandoRef = useRef(false);
   const [repetirCarga, setRepetirCarga] = useState(false);
@@ -176,6 +177,8 @@ export default function MeusTreinos({
       rolagemFrameRef.current = null;
       const pedido = rolagemSolicitadaRef.current;
       if (!pedido || treinoRenderizadoRef.current !== pedido.treinoId) return;
+      // Espere a consulta terminar para medir o cartão já com as séries carregadas.
+      if (pedido.alvo === "cargas" && carregandoCargasRef.current) return;
       const alvo = pedido.alvo === "formulario"
         ? formularioExercicioRef.current
         : pedido.alvo === "cargas"
@@ -1105,6 +1108,7 @@ export default function MeusTreinos({
       treinoId: treinoSelecionado.id,
       alvo: "cargas",
     };
+    carregandoCargasRef.current = true;
     setExercicioEditando(null);
     setExercicioParaCarga(exercicio);
     setRepetirCarga(false);
@@ -1140,7 +1144,9 @@ export default function MeusTreinos({
     } catch {
       mostrarMensagem("Erro", "Não foi possível carregar as cargas salvas.");
     } finally {
+      carregandoCargasRef.current = false;
       setCarregandoExercicios(false);
+      alinharDestinoSolicitado();
     }
   }
 
