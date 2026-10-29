@@ -48,6 +48,12 @@ type Exercicio = {
   photo_url?: string | null;
 };
 
+type CacheExercicios = {
+  lista: Exercicio[];
+  cargas: Record<string, number>;
+  completo?: boolean;
+};
+
 type SerieCarga = {
   repeticoes: string;
   carga: string;
@@ -126,6 +132,8 @@ export default function MeusTreinos({
   const [carregando, setCarregando] = useState(true);
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
   const [carregandoCargas, setCarregandoCargas] = useState(false);
+  const prefetchTreinosRef = useRef(new Set<string>());
+  const prefetchControllerRef = useRef<AbortController | null>(null);
   const carregandoCargasRef = useRef(false);
   const cargasRequestIdRef = useRef(0);
   const cargasAbortRef = useRef<AbortController | null>(null);
@@ -154,6 +162,7 @@ export default function MeusTreinos({
   function selecionarTreino(treino: Treino | null) {
     rolagemSolicitadaRef.current = null;
     if (treinoSelecionado?.id !== treino?.id) {
+      prefetchControllerRef.current?.abort();
       cargasRequestIdRef.current += 1;
       cargasAbortRef.current?.abort();
       carregandoCargasRef.current = false;
@@ -303,6 +312,65 @@ export default function MeusTreinos({
   }, [focado]);
 
   useEffect(() => {
+    if (!focado || !usuarioId || treinos.length === 0) return;
+    const planosPendentes = treinos.filter((plano) =>
+      !lerCacheParaExibicao<CacheExercicios>(
+        usuarioId,
+        `meus-treinos-exercicios:${plano.id}`,
+      ),
+    );
+    if (planosPendentes.length === 0) return;
+    const identificador = `${usuarioId}:${planosPendentes.map((plano) => plano.id).join(",")}`;
+    const prefetchTreinos = prefetchTreinosRef.current;
+    if (prefetchTreinos.has(identificador)) return;
+    prefetchTreinos.add(identificador);
+    const controlador = new AbortController();
+    prefetchControllerRef.current = controlador;
+    const revisaoPrefetch = obterRevisaoDeDados();
+
+    void medir("meusTreinos.exerciciosPrefetch", () =>
+      supabase
+        .from("exercises")
+        .select("id, plan_id, name, sets_goal, reps_goal, position, photo_path")
+        .eq("user_id", usuarioId)
+        .in("plan_id", planosPendentes.map((plano) => plano.id))
+        .order("position")
+        .abortSignal(controlador.signal),
+    ).then((resposta) => {
+      if (
+        controlador.signal.aborted ||
+        resposta.error ||
+        revisaoPrefetch !== obterRevisaoDeDados()
+      ) return;
+      const porTreino = new Map<string, Exercicio[]>();
+      for (const exercicio of (resposta.data ?? []) as Exercicio[]) {
+        const lista = porTreino.get(exercicio.plan_id) ?? [];
+        lista.push(exercicio);
+        porTreino.set(exercicio.plan_id, lista);
+      }
+      for (const plano of planosPendentes) {
+        const chaveExercicios = `meus-treinos-exercicios:${plano.id}`;
+        if (lerCacheParaExibicao<CacheExercicios>(usuarioId, chaveExercicios))
+          continue;
+        salvarCache(usuarioId, chaveExercicios, {
+          lista: porTreino.get(plano.id) ?? [],
+          cargas: {},
+          completo: false,
+        }, 20000);
+      }
+    }).catch(() => {
+      // O pré-carregamento é opcional; a consulta do treino continua disponível.
+    });
+
+    return () => {
+      controlador.abort();
+      if (prefetchControllerRef.current === controlador)
+        prefetchControllerRef.current = null;
+      prefetchTreinos.delete(identificador);
+    };
+  }, [focado, treinos, usuarioId]);
+
+  useEffect(() => {
     if (!focado) return;
     let ativo = true;
     const controlador = new AbortController();
@@ -320,10 +388,6 @@ export default function MeusTreinos({
       };
     const treinoId = treino.id;
     const chave = `meus-treinos-exercicios:${treinoId}`;
-    type CacheExercicios = {
-      lista: Exercicio[];
-      cargas: Record<string, number>;
-    };
     async function carregarExercicios() {
       const exibicao = lerCacheParaExibicao<CacheExercicios>(usuarioId, chave);
       if (!ativo || controlador.signal.aborted) return;
@@ -337,53 +401,88 @@ export default function MeusTreinos({
         setExercicios(anterior.lista);
         setMaioresCargas((atuais) => ({ ...atuais, ...anterior.cargas }));
         setCarregandoExercicios(false);
-        return;
+        if (anterior.completo !== false) return;
       }
       if (!exibicao && !anterior) setCarregandoExercicios(true);
       let revisaoInicial = obterRevisaoDeDados();
       try {
-        const { data, error } = await medir("meusTreinos.exercicios", () =>
-          supabase
-            .from("exercises")
-            .select(
-              "id, plan_id, name, sets_goal, reps_goal, position, photo_path",
-            )
-            .eq("plan_id", treinoId)
-            .eq("user_id", usuarioId)
-            .order("position")
-            .abortSignal(controlador.signal),
-        );
+        const listaPrefetch = anterior?.completo === false
+          ? anterior.lista
+          : undefined;
+        let listaBase: Exercicio[];
+        if (listaPrefetch !== undefined) {
+          listaBase = listaPrefetch;
+        } else {
+          const { data, error } = await medir("meusTreinos.exercicios", () =>
+            supabase
+              .from("exercises")
+              .select(
+                "id, plan_id, name, sets_goal, reps_goal, position, photo_path",
+              )
+              .eq("plan_id", treinoId)
+              .eq("user_id", usuarioId)
+              .order("position")
+              .abortSignal(controlador.signal),
+          );
+          if (!ativo || controlador.signal.aborted) return;
+          if (error) {
+            Alert.alert("Erro", "Não foi possível carregar os exercícios.");
+            return;
+          }
+          listaBase = (data ?? []) as Exercicio[];
+        }
         if (!ativo || controlador.signal.aborted) return;
-        if (error) {
-          Alert.alert("Erro", "Não foi possível carregar os exercícios.");
+        // A lista principal não espera fotos nem sincronização das cargas.
+        setExercicios(listaBase);
+        setCarregandoExercicios(false);
+        if (listaBase.length === 0) {
+          salvarCache(usuarioId, chave, { lista: [], cargas: {}, completo: true }, 20000);
           return;
         }
-        const listaBase = (data ?? []) as Exercicio[];
         // Reaplica as referências a partir da sessão concluída mais recente.
         // Isso também recupera sessões antigas caso a migração do gatilho ainda
         // não estivesse aplicada quando o treino foi finalizado.
-        const { data: ultimaSessao, error: erroUltimaSessao } =
-          await supabase
-            .from("workout_sessions")
-            .select("id")
-            .eq("plan_id", treinoId)
-            .eq("user_id", usuarioId)
-            .eq("status", "concluido")
-            .not("finished_at", "is", null)
-            .order("finished_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
+        const [urlsFotos, resultadoUltimaSessao] = await Promise.all([
+          medir("meusTreinos.fotos", () =>
+            obterFotosAssinadas(
+              "exercise-photos",
+              listaBase.map((e) => e.photo_path),
+              604800,
+              usuarioId,
+            ),
+          ),
+          medir("meusTreinos.ultimaSessao", () =>
+            supabase
+              .from("workout_sessions")
+              .select("id")
+              .eq("plan_id", treinoId)
+              .eq("user_id", usuarioId)
+              .eq("status", "concluido")
+              .not("finished_at", "is", null)
+              .order("finished_at", { ascending: false })
+              .limit(1)
+              .abortSignal(controlador.signal)
+              .maybeSingle(),
+          ),
+        ]);
         if (!ativo || controlador.signal.aborted) return;
+        const { data: ultimaSessao, error: erroUltimaSessao } = resultadoUltimaSessao;
+        const listaComFotos = listaBase.map((e) => ({
+          ...e,
+          photo_url: e.photo_path
+            ? (urlsFotos.get(e.photo_path) ?? null)
+            : null,
+        }));
+        setExercicios(listaComFotos);
         if (erroUltimaSessao) {
           mostrarMensagem(
             "Erro ao sincronizar cargas",
             erroUltimaSessao.message,
           );
-          return;
         }
-        if (ultimaSessao && listaBase.length > 0) {
+        if (ultimaSessao && !erroUltimaSessao) {
           const { data: seriesHistoricas, error: erroSeriesHistoricas } =
-            await supabase
+            await medir("meusTreinos.historicoCargas", () => supabase
               .from("workout_sets")
               .select("exercise_id, set_number, reps, weight_kg")
               .eq("session_id", ultimaSessao.id)
@@ -393,7 +492,8 @@ export default function MeusTreinos({
               .gt("reps", 0)
               .gte("weight_kg", 0)
               .lte("weight_kg", 2000)
-              .order("set_number", { ascending: true });
+              .order("set_number", { ascending: true })
+              .abortSignal(controlador.signal));
           if (!ativo || controlador.signal.aborted) return;
           if (erroSeriesHistoricas) {
             mostrarMensagem(
@@ -415,32 +515,48 @@ export default function MeusTreinos({
             });
             exerciciosHistoricos.set(serie.exercise_id, lista);
           }
-          for (const [exerciseId, series] of exerciciosHistoricos) {
-            const referencias = series.map((serie, indice) => ({
+          const referenciasHistoricas = [...exerciciosHistoricos].flatMap(
+            ([exerciseId, series]) => series.map((serie, indice) => ({
               user_id: usuarioId,
               exercise_id: exerciseId,
               set_number: indice + 1,
               reps: serie.reps,
               weight_kg: serie.weight_kg,
               updated_at: new Date().toISOString(),
-            }));
-            const { error: erroSalvar } = await supabase
-              .from("exercise_load_defaults")
-              .upsert(referencias, {
-                onConflict: "user_id,exercise_id,set_number",
-              });
+            })),
+          );
+          if (referenciasHistoricas.length > 0) {
+            const { error: erroSalvar } = await medir(
+              "meusTreinos.sincronizarCargas",
+              () => supabase
+                .from("exercise_load_defaults")
+                .upsert(referenciasHistoricas, {
+                  onConflict: "user_id,exercise_id,set_number",
+                })
+                .abortSignal(controlador.signal),
+            );
+            if (!ativo || controlador.signal.aborted) return;
             if (erroSalvar) {
               mostrarMensagem("Erro ao sincronizar cargas", erroSalvar.message);
               return;
             }
-            const { error: erroLimpar } = await supabase
-              .from("exercise_load_defaults")
-              .delete()
-              .eq("user_id", usuarioId)
-              .eq("exercise_id", exerciseId)
-              .gt("set_number", referencias.length);
-            if (erroLimpar) {
-              mostrarMensagem("Erro ao sincronizar cargas", erroLimpar.message);
+            const limpezas = await Promise.all(
+              [...exerciciosHistoricos].map(([exerciseId, series]) =>
+                medir("meusTreinos.limparCargas", () =>
+                  supabase
+                    .from("exercise_load_defaults")
+                    .delete()
+                    .eq("user_id", usuarioId)
+                    .eq("exercise_id", exerciseId)
+                    .gt("set_number", series.length)
+                    .abortSignal(controlador.signal),
+                ),
+              ),
+            );
+            if (!ativo || controlador.signal.aborted) return;
+            const erroLimpeza = limpezas.find((resultado) => resultado.error)?.error;
+            if (erroLimpeza) {
+              mostrarMensagem("Erro ao sincronizar cargas", erroLimpeza.message);
               return;
             }
           }
@@ -449,29 +565,16 @@ export default function MeusTreinos({
             revisaoInicial = obterRevisaoDeDados();
           }
         }
-        const [urlsFotos, resultadoReferencias] = await medir(
-          "meusTreinos.fotosECargas",
+        const resultadoReferencias = await medir(
+          "meusTreinos.cargasReferencia",
           () =>
-            Promise.all([
-              obterFotosAssinadas(
-                "exercise-photos",
-                listaBase.map((e) => e.photo_path),
-                604800,
-                usuarioId,
-              ),
-              listaBase.length > 0
-                ? supabase
-                    .from("exercise_load_defaults")
-                    .select("exercise_id, set_number, reps, weight_kg")
-                    .eq("user_id", usuarioId)
-                    .in(
-                      "exercise_id",
-                      listaBase.map((e) => e.id),
-                    )
-                    .order("set_number", { ascending: true })
-                    .abortSignal(controlador.signal)
-                : Promise.resolve({ data: [], error: null }),
-            ]),
+            supabase
+              .from("exercise_load_defaults")
+              .select("exercise_id, set_number, reps, weight_kg")
+              .eq("user_id", usuarioId)
+              .in("exercise_id", listaBase.map((e) => e.id))
+              .order("set_number", { ascending: true })
+              .abortSignal(controlador.signal),
         );
         if (!ativo || controlador.signal.aborted) return;
         const { data: referencias, error: erroReferencias } =
@@ -496,7 +599,7 @@ export default function MeusTreinos({
             ? (urlsFotos.get(e.photo_path) ?? null)
             : null,
         }));
-        salvarCache(usuarioId, chave, { lista, cargas }, 20000);
+        salvarCache(usuarioId, chave, { lista, cargas, completo: true }, 20000);
         setExercicios(lista);
         setMaioresCargas((atuais) => ({ ...atuais, ...cargas }));
       } catch {
