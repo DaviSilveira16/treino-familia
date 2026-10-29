@@ -137,11 +137,12 @@ export default function MeusTreinos({
   const restaurarScrollRef = useRef<number | null>(null);
   const rolagemSolicitadaRef = useRef<{
     treinoId: string;
-    alvo: "inicio" | "formulario";
+    alvo: "inicio" | "formulario" | "cargas";
   } | null>(null);
   const treinoRenderizadoRef = useRef<string | null>(null);
   const inicioTreinoRef = useRef<React.ComponentRef<typeof View> | null>(null);
   const formularioExercicioRef = useRef<React.ComponentRef<typeof View> | null>(null);
+  const formularioCargaRef = useRef<React.ComponentRef<typeof View> | null>(null);
   const rolagemFrameRef = useRef<number | null>(null);
   const [origemFotoAberta, setOrigemFotoAberta] = useState<Exercicio | null>(
     null,
@@ -177,7 +178,9 @@ export default function MeusTreinos({
       if (!pedido || treinoRenderizadoRef.current !== pedido.treinoId) return;
       const alvo = pedido.alvo === "formulario"
         ? formularioExercicioRef.current
-        : inicioTreinoRef.current;
+        : pedido.alvo === "cargas"
+          ? formularioCargaRef.current
+          : inicioTreinoRef.current;
       const scroll = scrollViewRef.current;
       if (!alvo || !scroll) return;
       // Ambos são medidos na janela: não soma coordenadas de pais distintos.
@@ -1098,6 +1101,10 @@ export default function MeusTreinos({
 
     scrollOrigemPainelRef.current = scrollYAtualRef.current;
     restaurarScrollRef.current = null;
+    rolagemSolicitadaRef.current = {
+      treinoId: treinoSelecionado.id,
+      alvo: "cargas",
+    };
     setExercicioEditando(null);
     setExercicioParaCarga(exercicio);
     setRepetirCarga(false);
@@ -1721,7 +1728,12 @@ export default function MeusTreinos({
                       )}
 
                       {exercicioParaCarga?.id === exercicio.id && (
-                        <View style={estilos.formularioInterno}>
+                        <View
+                          ref={formularioCargaRef}
+                          collapsable={false}
+                          onLayout={alinharDestinoSolicitado}
+                          style={estilos.formularioInterno}
+                        >
                           <Text style={estilos.descricaoTreino}>
                             Cargas salvas como referência. Se não houver
                             evolução, basta consultar e fechar; altere somente
