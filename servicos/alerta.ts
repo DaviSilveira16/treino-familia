@@ -17,7 +17,7 @@ export const Alert = {
     opcoes?: AlertOptions,
   ) {
     if (Platform.OS !== "web" || typeof window === "undefined") {
-      AlertaNativa.alert(titulo, mensagem, botoes, opcoes);
+      AlertaNativa.alert(titulo ?? "", mensagem ?? undefined, botoes, opcoes);
       return;
     }
 

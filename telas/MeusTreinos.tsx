@@ -4,6 +4,7 @@ import { useVoltarDoModal } from "../servicos/voltarModal";
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Modal,
   ScrollView,
   Text,
@@ -31,6 +32,9 @@ import {
 } from "../servicos/cacheConsultas";
 import { medir } from "../servicos/performance";
 import { criarEstilos } from "./MeusTreinos.estilos";
+import Acompanhamento from "../componentes/Acompanhamento";
+import OrientacoesTreinador from "../componentes/OrientacoesTreinador";
+import { renomearTreino } from "../servicos/acompanhamento";
 
 type Treino = {
   id: string;
@@ -111,6 +115,9 @@ export default function MeusTreinos({
     null,
   );
   const [nomeNovoTreino, setNomeNovoTreino] = useState("");
+  const [treinoRenomeando, setTreinoRenomeando] = useState<Treino | null>(null);
+  const [novoNome, setNovoNome] = useState("");
+  const renomeandoRef = useRef(false);
   const [mostrarFormularioExercicio, setMostrarFormularioExercicio] =
     useState(false);
   const [exercicios, setExercicios] = useState<Exercicio[]>([]);
@@ -130,6 +137,7 @@ export default function MeusTreinos({
     {},
   );
   const [carregando, setCarregando] = useState(true);
+  const [recarregar, setRecarregar] = useState(0);
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
   const [carregandoCargas, setCarregandoCargas] = useState(false);
   const prefetchTreinosRef = useRef(new Set<string>());
@@ -182,6 +190,7 @@ export default function MeusTreinos({
   useVoltarDoModal(Boolean(exercicioEditando), cancelarEdicao);
   useVoltarDoModal(Boolean(exercicioParaCarga), cancelarCargas);
   useVoltarDoModal(Boolean(origemFotoAberta), () => setOrigemFotoAberta(null));
+  useVoltarDoModal(Boolean(treinoRenomeando), () => { if (!renomeandoRef.current) setTreinoRenomeando(null); });
   const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView> | null>(
     null,
   );
@@ -205,7 +214,7 @@ export default function MeusTreinos({
       // Ambos são medidos na janela: não soma coordenadas de pais distintos.
       alvo.measureInWindow((_x, yAlvo, _largura, altura) => {
         if (altura <= 0 || rolagemSolicitadaRef.current !== pedido) return;
-        scroll.measureInWindow((_sx, yScroll) => {
+        scroll.getNativeScrollRef()?.measureInWindow((_sx: number, yScroll: number) => {
           if (rolagemSolicitadaRef.current !== pedido) return;
           const destino = Math.max(0, scrollYAtualRef.current + yAlvo - yScroll - 12);
           rolagemSolicitadaRef.current = null;
@@ -309,7 +318,7 @@ export default function MeusTreinos({
       ativo = false;
       controlador.abort();
     };
-  }, [focado]);
+  }, [focado, recarregar]);
 
   useEffect(() => {
     if (!focado || !usuarioId || treinos.length === 0) return;
@@ -660,6 +669,21 @@ export default function MeusTreinos({
     } finally {
       setSalvando(false);
     }
+  }
+
+  async function salvarNomeTreino() {
+    if (!treinoRenomeando || renomeandoRef.current) return;
+    renomeandoRef.current = true;
+    setSalvando(true);
+    try {
+      const atualizado = await renomearTreino(usuarioId, treinoRenomeando.id, novoNome);
+      setTreinos(atuais => atuais.map(t => t.id === atualizado.id ? atualizado : t).sort((a, b) => a.name.localeCompare(b.name)));
+      setTreinoSelecionado(atual => atual?.id === atualizado.id ? atualizado : atual);
+      setTreinoRenomeando(null);
+      mostrarMensagem("Nome atualizado", "O treino foi renomeado. Seus exercícios, cargas e registros foram mantidos.");
+    } catch (erro) {
+      mostrarMensagem("Não foi possível renomear", erro instanceof Error ? erro.message : "Confira a conexão e tente novamente.");
+    } finally { renomeandoRef.current = false; setSalvando(false); }
   }
 
   async function excluirTreino(treino: Treino) {
@@ -1444,6 +1468,13 @@ export default function MeusTreinos({
           Crie quantos treinos quiser e acompanhe suas cargas.
         </Text>
 
+        {!!usuarioId && <Acompanhamento usuarioId={usuarioId} corTema={corTema} onFechar={() => {
+          registrarMudancaDeDados(); setRecarregar(valor => valor + 1);
+        }} />}
+        <TouchableOpacity accessibilityRole="button" style={{ paddingVertical: 14 }} onPress={() => {
+          registrarMudancaDeDados(); setRecarregar(valor => valor + 1);
+        }}><Text style={estilos.textoCancelarFormulario}>Atualizar meus treinos</Text></TouchableOpacity>
+
         <View style={estilos.formulario}>
           <Text style={estilos.rotulo}>Nome do novo treino</Text>
           <TextInput
@@ -1525,6 +1556,11 @@ export default function MeusTreinos({
                     <Text style={estilos.seta}>{selecionado ? "✓" : "›"}</Text>
                   </TouchableOpacity>
                   <View style={estilos.acoesTreino}>
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Editar nome do treino ${treino.name}`}
+                      style={estilos.botaoAdicionarTreino} disabled={salvando}
+                      onPress={() => { setTreinoRenomeando(treino); setNovoNome(treino.name); }}>
+                      <Text style={estilos.textoBotaoAdicionarTreino}>Editar nome</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity
                       accessibilityRole="button"
                       accessibilityLabel={`Adicionar exercício ao treino ${treino.name}`}
@@ -1560,6 +1596,7 @@ export default function MeusTreinos({
               <Text style={estilos.tituloSecao}>
                 Exercícios — {treinoSelecionado.name}
               </Text>
+              <OrientacoesTreinador usuarioId={usuarioId} planId={treinoSelecionado.id} cor={corTema} />
               {exercicios.length > 0 &&
                 !mostrarFormularioExercicio &&
                 !exercicioEditando &&
@@ -1995,6 +2032,25 @@ export default function MeusTreinos({
           </>
         )}
       </ScrollView>
+      <Modal transparent animationType="fade" visible={Boolean(treinoRenomeando)}
+        onRequestClose={() => { if (!renomeandoRef.current) setTreinoRenomeando(null); }}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={{ flex: 1, backgroundColor: "#000D", justifyContent: "center", padding: 22 }}>
+          <View style={estilos.formulario}>
+            <Text style={estilos.tituloSecao}>Editar nome do treino</Text>
+            <TextInput accessibilityLabel="Novo nome do treino" style={estilos.input} value={novoNome}
+              onChangeText={setNovoNome} maxLength={100} autoFocus editable={!salvando}
+              onSubmitEditing={() => void salvarNomeTreino()} />
+            <TouchableOpacity accessibilityRole="button" style={estilos.botaoAdicionar} disabled={salvando}
+              onPress={() => void salvarNomeTreino()}>
+              <Text style={estilos.textoBotaoAdicionar}>{salvando ? "Salvando…" : "Salvar nome"}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" style={{ padding: 14 }} disabled={salvando} onPress={() => setTreinoRenomeando(null)}>
+              <Text style={estilos.textoCancelarFormulario}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
       <Modal
         transparent
         animationType="fade"

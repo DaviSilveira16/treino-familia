@@ -110,6 +110,7 @@ const modelos = carregar("servicos/salvarModeloTreino.ts", {
   "../supabase": mockSupabase,
 });
 const sync = carregar("servicos/treinoSincronizacao.ts", {
+  "./performance": { medir: (_operacao, executar) => executar() },
   "./tempoFinalizacao": { registrarTempoFinalizacao: async () => {} },
   "../supabase": mockSupabase,
   "./revisaoDados": { registrarMudancaDeDados() {} },

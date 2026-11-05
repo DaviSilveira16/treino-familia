@@ -2028,6 +2028,13 @@ function filtered(table, search) {
         exact: true,
       })
       .fill("40");
+    // Este cenário verifica a conclusão manual com carga, independentemente
+    // das referências alteradas pelos cenários anteriores na mesma conta.
+    for (const numero of [1, 2]) {
+      await page.getByRole("textbox", {
+        name: `Agachamento teste, série ${numero}, carga em quilos`, exact: true,
+      }).fill("20");
+    }
     await page
       .getByRole("button", {
         name: "Intensidade do treino: Moderada",

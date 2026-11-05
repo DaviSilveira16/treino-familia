@@ -78,6 +78,7 @@ function ambiente(sessao, falharDetalhes = false) {
     },
   };
   const sync = carregar("servicos/treinoSincronizacao.ts", {
+  "./performance": { medir: (_operacao, executar) => executar() },
     "./tempoFinalizacao": { registrarTempoFinalizacao: async () => {} },
     "../supabase": backend,
     "./treinoLocal": local,

@@ -68,6 +68,7 @@ function ambiente(storage = armazenamento()) {
     },
   };
   const repo = carregar("servicos/nutricaoRepositorio.ts", {
+    "./performance": { medir: (_operacao, executar) => executar() },
     "@react-native-async-storage/async-storage": storage,
     "../supabase": backend,
     "./revisaoDados": { registrarMudancaDeDados() {} },

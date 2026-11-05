@@ -18,6 +18,7 @@ import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
+import Acompanhamento from "../componentes/Acompanhamento";
 
 const estiloRolagemWeb =
   Platform.OS === "web"
@@ -1063,6 +1064,12 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
           )}
 
           <Text style={estilos.email}>{usuario.email}</Text>
+        </View>
+
+        <View style={estilos.cartao}>
+          <Text style={estilos.tituloSecao}>Acompanhamento de treinos</Text>
+          <Text style={estilos.descricaoSecao}>Receba fichas de um treinador ou monte treinos para outras pessoas. Seus treinos e registros continuam seus ao encerrar o vínculo.</Text>
+          <Acompanhamento usuarioId={usuario.id} corTema={corTema} />
         </View>
 
         <View style={estilos.cartao}>

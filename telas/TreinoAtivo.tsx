@@ -21,6 +21,7 @@ import {
 import { Alert } from "../servicos/alerta";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabase";
+import OrientacoesTreinador from "../componentes/OrientacoesTreinador";
 import {
   apagarRascunho,
   atualizarRascunho,
@@ -1674,6 +1675,7 @@ export default function TreinoAtivo({
         ) : null}
         <Text style={[estilos.marca, { color: corTema }]}>TREINO FAMÍLIA</Text>
         <Text style={estilos.titulo}>{planName}</Text>
+        <OrientacoesTreinador usuarioId={usuarioId} planId={planId} cor={corTema} />
         <Text style={estilos.subtitulo}>
           Modo de treino ativo · registre as séries que realmente concluiu.
         </Text>

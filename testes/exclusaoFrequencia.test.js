@@ -204,6 +204,7 @@ function ambiente(existe = true) {
     },
   };
   const sync = carregar("servicos/treinoSincronizacao.ts", {
+  "./performance": { medir: (_operacao, executar) => executar() },
     "./tempoFinalizacao": { registrarTempoFinalizacao: async () => {} },
     "../supabase": backend,
     "./treinoLocal": local,
