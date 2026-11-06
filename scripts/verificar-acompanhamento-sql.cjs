@@ -27,14 +27,19 @@ async function snapshot() {
 }
 (async () => {
   await db.exec(`
-    create role anon; create role authenticated;
+    create role anon; create role authenticated; create schema storage;
+    create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text);
+    alter table storage.objects enable row level security;
+    grant usage on schema storage to authenticated;
+    grant select,insert,update,delete on storage.objects to authenticated;
+
     create schema auth;
     create table auth.users(id uuid primary key, raw_user_meta_data jsonb not null default '{}');
     insert into auth.users values('${coach}','{"nome":"Treinador"}'),('${student}','{"nome":"Aluno"}'),('${stranger}','{"nome":"Terceiro"}');
     create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
     grant usage on schema auth to anon,authenticated; grant execute on function auth.uid() to anon,authenticated;
     create table workout_plans(id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users,name text not null,unique(user_id,name));
-    create table exercises(id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users,plan_id uuid references workout_plans on delete cascade,name text,sets_goal integer,reps_goal text,position integer);
+    create table exercises(id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users,plan_id uuid references workout_plans on delete cascade,name text,sets_goal integer,reps_goal text,position integer,photo_path text);
     create table workout_sessions(id uuid primary key,user_id uuid not null references auth.users,plan_id uuid references workout_plans on delete set null,started_at timestamptz not null,finished_at timestamptz,status text,notes text,duration_minutes numeric,intensity text);
     create table workout_sets(id uuid primary key,user_id uuid not null references auth.users,session_id uuid references workout_sessions on delete cascade,exercise_id uuid references exercises on delete set null,exercise_name text,set_number integer,reps integer,weight_kg numeric);
     create table exercise_load_defaults(user_id uuid references auth.users,exercise_id uuid references exercises on delete cascade,set_number integer,reps integer,weight_kg numeric,primary key(user_id,exercise_id,set_number));
@@ -43,6 +48,8 @@ async function snapshot() {
     await db.exec(`alter table ${table} enable row level security; create policy own on ${table} for all to authenticated using(user_id=auth.uid()) with check(user_id=auth.uid()); grant select,insert,update,delete on ${table} to authenticated;`);
   const migration = fs.readFileSync(path.join(__dirname, "../supabase/migrations/202611050001_acompanhamento.sql"), "utf8");
   await db.exec(migration); await db.exec(migration);
+  const editorMigration = fs.readFileSync(path.join(__dirname, "../supabase/migrations/202611060001_edicao_treinos_aluno.sql"), "utf8");
+  await db.exec(editorMigration); await db.exec(editorMigration);
   await account(null, "anon"); await assert.rejects(rpc("home"), /permission denied/);
   await account(null); await assert.rejects(rpc("home"), /Entre novamente/);
   await account(coach);
@@ -119,10 +126,14 @@ async function snapshot() {
   assert.equal((await rpc("history", { link_id: link.id, offset: 0 })).sessions.length, 20);
   assert.equal((await rpc("history", { link_id: link.id, offset: 20 })).sessions.length, 6);
   await account(null, "postgres");
+  await require("./verificar-editor-aluno.cjs")({ db, account, coach, student, stranger, link, id });
+  await account(null, "postgres");
   const preserved = await snapshot();
   await account(student); await rpc("end", { link_id: link.id }); await rpc("end", { link_id: link.id });
   await account(null, "postgres"); assert.deepEqual(await snapshot(), preserved, "separação não altera nenhum dado de treino ou observação");
   await account(coach);
+  await assert.rejects(db.query("select tf_coaching_workouts($1,'list','{}')",[link.id]), /vínculo não está ativo/);
+  assert.equal((await db.query("select * from storage.objects")).rows.length,0);
   for (const action of ["history", "plans", "drafts", "draft_save", "publish"])
     await assert.rejects(rpc(action, { link_id: link.id, id: draft.id, revision: 2, document }), /encerrado/);
   await account(student);

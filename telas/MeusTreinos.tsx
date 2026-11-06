@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useIsFocused } from "@react-navigation/native";
 import { useVoltarDoModal } from "../servicos/voltarModal";
 import {
@@ -35,6 +35,7 @@ import { criarEstilos } from "./MeusTreinos.estilos";
 import Acompanhamento from "../componentes/Acompanhamento";
 import OrientacoesTreinador from "../componentes/OrientacoesTreinador";
 import { renomearTreino } from "../servicos/acompanhamento";
+import { criarEditorTreinosAluno, type ContextoTreinosAluno, type SnapshotTreinoAluno } from "../servicos/editorTreinosAluno";
 
 type Treino = {
   id: string;
@@ -65,15 +66,24 @@ type SerieCarga = {
 
 type Props = {
   onVoltar: () => void;
-  onIniciarTreino: (treino: Treino) => void;
+  onIniciarTreino?: (treino: Treino) => void;
   corTema?: string;
+  aluno?: ContextoTreinosAluno;
+  registrarVoltar?: (fechar: (() => void) | null) => void;
 };
 
 export default function MeusTreinos({
   onVoltar,
   onIniciarTreino,
   corTema = "#0878D1",
+  aluno,
+  registrarVoltar,
 }: Props) {
+  const apiAluno = useMemo(() => aluno ? criarEditorTreinosAluno(aluno) : null, [aluno]);
+  const snapshotAluno = useRef<SnapshotTreinoAluno | null>(null);
+  const operacaoAluno = useRef(false);
+  const leituraAluno = useRef(0);
+  const [erroAluno, setErroAluno] = useState("");
   const focado = useIsFocused();
   const estilos = criarEstilos(corTema);
   function mostrarMensagem(titulo: string, mensagem: string) {
@@ -180,20 +190,87 @@ export default function MeusTreinos({
     }
     setTreinoSelecionado(treino);
   }
+  function cancelarFormularioExercicio() {
+    rolagemSolicitadaRef.current = null;
+    restaurarScrollRef.current = scrollOrigemFormularioRef.current;
+    setMostrarFormularioExercicio(false);
+  }
+
+  function cancelarEdicao() {
+    restaurarScrollRef.current = scrollOrigemPainelRef.current;
+    setExercicioEditando(null);
+  }
+
+  function cancelarCargas() {
+    cargasRequestIdRef.current += 1;
+    cargasAbortRef.current?.abort();
+    cargasAbortRef.current = null;
+    carregandoCargasRef.current = false;
+    setCarregandoCargas(false);
+    rolagemSolicitadaRef.current = null;
+    restaurarScrollRef.current = scrollOrigemPainelRef.current;
+    setExercicioParaCarga(null);
+  }
+
+  useVoltarDoModal(Boolean(aluno), onVoltar);
   useVoltarDoModal(Boolean(treinoSelecionado), () => {
     selecionarTreino(null);
     setExercicioEditando(null);
     setExercicioParaCarga(null);
     setMostrarFormularioExercicio(false);
   });
-  useVoltarDoModal(mostrarFormularioExercicio, cancelarFormularioExercicio);
-  useVoltarDoModal(Boolean(exercicioEditando), cancelarEdicao);
-  useVoltarDoModal(Boolean(exercicioParaCarga), cancelarCargas);
+  useVoltarDoModal(mostrarFormularioExercicio, () => cancelarFormularioExercicio());
+  useVoltarDoModal(Boolean(exercicioEditando), () => cancelarEdicao());
+  useVoltarDoModal(Boolean(exercicioParaCarga), () => cancelarCargas());
   useVoltarDoModal(Boolean(origemFotoAberta), () => setOrigemFotoAberta(null));
   useVoltarDoModal(Boolean(treinoRenomeando), () => { if (!renomeandoRef.current) setTreinoRenomeando(null); });
   const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView> | null>(
     null,
   );
+
+  useEffect(() => {
+    if (!registrarVoltar) return;
+    registrarVoltar(() => {
+      if (operacaoAluno.current || fotoEmEnvioRef.current) return;
+      if (treinoRenomeando) setTreinoRenomeando(null);
+      else if (origemFotoAberta) setOrigemFotoAberta(null);
+      else if (exercicioParaCarga) cancelarCargas();
+      else if (exercicioEditando) cancelarEdicao();
+      else if (mostrarFormularioExercicio) cancelarFormularioExercicio();
+      else if (treinoSelecionado) selecionarTreino(null);
+      else onVoltar();
+    });
+    return () => registrarVoltar(null);
+  });
+
+  function aplicarSnapshotAluno(snapshot: SnapshotTreinoAluno) {
+    snapshotAluno.current = snapshot;
+    setTreinos(atuais => [...atuais.filter(p => p.id !== snapshot.plan.id), snapshot.plan].sort((a, b) => a.name.localeCompare(b.name)));
+    setTreinoSelecionado(snapshot.plan);
+    setExercicios(snapshot.exercises);
+    setMaioresCargas(Object.fromEntries(snapshot.exercises.map(ex => [ex.id, Math.max(0, ...ex.loads.map(c => Number(c.weight_kg)))])));
+  }
+
+  async function alterarTreinoAluno(acao: string, dados: Record<string, unknown>, planoId?: string): Promise<boolean> {
+    if (!apiAluno || operacaoAluno.current) return false;
+    leituraAluno.current += 1;
+    operacaoAluno.current = true; setSalvando(true); setErroAluno("");
+    try {
+      let atual = snapshotAluno.current;
+      if (planoId && atual?.plan.id !== planoId) atual = await apiAluno.ler(planoId);
+      const resultado = await apiAluno.alterar(acao, { ...dados, ...(planoId ? { plan_id: planoId, version: atual?.version } : {}) });
+      if (resultado.snapshot) aplicarSnapshotAluno(resultado.snapshot);
+      else {
+        snapshotAluno.current = null;
+        setTreinos(atuais => atuais.filter(p => p.id !== resultado.plan_id));
+        selecionarTreino(null);
+      }
+      return true;
+    } catch (erro) {
+      mostrarMensagem("Não foi possível salvar", erro instanceof Error ? erro.message : "Confira a conexão e tente novamente.");
+      return false;
+    } finally { operacaoAluno.current = false; setSalvando(false); setCarregandoExercicios(false); }
+  }
 
   function alinharDestinoSolicitado() {
     if (rolagemFrameRef.current !== null)
@@ -239,30 +316,8 @@ export default function MeusTreinos({
     alinharDestinoSolicitado();
   }
 
-  function cancelarFormularioExercicio() {
-    rolagemSolicitadaRef.current = null;
-    restaurarScrollRef.current = scrollOrigemFormularioRef.current;
-    setMostrarFormularioExercicio(false);
-  }
-
-  function cancelarEdicao() {
-    restaurarScrollRef.current = scrollOrigemPainelRef.current;
-    setExercicioEditando(null);
-  }
-
-  function cancelarCargas() {
-    cargasRequestIdRef.current += 1;
-    cargasAbortRef.current?.abort();
-    cargasAbortRef.current = null;
-    carregandoCargasRef.current = false;
-    setCarregandoCargas(false);
-    rolagemSolicitadaRef.current = null;
-    restaurarScrollRef.current = scrollOrigemPainelRef.current;
-    setExercicioParaCarga(null);
-  }
-
   useEffect(() => {
-    if (!focado) return;
+    if (!focado || apiAluno) return;
     let ativo = true;
     const controlador = new AbortController();
     async function carregarTreinos() {
@@ -318,10 +373,42 @@ export default function MeusTreinos({
       ativo = false;
       controlador.abort();
     };
-  }, [focado, recarregar]);
+  }, [focado, recarregar, apiAluno]);
 
   useEffect(() => {
-    if (!focado || !usuarioId || treinos.length === 0) return;
+    if (!focado || !apiAluno || !aluno) return;
+    let ativo = true;
+    void apiAluno.listar().then(resultado => {
+      if (!ativo) return;
+      setUsuarioId(aluno.alunoId); setTreinos(resultado.plans); setErroAluno("");
+    }).catch(erro => {
+      if (ativo) { setTreinos([]); setExercicios([]); setErroAluno(erro instanceof Error ? erro.message : "Não foi possível consultar os treinos."); }
+    }).finally(() => { if (ativo) setCarregando(false); });
+    return () => { ativo = false; };
+  }, [focado, apiAluno, aluno, recarregar]);
+
+  useEffect(() => {
+    if (!focado || !apiAluno || !treinoSelecionado) return;
+    const id = treinoSelecionado.id;
+    let ativo = true;
+    const pedido = ++leituraAluno.current;
+    setCarregandoExercicios(true);
+    void apiAluno.ler(id).then(async snapshot => {
+      if (!ativo || pedido !== leituraAluno.current) return;
+      setErroAluno("");
+      snapshotAluno.current = snapshot;
+      setExercicios(snapshot.exercises);
+      setMaioresCargas(Object.fromEntries(snapshot.exercises.map(ex => [ex.id, Math.max(0, ...ex.loads.map(c => Number(c.weight_kg)))])));
+      const fotos = await obterFotosAssinadas("exercise-photos", snapshot.exercises.map(ex => ex.photo_path), 60, aluno?.usuarioId ?? "");
+      if (ativo && pedido === leituraAluno.current) setExercicios(snapshot.exercises.map(ex => ({ ...ex, photo_url: ex.photo_path ? fotos.get(ex.photo_path) : null })));
+    }).catch(erro => {
+      if (ativo && pedido === leituraAluno.current) { setExercicios([]); snapshotAluno.current = null; setErroAluno(erro instanceof Error ? erro.message : "Não foi possível abrir o treino."); }
+    }).finally(() => { if (ativo && pedido === leituraAluno.current) setCarregandoExercicios(false); });
+    return () => { ativo = false; };
+  }, [focado, apiAluno, treinoSelecionado, recarregar, aluno?.usuarioId]);
+
+  useEffect(() => {
+    if (!focado || apiAluno || !usuarioId || treinos.length === 0) return;
     const planosPendentes = treinos.filter((plano) =>
       !lerCacheParaExibicao<CacheExercicios>(
         usuarioId,
@@ -377,10 +464,10 @@ export default function MeusTreinos({
         prefetchControllerRef.current = null;
       prefetchTreinos.delete(identificador);
     };
-  }, [focado, treinos, usuarioId]);
+  }, [focado, treinos, usuarioId, apiAluno]);
 
   useEffect(() => {
-    if (!focado) return;
+    if (!focado || apiAluno) return;
     let ativo = true;
     const controlador = new AbortController();
     const treino = treinoSelecionado;
@@ -448,10 +535,9 @@ export default function MeusTreinos({
           salvarCache(usuarioId, chave, { lista: [], cargas: {}, completo: true }, 20000);
           return;
         }
-        // Reaplica as referências a partir da sessão concluída mais recente.
-        // Isso também recupera sessões antigas caso a migração do gatilho ainda
-        // não estivesse aplicada quando o treino foi finalizado.
-        const [urlsFotos, resultadoUltimaSessao] = await Promise.all([
+        // Recupera referências ausentes sem substituir uma edição posterior
+        // feita pelo aluno ou por seu treinador.
+        const [urlsFotos, resultadoUltimaSessao, referenciasExistentes] = await Promise.all([
           medir("meusTreinos.fotos", () =>
             obterFotosAssinadas(
               "exercise-photos",
@@ -473,8 +559,12 @@ export default function MeusTreinos({
               .abortSignal(controlador.signal)
               .maybeSingle(),
           ),
+          supabase.from("exercise_load_defaults").select("exercise_id").eq("user_id", usuarioId)
+            .in("exercise_id", listaBase.map(e => e.id)).abortSignal(controlador.signal),
         ]);
         if (!ativo || controlador.signal.aborted) return;
+        if (referenciasExistentes.error) throw referenciasExistentes.error;
+        const comReferencia = new Set((referenciasExistentes.data ?? []).map(c => c.exercise_id));
         const { data: ultimaSessao, error: erroUltimaSessao } = resultadoUltimaSessao;
         const listaComFotos = listaBase.map((e) => ({
           ...e,
@@ -516,7 +606,7 @@ export default function MeusTreinos({
             { reps: number; weight_kg: number }[]
           >();
           for (const serie of seriesHistoricas ?? []) {
-            if (!serie.exercise_id) continue;
+            if (!serie.exercise_id || comReferencia.has(serie.exercise_id)) continue;
             const lista = exerciciosHistoricos.get(serie.exercise_id) ?? [];
             lista.push({
               reps: Number(serie.reps),
@@ -540,6 +630,7 @@ export default function MeusTreinos({
               () => supabase
                 .from("exercise_load_defaults")
                 .upsert(referenciasHistoricas, {
+                  ignoreDuplicates: true,
                   onConflict: "user_id,exercise_id,set_number",
                 })
                 .abortSignal(controlador.signal),
@@ -549,25 +640,7 @@ export default function MeusTreinos({
               mostrarMensagem("Erro ao sincronizar cargas", erroSalvar.message);
               return;
             }
-            const limpezas = await Promise.all(
-              [...exerciciosHistoricos].map(([exerciseId, series]) =>
-                medir("meusTreinos.limparCargas", () =>
-                  supabase
-                    .from("exercise_load_defaults")
-                    .delete()
-                    .eq("user_id", usuarioId)
-                    .eq("exercise_id", exerciseId)
-                    .gt("set_number", series.length)
-                    .abortSignal(controlador.signal),
-                ),
-              ),
-            );
-            if (!ativo || controlador.signal.aborted) return;
-            const erroLimpeza = limpezas.find((resultado) => resultado.error)?.error;
-            if (erroLimpeza) {
-              mostrarMensagem("Erro ao sincronizar cargas", erroLimpeza.message);
-              return;
-            }
+
           }
           if (exerciciosHistoricos.size > 0) {
             registrarMudancaDeDados();
@@ -623,7 +696,7 @@ export default function MeusTreinos({
       ativo = false;
       controlador.abort();
     };
-  }, [focado, treinoSelecionado, usuarioId]);
+  }, [focado, treinoSelecionado, usuarioId, apiAluno, recarregar]);
 
   async function criarTreino() {
     const nome = nomeNovoTreino.trim();
@@ -636,6 +709,10 @@ export default function MeusTreinos({
       return;
     }
 
+    if (apiAluno) {
+      if (await alterarTreinoAluno("create_plan", { name: nome })) { setNomeNovoTreino(""); setMostrarFormularioExercicio(false); }
+      return;
+    }
     setSalvando(true);
     try {
       const { data, error } = await supabase
@@ -673,6 +750,10 @@ export default function MeusTreinos({
 
   async function salvarNomeTreino() {
     if (!treinoRenomeando || renomeandoRef.current) return;
+    if (apiAluno) {
+      if (await alterarTreinoAluno("rename_plan", { name: novoNome.trim() }, treinoRenomeando.id)) setTreinoRenomeando(null);
+      return;
+    }
     renomeandoRef.current = true;
     setSalvando(true);
     try {
@@ -694,6 +775,12 @@ export default function MeusTreinos({
 
     if (!confirmado) return;
 
+    if (apiAluno) {
+      if (await alterarTreinoAluno("delete_plan", {}, treino.id)) {
+        setMostrarFormularioExercicio(false); setExercicioEditando(null); setExercicioParaCarga(null);
+      }
+      return;
+    }
     setSalvando(true);
 
     try {
@@ -819,6 +906,12 @@ export default function MeusTreinos({
       return;
     }
 
+    if (apiAluno) {
+      if (await alterarTreinoAluno("create_exercise", { name: nome, sets_goal: series, reps_goal: reps }, treinoSelecionado.id)) {
+        setNomeExercicio(""); setQuantidadeSeries("3"); setRepeticoes("8-12");
+      }
+      return;
+    }
     setSalvando(true);
     try {
       const { data, error } = await supabase
@@ -874,6 +967,10 @@ export default function MeusTreinos({
     [ordem[indice], ordem[destino]] = [ordem[destino], ordem[indice]];
     const movido = exercicios[indice];
     const vizinho = exercicios[destino];
+    if (apiAluno) {
+      await alterarTreinoAluno("move_exercise", { exercise_id: movido.id, other_id: vizinho.id }, treino.id);
+      return;
+    }
     const posicaoMovido = movido.position;
     const posicaoVizinho = vizinho.position;
     const definirPosicao = async (exercicio: Exercicio, position: number) => {
@@ -994,6 +1091,10 @@ export default function MeusTreinos({
       return;
     }
 
+    if (apiAluno) {
+      if (await alterarTreinoAluno("update_exercise", { exercise_id: exercicioEditando.id, name: nome, sets_goal: series, reps_goal: reps }, exercicioEditando.plan_id)) cancelarEdicao();
+      return;
+    }
     setSalvando(true);
     try {
       const { data, error } = await supabase
@@ -1035,6 +1136,13 @@ export default function MeusTreinos({
 
     if (!confirmado) return;
 
+    if (apiAluno) {
+      if (await alterarTreinoAluno("delete_exercise", { exercise_id: exercicio.id }, exercicio.plan_id)) {
+        if (exercicioEditando?.id === exercicio.id) setExercicioEditando(null);
+        if (exercicioParaCarga?.id === exercicio.id) setExercicioParaCarga(null);
+      }
+      return;
+    }
     try {
       const { error: erroPreservarHistorico } = await supabase
         .from("workout_sets")
@@ -1159,6 +1267,8 @@ export default function MeusTreinos({
       const imagem = fotoCapturada ?? resultado!.assets[0];
       const { arquivoImagem, contentType, extensao } =
         await prepararFotoExercicio(imagem);
+      // Executado no evento de envio da foto, após o seletor, nunca no render.
+      // eslint-disable-next-line react-hooks/purity
       const novoCaminho = `${usuarioId}/${exercicio.id}/${Date.now()}.${extensao}`;
       const { error: erroUpload } = await supabase.storage
         .from("exercise-photos")
@@ -1173,6 +1283,11 @@ export default function MeusTreinos({
         return;
       }
 
+      if (apiAluno) {
+        if (await alterarTreinoAluno("set_photo", { exercise_id: exercicio.id, photo_path: novoCaminho }, exercicio.plan_id))
+          mostrarMensagem("Foto salva", "A foto do exercício foi atualizada.");
+        return;
+      }
       const { error: erroAtualizarExercicio } = await supabase
         .from("exercises")
         .update({ photo_path: novoCaminho })
@@ -1265,6 +1380,18 @@ export default function MeusTreinos({
 
     const chaveCacheCargas = `meus-treinos-cargas:${exercicio.id}`;
     try {
+      if (apiAluno) {
+        const snapshot = await apiAluno.ler(exercicio.plan_id);
+        if (pedidoId !== cargasRequestIdRef.current) return;
+        snapshotAluno.current = snapshot;
+        const atual = snapshot.exercises.find(e => e.id === exercicio.id);
+        if (!atual) throw new Error("Exercício não encontrado.");
+        setSeriesCarga(Array.from({ length: Math.max(atual.sets_goal, atual.loads.length, 1) }, (_, indice) => {
+          const salva = atual.loads.find(c => c.set_number === indice + 1);
+          return { repeticoes: salva ? String(salva.reps) : atual.reps_goal.match(/\d+/)?.[0] ?? "8", carga: salva ? String(salva.weight_kg) : "" };
+        }));
+        return;
+      }
       const cargasEmCache = lerCache<SerieCarga[]>(usuarioId, chaveCacheCargas);
       if (cargasEmCache) {
         setSeriesCarga(cargasEmCache);
@@ -1365,6 +1492,12 @@ export default function MeusTreinos({
       return;
     }
 
+    if (apiAluno) {
+      if (await alterarTreinoAluno("save_loads", { exercise_id: exercicioParaCarga.id, loads: seriesValidadas }, treinoSelecionado.id)) {
+        cancelarCargas(); mostrarMensagem("Cargas salvas", "As cargas de referência foram atualizadas. O histórico realizado foi mantido.");
+      }
+      return;
+    }
     setSalvando(true);
     try {
       const registrosReferencia = seriesValidadas.map((serie, indice) => ({
@@ -1458,23 +1591,24 @@ export default function MeusTreinos({
           );
         }}
       >
-        <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar}>
+        <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar} disabled={salvando || Boolean(fotoCarregandoId)}>
           <Text style={estilos.textoVoltar}>‹ Voltar</Text>
         </TouchableOpacity>
 
         <Text style={estilos.marca}>TREINO FAMÍLIA</Text>
-        <Text style={estilos.titulo}>Meus treinos</Text>
+        <Text style={estilos.titulo}>{aluno ? `Treinos de ${aluno.nomeAluno}` : "Meus treinos"}</Text>
         <Text style={estilos.subtitulo}>
           Crie quantos treinos quiser e acompanhe suas cargas.
         </Text>
 
-        {!!usuarioId && <Acompanhamento usuarioId={usuarioId} corTema={corTema} onFechar={() => {
+        {!!usuarioId && !aluno && <Acompanhamento usuarioId={usuarioId} corTema={corTema} onFechar={() => {
           registrarMudancaDeDados(); setRecarregar(valor => valor + 1);
         }} />}
         <TouchableOpacity accessibilityRole="button" style={{ paddingVertical: 14 }} onPress={() => {
           registrarMudancaDeDados(); setRecarregar(valor => valor + 1);
         }}><Text style={estilos.textoCancelarFormulario}>Atualizar meus treinos</Text></TouchableOpacity>
 
+        {!!erroAluno && <Text accessibilityRole="alert" style={estilos.textoSecundario}>{erroAluno}</Text>}
         <View style={estilos.formulario}>
           <Text style={estilos.rotulo}>Nome do novo treino</Text>
           <TextInput
@@ -1596,8 +1730,8 @@ export default function MeusTreinos({
               <Text style={estilos.tituloSecao}>
                 Exercícios — {treinoSelecionado.name}
               </Text>
-              <OrientacoesTreinador usuarioId={usuarioId} planId={treinoSelecionado.id} cor={corTema} />
-              {exercicios.length > 0 &&
+              {!aluno && <OrientacoesTreinador usuarioId={usuarioId} planId={treinoSelecionado.id} cor={corTema} />}
+              {exercicios.length > 0 && onIniciarTreino && !aluno &&
                 !mostrarFormularioExercicio &&
                 !exercicioEditando &&
                 !exercicioParaCarga && (
@@ -1611,7 +1745,7 @@ export default function MeusTreinos({
                       marginTop: 10,
                       marginBottom: 8,
                     }}
-                    onPress={() => onIniciarTreino(treinoSelecionado)}
+                    onPress={() => onIniciarTreino?.(treinoSelecionado)}
                     activeOpacity={0.85}
                   >
                     <Text
@@ -1855,6 +1989,7 @@ export default function MeusTreinos({
                           <TextInput
                             style={estilos.input}
                             value={nomeEdicao}
+                            accessibilityLabel="Editar nome do exercício"
                             onChangeText={setNomeEdicao}
                             placeholder="Nome do exercício"
                             placeholderTextColor="#828A85"
@@ -1865,6 +2000,7 @@ export default function MeusTreinos({
                               <TextInput
                                 style={estilos.input}
                                 value={seriesEdicao}
+                                accessibilityLabel="Editar quantidade de séries"
                                 onChangeText={setSeriesEdicao}
                                 keyboardType="number-pad"
                               />
@@ -1874,6 +2010,7 @@ export default function MeusTreinos({
                               <TextInput
                                 style={estilos.input}
                                 value={repeticoesEdicao}
+                                accessibilityLabel="Editar repetições"
                                 onChangeText={setRepeticoesEdicao}
                               />
                             </View>
@@ -1972,6 +2109,7 @@ export default function MeusTreinos({
                                 <TextInput
                                   style={estilos.input}
                                   value={serie.repeticoes}
+                                  accessibilityLabel={`Repetições da série ${serieIndice + 1}`}
                                   onChangeText={(valor) =>
                                     atualizarSerieCarga(
                                       serieIndice,
@@ -1989,6 +2127,7 @@ export default function MeusTreinos({
                                 <TextInput
                                   style={estilos.input}
                                   value={serie.carga}
+                                  accessibilityLabel={`Carga da série ${serieIndice + 1}`}
                                   onChangeText={(valor) =>
                                     atualizarSerieCarga(
                                       serieIndice,

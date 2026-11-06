@@ -4,6 +4,8 @@
 
 Execute `supabase/migrations/202611050001_acompanhamento.sql` no SQL Editor do mesmo projeto Supabase usado pelo aplicativo e publique a versão atualizada do app/site. A migração é transacional e reaplicável. Ela depende das tabelas de treinos já existentes; não substitui suas políticas de acesso nem altera registros antigos.
 
+Em seguida, execute `supabase/migrations/202611060001_edicao_treinos_aluno.sql` para habilitar a edição direta e as fotos dos exercícios. Se a primeira migração já foi aplicada, basta esta segunda. Ela depende também do bucket privado `exercise-photos` e da coluna `exercises.photo_path`, já usados pelo editor normal.
+
 Os testes usam um PostgreSQL isolado com tabelas representativas do aplicativo. Não aplicam a migração ao projeto remoto. O ambiente desta implementação não tem uma conexão administrativa com esse projeto.
 
 A edição do nome de um treino usa a permissão de atualização do proprietário já existente e funciona independentemente da migração de acompanhamento.
@@ -14,8 +16,8 @@ A edição do nome de um treino usa a permissão de atualização do proprietár
 2. Em **Pessoas que acompanho**, gere um convite e compartilhe o código. Cada código tem validade de sete dias, permite um aceite e pode ser cancelado.
 3. O aluno cola o código em **Meu treinador**, confere o nome de quem convidou e aceita explicitamente o compartilhamento.
 4. O treinador atualiza a lista e abre **Acompanhar [nome]**. A área da pessoa mostra seu nome e os blocos **Treinos**, **Histórico** e **Frequência**, no padrão da tela inicial do aplicativo. Cada bloco abre sua própria área; Voltar retorna aos blocos antes de sair do acompanhamento.
-5. Dentro de **Treinos**, use **Criar ficha**, copie um dos seus próprios treinos ou use um treino atual do aluno como base. Defina nome, exercícios, séries, faixa de repetições, carga, descanso e orientações. A cópia usa a primeira carga de referência por exercício: revise os valores antes de entregar.
-6. **Salvar rascunho** guarda a ficha sem entregá-la. **Disponibilizar treino ao aluno** cria uma cópia em Meus treinos do aluno. Depois de editar, salve e disponibilize a nova revisão.
+5. **Treinos** abre o próprio componente de **Meus treinos**, identificado com o nome do aluno: criar/remover treinos, renomear, adicionar/editar/remover exercícios, mudar a ordem, definir cargas por série e escolher fotos. Os formulários e cartões são os mesmos, sem o botão de iniciar cronômetro. As alterações são salvas diretamente nos treinos do aluno.
+6. Para preparar uma entrega separada, use **Fichas em rascunho** na área do aluno. É possível copiar modelos próprios ou usar um treino do aluno como base. **Salvar rascunho** guarda a ficha sem entregá-la; **Disponibilizar treino ao aluno** cria uma nova cópia versionada. A cópia usa a primeira carga por exercício: revise antes de entregar.
 7. O aluno usa o registro e cronômetro habituais. As orientações originais ficam disponíveis no treino e na sessão ativa, com uma cópia local para leitura sem conexão depois da primeira consulta.
 8. Em **Minhas observações de treino**, o aluno pode comentar uma sessão concluída. As observações também podem ser editadas na área de acompanhamento com seu treinador. O treinador vê esses comentários, as séries realizadas e a contagem de treinos dos últimos 30 dias.
 9. **Editar nome** em cada cartão de Meus treinos permite renomear uma ficha própria ou recebida sem recriar o plano nem perder exercícios, cargas ou sessões. **Atualizar meus treinos** consulta novas entregas; fechar o painel de acompanhamento também atualiza a lista.
@@ -42,13 +44,18 @@ A prescrição original fica em um snapshot independente das cargas reais e das 
 
 ## Permissões e confiabilidade
 
-- O aceite compartilha treinos cadastrados, histórico de musculação, frequência, séries, cargas e observações. Nutrição, medidas, fotos, e-mail e credenciais não são expostos pelo módulo.
+- O aceite compartilha treinos cadastrados, histórico de musculação, frequência, séries, cargas e observações. Nutrição, medidas, e-mail e credenciais não são expostos pelo módulo.
+- A edição direta inclui as fotos dos exercícios; fotos de perfil e medidas continuam privadas. O texto do convite informa os controles de criação, edição e remoção.
 - O código de convite é gerado aleatoriamente pelo PostgreSQL e separado do identificador de reenvio enviado pelo aplicativo.
 - Tabelas `coaching_*` têm RLS e nenhum acesso direto concedido a `anon`/`authenticated`. As operações passam pela RPC `tf_coaching`, que verifica `auth.uid()`, participantes, vínculo ativo e propriedade em cada ação.
 - O treinador não recebe permissão direta de escrita nas tabelas privadas do aluno e não pode registrar séries/conclusões em seu lugar. A publicação cria uma nova cópia exclusivamente para o aluno daquele vínculo.
 - Encerramento e operações protegidas usam o mesmo bloqueio de linha. Novas requisições do treinador são recusadas após a confirmação da revogação. Uma leitura já concluída não pode ser desfeita; a interface revalida o vínculo a cada 30 segundos e ao voltar ao aplicativo, e oculta o histórico se a consulta falhar.
 - Salvamentos verificam a revisão esperada para evitar sobrescrever edições concorrentes. Reenvio idêntico após resposta perdida é reconhecido. A publicação grava plano, exercícios, cargas e recibo na mesma transação; uma falha reverte tudo.
-- Histórico e consulta de planos usam páginas de 20. Não há upload de foto, chat, cobrança ou prescrição automática neste módulo.
+- A RPC `tf_coaching_workouts` deriva o aluno pelo vínculo, verifica a conta em cada chamada e mantém as tabelas de treinos protegidas por suas políticas atuais. O editor compartilhado não troca a sessão autenticada nem persiste dados privados do aluno no cache do treinador.
+- Edições diretas conferem a versão completa do treino e bloqueiam alterações quando há uma sessão em andamento. Recibos e snapshots anteriores ficam em `coaching_workout_edits`, sem acesso direto pelos clientes. Exclusões explícitas preservam nomes, cargas e séries já realizadas; encerrar o vínculo não exclui nada.
+- Fotos usam políticas restritas ao bucket `exercise-photos` e ao caminho do exercício do aluno vinculado. O treinador pode enviar e consultar, mas não apagar arquivos. URLs assinadas para o treinador duram 60 segundos; uma URL já emitida pode permanecer válida até expirar após o encerramento.
+- Ao abrir Meus treinos, referências já existentes são preservadas; recuperar cargas do histórico só preenche exercícios sem referência. Assim, abrir a tela não desfaz ajustes do treinador.
+- Histórico e consulta de modelos usam páginas de 20; o editor carrega a lista de planos como Meus treinos. Não há chat, cobrança ou prescrição automática.
 
 ## Verificação local
 
@@ -68,12 +75,12 @@ Remove-Item Env:SMOKE_BROWSER
 
 O teste de interface intercepta todas as requisições externas e usa duas contas fictícias com PostgreSQL isolado. Cobre consentimento, edição, publicação, versões, consulta dos treinos do aluno, orientações, renomeação persistente, séries realizadas, observações e separação com dados preservados. As capturas ficam em `.test-results/acompanhamento-*`. Os testes de navegador não substituem a validação em aparelhos físicos.
 
-## Resultado desta implementação
+## Validação
 
-- `npm run check`: TypeScript aprovado, lint sem erros (42 avisos existentes) e 23 arquivos de testes aprovados após a reorganização da área do aluno.
+- `npm run check`: TypeScript, lint e testes de serviços, incluindo isolamento de conta e reenvio do editor do aluno.
 - `npm run build:web`: aprovado.
 - PostgreSQL isolado: migração reaplicável, convites, aceite, isolamento entre contas, validação, publicação atômica, reenvios, revisões, paginação e preservação após separação aprovados.
-- Fluxo completo de acompanhamento em Chrome e WebKit com viewport móvel: aprovado, incluindo os três blocos, retorno à área do aluno e calendário com mais de 20 sessões no mesmo mês.
+- Fluxo de acompanhamento em viewport móvel: os três blocos, editor compartilhado sem cronômetro, alterações persistidas na conta do aluno, histórico preservado e calendário com mais de 20 sessões no mesmo mês.
 - Regressão geral `npm run test:ui` em Chrome: aprovada. A preparação do registro manual agora informa explicitamente as cargas das séries iniciais, sem depender de referências alteradas por cenários anteriores.
 - Corrigidas as incompatibilidades de tipo do alerta nativo e da medição do ScrollView; os testes anteriores receberam a simulação explícita da instrumentação de desempenho já usada pelos serviços.
 - Nenhuma publicação, migração remota ou teste em aparelho físico foi executado.

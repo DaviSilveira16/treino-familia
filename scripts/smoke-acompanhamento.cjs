@@ -13,6 +13,8 @@ const storageKey = `sb-${backend.hostname.split(".")[0]}-auth-token`;
 const output = path.join(root, ".test-results", `acompanhamento-${process.env.SMOKE_BROWSER || "chromium"}`);
 fs.mkdirSync(output, { recursive: true });
 const errors = [];
+const editorCalls = [];
+const photoBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
 const server = http.createServer((req, res) => {
   const dist = path.join(root, "dist");
   let target = path.resolve(dist, `.${new URL(req.url, "http://localhost").pathname}`);
@@ -31,7 +33,12 @@ async function queryAs(userId, fn) {
 let browser, pages = [];
 (async () => {
   await db.exec(`
-    create role anon; create role authenticated; create schema auth;
+    create role anon; create role authenticated; create schema storage;
+    create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text,name text);
+    alter table storage.objects enable row level security;
+    grant usage on schema storage to authenticated;
+    grant select,insert,update,delete on storage.objects to authenticated;
+     create schema auth;
     create table auth.users(id uuid primary key,raw_user_meta_data jsonb);
     create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
     grant usage on schema auth to authenticated; grant execute on function auth.uid() to authenticated;
@@ -45,6 +52,7 @@ let browser, pages = [];
   const tables = ["workout_plans", "exercises", "exercise_load_defaults", "workout_sessions", "workout_sets"];
   for (const table of tables) await db.exec(`alter table ${table} enable row level security; create policy own on ${table} for all to authenticated using(user_id=auth.uid()) with check(user_id=auth.uid()); grant select,update,insert,delete on ${table} to authenticated;`);
   await db.exec(fs.readFileSync(path.join(root, "supabase/migrations/202611050001_acompanhamento.sql"), "utf8"));
+  await db.exec(fs.readFileSync(path.join(root, "supabase/migrations/202611060001_edicao_treinos_aluno.sql"), "utf8"));
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const engine = process.env.SMOKE_BROWSER === "webkit" ? webkit : chromium;
@@ -60,9 +68,28 @@ let browser, pages = [];
       if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
       if (url.pathname.startsWith("/auth/v1/")) return send(user);
       try {
+        if (url.pathname.startsWith("/storage/v1/object/sign/exercise-photos")) {
+          if (req.method() === "GET") return route.fulfill({ body: photoBytes, headers: { ...headers, "content-type": "image/png" } });
+          const body = req.postDataJSON();
+          const paths = body.paths || [decodeURIComponent(url.pathname.split("/exercise-photos/")[1])];
+          const allowed = await queryAs(user.id, async tx => (await tx.query("select name from storage.objects where bucket_id='exercise-photos' and name=any($1)",[paths])).rows);
+          assert.equal(allowed.length,paths.length);
+          const results = paths.map(p => ({ path: p, signedURL: `/object/sign/exercise-photos/${p}?token=fixture` }));
+          return send(body.paths ? results : results[0]);
+        }
+        if (url.pathname.startsWith("/storage/v1/object/exercise-photos/") && req.method() === "POST") {
+          const name = decodeURIComponent(url.pathname.split("/exercise-photos/")[1]);
+          await queryAs(user.id, tx => tx.query("insert into storage.objects(bucket_id,name) values('exercise-photos',$1)",[name]));
+          return send({ Key: `exercise-photos/${name}` });
+        }
         if (url.pathname.endsWith("/rpc/tf_coaching")) {
           const { p_action, p_data } = req.postDataJSON();
           return send(await queryAs(user.id, async tx => (await tx.query("select tf_coaching($1,$2::jsonb) as result", [p_action, JSON.stringify(p_data)])).rows[0].result));
+        }
+        if (url.pathname.endsWith("/rpc/tf_coaching_workouts")) {
+          const { p_link_id, p_action, p_data } = req.postDataJSON();
+          editorCalls.push({ user: user.id, action: p_action, data: p_data });
+          return send(await queryAs(user.id, async tx => (await tx.query("select tf_coaching_workouts($1,$2,$3::jsonb) as result", [p_link_id,p_action,JSON.stringify(p_data)])).rows[0].result));
         }
         if (url.pathname.includes("/rpc/")) return send(url.pathname.endsWith("tf_resumo_semanal") ? { treinos: 0, cardios: 0, minutos: 0, calorias: 0, caloriasDisponiveis: 0 } : []);
         const table = url.pathname.split("/").pop();
@@ -118,7 +145,7 @@ let browser, pages = [];
   await button(coach, "Abrir Frequência do aluno").waitFor();
   assert.equal(await button(coach, "Criar ficha").count(), 0, "painel inicial não mistura formulários com os blocos");
   await coach.screenshot({ path: path.join(output, "area-aluno-blocos.png"), fullPage: true });
-  await button(coach, "Abrir Treinos do aluno").click();
+  await button(coach, "Fichas em rascunho").click();
   await button(coach, "Criar ficha").click();
   await coach.getByLabel("Nome da ficha", { exact: true }).fill("Treino orientado");
   await coach.getByLabel("Orientações gerais", { exact: true }).fill("Mantenha a execução confortável.");
@@ -149,7 +176,8 @@ let browser, pages = [];
   assert.equal((await db.query("select count(*)::int as n from exercises where plan_id=$1", [planId])).rows[0].n, 1);
   // Simula uma sessão já realizada pelo aluno, para acompanhar séries e feedback.
   await db.query("insert into workout_sessions(id,user_id,plan_id,started_at,finished_at,status,duration_minutes) values($1,$2,$3,now(),now(),'concluido',40)", [uid(30), users[1].id, planId]);
-  await db.query("insert into workout_sets(id,user_id,session_id,exercise_name,set_number,reps,weight_kg) values($1,$2,$3,'Supino',1,12,15)", [uid(31), users[1].id, uid(30)]);
+  const originalExercise = (await db.query("select id from exercises where plan_id=$1",[planId])).rows[0].id;
+  await db.query("insert into workout_sets(id,user_id,session_id,exercise_id,exercise_name,set_number,reps,weight_kg) values($1,$2,$3,$4,'Supino',1,12,15)", [uid(31), users[1].id, uid(30),originalExercise]);
   await button(student, "Meu treinador e pessoas que acompanho").click();
   await button(student, "Minhas observações de treino").click();
   await button(student, "Anotar sobre Meu treino escolhido").click();
@@ -161,6 +189,60 @@ let browser, pages = [];
   await button(coach, "Ver exercícios de Meu treino escolhido").click();
   await coach.getByText("Série 1: 8 reps × 12,5 kg", { exact: true }).waitFor();
   await button(coach, "‹ Voltar").last().click();
+  // O mesmo componente de MeusTreinos, gravando na conta do aluno pela RPC.
+  await button(coach, "Abrir Treinos do aluno").click();
+  await coach.getByText("Treinos de Aluno teste", { exact: true }).waitFor();
+  await coach.getByPlaceholder("Ex.: Peito e tríceps, Treino E...").last().fill("Temporário");
+  await coach.getByText("+ Criar treino", { exact: true }).last().click();
+  await button(coach, "Adicionar exercício ao treino Temporário").click();
+  await coach.getByPlaceholder("Ex.: Supino reto").fill("Remada");
+  await coach.getByTestId("formulario-adicionar-exercicio").getByText("+ Adicionar exercício", { exact: true }).click();
+  await coach.getByText("1.Remada", { exact: true }).waitFor();
+  await coach.getByPlaceholder("Ex.: Supino reto").fill("Puxada");
+  await coach.getByTestId("formulario-adicionar-exercicio").getByText("+ Adicionar exercício", { exact: true }).click();
+  await coach.getByText("2.Puxada", { exact: true }).waitFor();
+  await button(coach, "Mover Puxada para cima").click();
+  await coach.getByText("1.Puxada", { exact: true }).waitFor();
+  await coach.getByText("Editar", { exact: true }).first().click();
+  await button(coach, "Excluir exercício").click();
+  await coach.getByText("1.Remada", { exact: true }).waitFor();
+  const temporaryCard = button(coach, "Abrir treino Temporário").locator("..");
+  await temporaryCard.getByText("Remover", { exact: true }).click();
+  await button(coach, "Abrir treino Temporário").waitFor({ state: "hidden" });
+  await button(coach, "Abrir treino Meu treino escolhido").click();
+  await coach.getByText("1.Supino", { exact: true }).waitFor();
+  assert.equal(await coach.getByText("▶ Iniciar treino com cronômetro", { exact: true }).count(), 0);
+  await coach.getByText("Editar", { exact: true }).click();
+  await coach.getByLabel("Editar nome do exercício", { exact: true }).fill("Supino ajustado");
+  await coach.getByLabel("Editar quantidade de séries", { exact: true }).fill("3");
+  await coach.getByLabel("Editar repetições", { exact: true }).fill("10-12");
+  await coach.getByText("Salvar edição", { exact: true }).click();
+  await coach.getByText("1.Supino ajustado", { exact: true }).waitFor();
+  await coach.getByText("Cargas", { exact: true }).click();
+  await coach.getByLabel("Carga da série 1", { exact: true }).fill("22");
+  await coach.getByLabel("Carga da série 2", { exact: true }).fill("23");
+  await coach.getByLabel("Carga da série 3", { exact: true }).fill("24");
+  await coach.getByText("Salvar cargas", { exact: true }).click();
+  await coach.getByText(/Maior carga: 24 kg/).waitFor();
+  await button(coach, "Editar nome do treino Meu treino escolhido").click();
+  await coach.getByLabel("Novo nome do treino", { exact: true }).fill("Nome pelo treinador");
+  await coach.getByLabel("Novo nome do treino", { exact: true }).press("Tab");
+  assert.equal(await coach.getByLabel("Novo nome do treino", { exact: true }).inputValue(), "Nome pelo treinador");
+  await button(coach, "Salvar nome").click();
+  await button(coach, "Editar nome do treino Nome pelo treinador").click();
+  await coach.getByLabel("Novo nome do treino", { exact: true }).fill("Meu treino escolhido");
+  await coach.getByLabel("Novo nome do treino", { exact: true }).press("Tab");
+  await button(coach, "Salvar nome").click();
+  await coach.getByLabel("Novo nome do treino", { exact: true }).waitFor({ state: "hidden" });
+  await coach.getByText("1.Supino ajustado", { exact: true }).waitFor();
+  const selectingPhoto = coach.waitForEvent("filechooser");
+  await button(coach, "Escolher foto de Supino ajustado").click();
+  await (await selectingPhoto).setFiles({ name: "exercicio.png", mimeType: "image/png", buffer: photoBytes });
+  await coach.waitForFunction(() => [...document.images].some(img => img.src.includes("/object/sign/exercise-photos/") && img.complete && img.naturalWidth > 0));
+  assert.equal((await db.query("select user_id from workout_plans where id=$1",[planId])).rows[0].user_id,users[1].id);
+  assert.equal(Number((await db.query("select weight_kg from workout_sets where id=$1",[uid(31)])).rows[0].weight_kg),15);
+  await coach.screenshot({ path: path.join(output, "aluno-mesma-tela-treinos.png"), fullPage: true });
+  await coach.getByText("‹ Voltar", { exact: true }).last().click();
   await button(coach, "Abrir Histórico do aluno").click();
   await button(coach, "Atualizar acompanhamento").click();
   await coach.getByText("Observação: A última série foi difícil.", { exact: true }).waitFor();
@@ -196,14 +278,17 @@ let browser, pages = [];
   assert.equal((await db.query("select comment from coaching_feedback")).rows[0].comment, "A última série foi difícil.");
   await button(student, "‹ Voltar").last().click();
   await button(student, "Abrir treino Meu treino escolhido").click();
+  await student.getByText("1.Supino ajustado", { exact: true }).waitFor();
+  await student.getByText(/Maior carga: 24 kg/).waitFor();
   await student.getByText(/Preparado por Treinador teste/).first().waitFor();
   await student.screenshot({ path: path.join(output, "aluno-treinos-preservados.png"), fullPage: true });
   await student.reload(); await student.getByText("Meus treinos", { exact: true }).click();
   await button(student, "Abrir treino Meu treino escolhido").waitFor();
   assert.deepEqual(errors, []);
-  console.log("OK UI móvel: convite/consentimento entre duas contas, rascunho, duas versões, orientações, renomeação persistente, séries, observações e separação sem exclusão; PostgreSQL real isolado.");
+  console.log("OK UI móvel: duas contas, mesma tela de treinos sem cronômetro, edição de exercício/nome/cargas, rascunhos, histórico e separação preservando alterações; PostgreSQL real isolado.");
 })().catch(async error => {
   console.error(error); process.exitCode = 1;
+  fs.writeFileSync(path.join(output, "editor-falha.json"), JSON.stringify(editorCalls, null, 2));
   for (let i = 0; i < pages.length; i++) {
     await pages[i].screenshot({ path: path.join(output, `falha-${i}.png`), fullPage: true }).catch(() => {});
     fs.writeFileSync(path.join(output, `falha-${i}.txt`), await pages[i].locator("body").innerText().catch(() => ""));

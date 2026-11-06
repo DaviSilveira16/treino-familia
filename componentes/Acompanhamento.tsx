@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, AppState, KeyboardAvoidingView, Modal, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { supabase } from "../supabase";
 import { Alert } from "../servicos/alerta";
@@ -10,7 +10,8 @@ import { chamarAcompanhamento, copiarModeloProprio, normalizarCodigoConvite, pub
 
 const mensagem = (erro: unknown) => erro instanceof Error ? erro.message : "Não foi possível confirmar. Confira a conexão e tente novamente.";
 const data = (valor: string) => new Date(valor).toLocaleDateString("pt-BR");
-type AreaAluno = "inicio" | "treinos" | "historico" | "frequencia" | "vinculo";
+const MeusTreinosAluno = React.lazy(() => import("../telas/MeusTreinos"));
+type AreaAluno = "inicio" | "treinos" | "fichas" | "historico" | "frequencia" | "vinculo";
 const blocosAluno = [
   { id: "treinos", titulo: "Treinos", descricao: "Consulte os exercícios e prepare as fichas", emoji: "🏋️" },
   { id: "historico", titulo: "Histórico", descricao: "Veja sessões, cargas e observações", emoji: "📋" },
@@ -76,6 +77,11 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
   const [editarSujo, setEditarSujo] = useState(false);
   const emVoo = useRef(false), montado = useRef(true), conviteId = useRef(novoIdSerie());
   const selecionadoRef = useRef(selecionado);
+  const voltarTreinos = useRef<(() => void) | null>(null);
+  const registrarVoltarTreinos = useCallback((voltar: (() => void) | null) => { voltarTreinos.current = voltar; }, []);
+  const contextoAluno = useMemo(() => selecionado ? {
+    usuarioId, vinculoId: selecionado.id, alunoId: selecionado.student_id, nomeAluno: selecionado.student_name,
+  } : undefined, [selecionado, usuarioId]);
   useEffect(() => { selecionadoRef.current = selecionado; }, [selecionado]);
   const chamar = useCallback(<T,>(action: string, payload: Record<string, unknown> = {}) => chamarAcompanhamento<T>(usuarioId, action, payload), [usuarioId]);
   const carregarInicio = useCallback(async () => {
@@ -114,6 +120,7 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
   }, [carregarInicio]);
   const voltar = () => {
     if (emVoo.current) return true;
+    if (areaAluno === "treinos" && voltarTreinos.current) { voltarTreinos.current(); return true; }
     if (editor) {
       void (async () => {
         if (editarSujo && !await confirmar("Sair da edição?", "As alterações ainda não salvas serão descartadas. A última ficha salva continua disponível.")) return;
@@ -127,7 +134,7 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
     return true;
   };
   useEffect(() => { voltarRef.current = voltar; return () => { voltarRef.current = null; }; });
-  useVoltarDoModal(true, voltar);
+  useVoltarDoModal(areaAluno !== "treinos", voltar);
   async function abrirVinculo(l: Vinculo) {
     await executar(async () => {
       const h = await chamar<HistoricoAcompanhado>("history", { link_id: l.id, offset: 0 });
@@ -153,7 +160,7 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
   }
   async function abrirAreaAluno(area: AreaAluno) {
     await executar(async () => {
-      if (area === "treinos") {
+      if (area === "fichas") {
         await carregarPlanosAluno(0);
         if (selecionado?.coach_id === usuarioId) {
           const lista = await chamar<Ficha[]>("drafts", { link_id: selecionado.id });
@@ -165,7 +172,13 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
     });
   }
   const souTreinador = selecionado?.coach_id === usuarioId;
-  const tituloArea = areaAluno === "vinculo" ? "Sobre o vínculo" : blocosAluno.find(b => b.id === areaAluno)?.titulo;
+  const tituloArea = areaAluno === "vinculo" ? "Sobre o vínculo" : areaAluno === "fichas" ? "Fichas em rascunho" : blocosAluno.find(b => b.id === areaAluno)?.titulo;
+  if (areaAluno === "treinos" && contextoAluno) return <View style={e.tela}>
+    <Suspense fallback={<ActivityIndicator color={cor} />}>
+      <MeusTreinosAluno key={contextoAluno.vinculoId} aluno={contextoAluno} corTema={cor}
+        onVoltar={() => setAreaAluno("inicio")} registrarVoltar={registrarVoltarTreinos} />
+    </Suspense>
+  </View>;
   return <KeyboardAvoidingView style={e.tela} behavior={Platform.OS === "ios" ? "padding" : undefined}>
     <ScrollView key={`${selecionado?.id ?? "inicio"}:${areaAluno}:${editor?.id ?? "sem-editor"}:${meuHistorico}`} keyboardShouldPersistTaps="handled" contentContainerStyle={e.conteudo}>
       <Botao titulo="‹ Voltar" cor={cor} disabled={ocupado} onPress={voltar} />
@@ -199,9 +212,10 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
             <Text style={[e.setaBloco, { color: cor }]}>›</Text>
           </TouchableOpacity>)}
           <Botao titulo="Sobre o vínculo" cor={cor} disabled={ocupado} onPress={() => setAreaAluno("vinculo")} />
+          {souTreinador && <Botao titulo="Fichas em rascunho" cor={cor} disabled={ocupado} onPress={() => void abrirAreaAluno("fichas")} />}
         </>}
         {selecionado && areaAluno === "vinculo" && <View style={e.card}>
-          <Text style={e.texto}>{souTreinador ? "Você acompanha esta pessoa." : "Este treinador pode preparar fichas e consultar seu histórico de treinos."}</Text>
+          <Text style={e.texto}>{souTreinador ? "Você acompanha esta pessoa." : "Este treinador pode criar e editar seus treinos, exercícios, fotos dos exercícios e cargas, além de consultar seu histórico."}</Text>
           {<Acao titulo={"Encerrar vínculo"} acao={async () => {
             if (!await confirmar("Encerrar acompanhamento?", "O treinador perderá o acesso. Todos os treinos entregues, exercícios, cargas, sessões e observações continuarão com o aluno. Nada disso será apagado.")) return;
             await chamar("end", { link_id: selecionado.id });
@@ -210,7 +224,7 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
           }} disabled={ocupado} executar={executar} cor={cor} />}
         </View>}
         {selecionado && areaAluno === "frequencia" && !erro && <FrequenciaAluno key={selecionado.id} usuarioId={usuarioId} vinculoId={selecionado.id} cor={cor} />}
-        {selecionado && areaAluno === "treinos" && <View style={e.card}>
+        {selecionado && areaAluno === "fichas" && <View style={e.card}>
           <Text style={e.subtitulo}>Treinos atuais do aluno</Text>
           <Acao titulo="Consultar treinos do aluno" acao={() => carregarPlanosAluno(0)} executar={executar} cor={cor} disabled={ocupado} />
           {planosAluno && <>
@@ -285,7 +299,7 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
           {<Acao titulo={"Conferir convite"} acao={async () => { const code = normalizarCodigoConvite(codigo); const info = await chamar<{ coach_name: string }>("invite_preview", { code }); setPrevia({ code, coach_name: info.coach_name }); }} disabled={ocupado} executar={executar} cor={cor} />}
           {previa && <View style={e.card}>
             <Text style={e.subtitulo}>Convite de {previa.coach_name}</Text>
-            <Text style={e.texto}>Ao aceitar, você permite que esta pessoa prepare fichas e veja seus treinos cadastrados, histórico, frequência, séries, cargas e observações. Nutrição, medidas e fotos pessoais não são compartilhadas. Você pode encerrar quando quiser e manter todos os treinos recebidos e registros.</Text>
+            <Text style={e.texto}>Ao aceitar, você permite que esta pessoa crie, edite e remova treinos e exercícios, ajuste cargas e fotos dos exercícios e consulte seu histórico, frequência, séries e observações. Os registros já realizados são preservados. Nutrição, medidas e fotos de perfil não são compartilhadas. Você pode encerrar quando quiser e manter todos os treinos e registros.</Text>
             {<Acao titulo={"Aceitar e compartilhar meus treinos"} acao={async () => {
               await chamar("invite_accept", { code: previa.code, consent: true }); setPrevia(null); setCodigo(""); await carregarInicio(); setAviso("Vínculo aceito. As fichas entregues aparecerão em Meus treinos.");
             }} disabled={ocupado} executar={executar} cor={cor} />}
