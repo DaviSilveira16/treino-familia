@@ -13,8 +13,8 @@ A edição do nome de um treino usa a permissão de atualização do proprietár
 1. Abra **Perfil** ou **Meus treinos → Meu treinador e pessoas que acompanho**.
 2. Em **Pessoas que acompanho**, gere um convite e compartilhe o código. Cada código tem validade de sete dias, permite um aceite e pode ser cancelado.
 3. O aluno cola o código em **Meu treinador**, confere o nome de quem convidou e aceita explicitamente o compartilhamento.
-4. O treinador atualiza a lista e abre **Acompanhar [nome]**. Pode consultar os treinos cadastrados, séries/cargas de referência e histórico de sessões concluídas do aluno.
-5. Use **Criar ficha**, copie um dos seus próprios treinos ou use um treino atual do aluno como base. Defina nome, exercícios, séries, faixa de repetições, carga, descanso e orientações. A cópia usa a primeira carga de referência por exercício: revise os valores antes de entregar.
+4. O treinador atualiza a lista e abre **Acompanhar [nome]**. A área da pessoa mostra seu nome e os blocos **Treinos**, **Histórico** e **Frequência**, no padrão da tela inicial do aplicativo. Cada bloco abre sua própria área; Voltar retorna aos blocos antes de sair do acompanhamento.
+5. Dentro de **Treinos**, use **Criar ficha**, copie um dos seus próprios treinos ou use um treino atual do aluno como base. Defina nome, exercícios, séries, faixa de repetições, carga, descanso e orientações. A cópia usa a primeira carga de referência por exercício: revise os valores antes de entregar.
 6. **Salvar rascunho** guarda a ficha sem entregá-la. **Disponibilizar treino ao aluno** cria uma cópia em Meus treinos do aluno. Depois de editar, salve e disponibilize a nova revisão.
 7. O aluno usa o registro e cronômetro habituais. As orientações originais ficam disponíveis no treino e na sessão ativa, com uma cópia local para leitura sem conexão depois da primeira consulta.
 8. Em **Minhas observações de treino**, o aluno pode comentar uma sessão concluída. As observações também podem ser editadas na área de acompanhamento com seu treinador. O treinador vê esses comentários, as séries realizadas e a contagem de treinos dos últimos 30 dias.
@@ -22,9 +22,11 @@ A edição do nome de um treino usa a permissão de atualização do proprietár
 
 Uma conta pode ser aluno e treinador simultaneamente, inclusive manter mais de um vínculo. Cada pessoa precisa aceitar o próprio convite. A consulta e edição de acompanhamento exigem conexão: dados de alunos não ficam em um cache offline do treinador.
 
+O bloco **Frequência** mostra um calendário mensal de musculação, dias treinados, quantidade de sessões e tempo registrado. Tocar em um dia mostra os treinos e observações daquela data. A consulta considera todas as páginas necessárias do histórico, sem limitar o calendário às primeiras 20 sessões. As datas seguem o fuso horário do aparelho que consulta. Essa reorganização usa a RPC já existente e não requer uma nova migração SQL.
+
 ## O que acontece ao separar
 
-Qualquer uma das partes pode usar **Encerrar vínculo**. A operação grava somente a data de encerramento do vínculo. Não exclui nem modifica planos, exercícios, referências de carga, sessões, séries, orientações entregues ou observações.
+Qualquer uma das partes pode usar **Sobre o vínculo → Encerrar vínculo**. A operação grava somente a data de encerramento do vínculo. Não exclui nem modifica planos, exercícios, referências de carga, sessões, séries, orientações entregues ou observações.
 
 Todos os treinos entregues pertencem ao aluno desde a publicação, usando seu `user_id`. Depois da separação, o aluno continua podendo abrir, executar, adaptar e renomear esses treinos; as observações permanecem editáveis. O antigo treinador perde a autorização para consultar treinos/histórico, preparar fichas ou publicar novas versões naquele vínculo.
 
@@ -68,10 +70,10 @@ O teste de interface intercepta todas as requisições externas e usa duas conta
 
 ## Resultado desta implementação
 
-- `npm run check`: TypeScript aprovado, lint sem erros (42 avisos existentes) e 22 arquivos de testes aprovados.
+- `npm run check`: TypeScript aprovado, lint sem erros (42 avisos existentes) e 23 arquivos de testes aprovados após a reorganização da área do aluno.
 - `npm run build:web`: aprovado.
 - PostgreSQL isolado: migração reaplicável, convites, aceite, isolamento entre contas, validação, publicação atômica, reenvios, revisões, paginação e preservação após separação aprovados.
-- Fluxo completo de acompanhamento em Chrome e WebKit com viewport móvel: aprovado.
+- Fluxo completo de acompanhamento em Chrome e WebKit com viewport móvel: aprovado, incluindo os três blocos, retorno à área do aluno e calendário com mais de 20 sessões no mesmo mês.
 - Regressão geral `npm run test:ui` em Chrome: aprovada. A preparação do registro manual agora informa explicitamente as cargas das séries iniciais, sem depender de referências alteradas por cenários anteriores.
 - Corrigidas as incompatibilidades de tipo do alerta nativo e da medição do ScrollView; os testes anteriores receberam a simulação explícita da instrumentação de desempenho já usada pelos serviços.
 - Nenhuma publicação, migração remota ou teste em aparelho físico foi executado.

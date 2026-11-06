@@ -4,11 +4,18 @@ import { supabase } from "../supabase";
 import { Alert } from "../servicos/alerta";
 import { novoIdSerie } from "../servicos/treinoLocal";
 import { useVoltarDoModal } from "../servicos/voltarModal";
+import FrequenciaAluno from "./FrequenciaAluno";
 import { chamarAcompanhamento, copiarModeloProprio, normalizarCodigoConvite, publicarFicha, salvarFicha,
   type ConviteTreinador, type DocumentoFicha, type Entrega, type Ficha, type HistoricoAcompanhado, type InicioAcompanhamento, type PlanosAcompanhados, type Vinculo } from "../servicos/acompanhamento";
 
 const mensagem = (erro: unknown) => erro instanceof Error ? erro.message : "Não foi possível confirmar. Confira a conexão e tente novamente.";
 const data = (valor: string) => new Date(valor).toLocaleDateString("pt-BR");
+type AreaAluno = "inicio" | "treinos" | "historico" | "frequencia" | "vinculo";
+const blocosAluno = [
+  { id: "treinos", titulo: "Treinos", descricao: "Consulte os exercícios e prepare as fichas", emoji: "🏋️" },
+  { id: "historico", titulo: "Histórico", descricao: "Veja sessões, cargas e observações", emoji: "📋" },
+  { id: "frequencia", titulo: "Frequência", descricao: "Acompanhe os dias treinados no calendário", emoji: "📅" },
+] as const;
 function confirmar(titulo: string, texto: string): Promise<boolean> {
   return new Promise(resolve => Alert.alert(titulo, texto, [
     { text: "Cancelar", style: "cancel", onPress: () => resolve(false) },
@@ -48,6 +55,7 @@ export default function Acompanhamento({ usuarioId, corTema = "#35D07F", onFecha
 function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; cor: string; onFechar: () => void; voltarRef: React.MutableRefObject<(() => boolean) | null> }) {
   const [inicio, setInicio] = useState<InicioAcompanhamento>({ links: [], invites: [] });
   const [selecionado, setSelecionado] = useState<Vinculo | null>(null);
+  const [areaAluno, setAreaAluno] = useState<AreaAluno>("inicio");
   const [fichas, setFichas] = useState<Ficha[]>([]);
   const [editor, setEditor] = useState<Ficha | null>(null);
   const [historico, setHistorico] = useState<HistoricoAcompanhado | null>(null);
@@ -77,6 +85,7 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
     const atual = selecionadoRef.current;
     if (atual && !novo.links.some(l => l.id === atual.id && !l.ended_at && l.coach_id)) {
       setSelecionado(null); setEditor(null); setHistorico(null); setFichas([]); setModelos(null); setEditarSujo(false); setPlanosAluno(null);
+      setAreaAluno("inicio");
       setAviso("Vínculo encerrado. Os treinos e registros do aluno foram mantidos.");
     }
   }, [chamar]);
@@ -110,6 +119,8 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
         if (editarSujo && !await confirmar("Sair da edição?", "As alterações ainda não salvas serão descartadas. A última ficha salva continua disponível.")) return;
         setEditor(null); setEditarSujo(false); setModelos(null);
       })();
+    } else if (selecionado && areaAluno !== "inicio") {
+      setAreaAluno("inicio"); setObservacao(null); setModelos(null); setErro(""); setAviso("");
     } else if (selecionado || meuHistorico) {
       setSelecionado(null); setMeuHistorico(false); setHistorico(null); setFichas([]); setObservacao(null); setPagina(0); setPlanosAluno(null);
     } else onFechar();
@@ -119,10 +130,10 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
   useVoltarDoModal(true, voltar);
   async function abrirVinculo(l: Vinculo) {
     await executar(async () => {
-      const dados = l.coach_id === usuarioId ? await chamar<Ficha[]>("drafts", { link_id: l.id }) : [];
       const h = await chamar<HistoricoAcompanhado>("history", { link_id: l.id, offset: 0 });
       if (!montado.current) return;
-      setSelecionado(l); setFichas(dados); setHistorico(h); setPagina(0); setMeuHistorico(false); setSessoesAbertas([]); setObservacao(null); setPlanosAluno(null);
+      setSelecionado(l); setFichas([]); setHistorico(h); setPagina(0); setMeuHistorico(false); setSessoesAbertas([]); setObservacao(null); setPlanosAluno(null);
+      setAreaAluno("inicio");
     });
   }
   async function carregarPagina(proxima: number) {
@@ -140,20 +151,56 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
     const planos = await chamar<PlanosAcompanhados>("plans", { link_id: selecionado?.id, offset: proxima * 20 });
     if (montado.current) { setPlanosAluno(planos); setPaginaPlanos(proxima); setPlanoAberto(null); }
   }
+  async function abrirAreaAluno(area: AreaAluno) {
+    await executar(async () => {
+      if (area === "treinos") {
+        await carregarPlanosAluno(0);
+        if (selecionado?.coach_id === usuarioId) {
+          const lista = await chamar<Ficha[]>("drafts", { link_id: selecionado.id });
+          if (!montado.current) return;
+          setFichas(lista);
+        }
+      } else if (area === "historico") await carregarPagina(0);
+      if (montado.current) setAreaAluno(area);
+    });
+  }
   const souTreinador = selecionado?.coach_id === usuarioId;
+  const tituloArea = areaAluno === "vinculo" ? "Sobre o vínculo" : blocosAluno.find(b => b.id === areaAluno)?.titulo;
   return <KeyboardAvoidingView style={e.tela} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={e.conteudo}>
+    <ScrollView key={`${selecionado?.id ?? "inicio"}:${areaAluno}:${editor?.id ?? "sem-editor"}:${meuHistorico}`} keyboardShouldPersistTaps="handled" contentContainerStyle={e.conteudo}>
       <Botao titulo="‹ Voltar" cor={cor} disabled={ocupado} onPress={voltar} />
-      <Text style={e.titulo}>{editor ? "Montar ficha" : selecionado ? (souTreinador ? selecionado.student_name : selecionado.coach_name) : meuHistorico ? "Minhas observações" : "Treinar com acompanhamento"}</Text>
+      {selecionado && <View style={e.identidade}>
+        <View style={[e.avatarAluno, { backgroundColor: `${cor}20` }]}><Text style={[e.inicialAluno, { color: cor }]}>{selecionado.student_name.charAt(0).toUpperCase()}</Text></View>
+        <View style={e.textoBloco}><Text style={[e.rotuloAluno, { color: cor }]}>{souTreinador ? "ACOMPANHANDO" : "SEU ACOMPANHAMENTO"}</Text>
+          <Text style={e.nomeAluno}>{selecionado.student_name}</Text><Text style={e.texto}>Treinador: {selecionado.coach_name}</Text></View>
+      </View>}
+      <Text style={e.titulo}>{editor ? "Montar ficha" : selecionado ? (tituloArea ?? "Espaço de treino") : meuHistorico ? "Minhas observações" : "Treinar com acompanhamento"}</Text>
       {ocupado && <ActivityIndicator color={cor} accessibilityLabel="Aguarde" />}
       {!!erro && <Text accessibilityRole="alert" style={e.erro}>{erro}</Text>}
+      {!!erro && <Acao titulo="Conferir vínculo novamente" acao={carregarInicio} executar={executar} disabled={ocupado} cor={cor} />}
       {!!aviso && <Text accessibilityRole="alert" style={e.texto}>{aviso}</Text>}
       {editor ? <>
         <EditorFicha key={editor.id} ficha={editor} usuarioId={usuarioId} cor={cor} ocupado={ocupado}
           executar={executar} onSujo={setEditarSujo} onSalvo={f => { setEditor(f); setFichas(atuais => [f, ...atuais.filter(a => a.id !== f.id)]); }}
           onPublicado={() => setAviso("Ficha disponibilizada em Meus treinos do aluno. As versões anteriores permanecem disponíveis.")} />
       </> : selecionado || meuHistorico ? <>
-        {selecionado && <View style={e.card}>
+        {selecionado && areaAluno === "inicio" && <>
+          <Text style={e.texto}>{souTreinador ? "Escolha o que deseja acompanhar desta pessoa." : "Consulte seus treinos e o acompanhamento recebido."}</Text>
+          {historico && <View style={e.resumoAluno}>
+            <View style={e.indicadorAluno}><Text style={[e.numeroAluno, { color: cor }]}>{historico.last30}</Text><Text style={e.texto}>treinos em 30 dias</Text></View>
+            <View style={e.indicadorAluno}><Text style={[e.numeroAluno, { color: cor }]}>{historico.total}</Text><Text style={e.texto}>treinos no histórico</Text></View>
+          </View>}
+          {blocosAluno.map(bloco => <TouchableOpacity key={bloco.id} accessibilityRole="button" accessibilityLabel={`Abrir ${bloco.titulo} do aluno`}
+            accessibilityState={{ disabled: ocupado }} disabled={ocupado} activeOpacity={0.8}
+            style={[e.blocoAluno, ocupado && { opacity: 0.5 }]} onPress={() => void abrirAreaAluno(bloco.id)}>
+            <View style={[e.iconeBloco, { backgroundColor: `${cor}20` }]}><Text style={e.emojiBloco}>{bloco.emoji}</Text></View>
+            <View style={e.textoBloco}><Text style={e.subtitulo}>{bloco.titulo}</Text>
+              <Text style={e.texto}>{bloco.id === "treinos" && !souTreinador ? "Consulte suas fichas e exercícios" : bloco.descricao}</Text></View>
+            <Text style={[e.setaBloco, { color: cor }]}>›</Text>
+          </TouchableOpacity>)}
+          <Botao titulo="Sobre o vínculo" cor={cor} disabled={ocupado} onPress={() => setAreaAluno("vinculo")} />
+        </>}
+        {selecionado && areaAluno === "vinculo" && <View style={e.card}>
           <Text style={e.texto}>{souTreinador ? "Você acompanha esta pessoa." : "Este treinador pode preparar fichas e consultar seu histórico de treinos."}</Text>
           {<Acao titulo={"Encerrar vínculo"} acao={async () => {
             if (!await confirmar("Encerrar acompanhamento?", "O treinador perderá o acesso. Todos os treinos entregues, exercícios, cargas, sessões e observações continuarão com o aluno. Nada disso será apagado.")) return;
@@ -162,7 +209,8 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
             await carregarInicio(); setAviso("Vínculo encerrado. Todos os treinos e registros do aluno foram preservados.");
           }} disabled={ocupado} executar={executar} cor={cor} />}
         </View>}
-        {souTreinador && selecionado && <View style={e.card}>
+        {selecionado && areaAluno === "frequencia" && !erro && <FrequenciaAluno key={selecionado.id} usuarioId={usuarioId} vinculoId={selecionado.id} cor={cor} />}
+        {selecionado && areaAluno === "treinos" && <View style={e.card}>
           <Text style={e.subtitulo}>Treinos atuais do aluno</Text>
           <Acao titulo="Consultar treinos do aluno" acao={() => carregarPlanosAluno(0)} executar={executar} cor={cor} disabled={ocupado} />
           {planosAluno && <>
@@ -174,17 +222,17 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
                 <Text style={e.texto}>{ex.name} · {ex.sets} séries · {ex.reps} repetições</Text>
                 {ex.loads.map(c => <Text style={e.texto} key={c.set_number}>Série {c.set_number}: {c.reps} reps × {Number(c.weight_kg).toLocaleString("pt-BR")} kg</Text>)}
               </View>)}
-              <Botao titulo={`Usar ${p.name} como base`} cor={cor} disabled={ocupado || !p.exercises.length || p.exercises.length > 50}
+              {souTreinador && <Botao titulo={`Usar ${p.name} como base`} cor={cor} disabled={ocupado || !p.exercises.length || p.exercises.length > 50}
                 onPress={() => setEditor({ id: novoIdSerie(), link_id: selecionado.id, revision: 0, published_revision: 0,
-                  document: { name: p.name.slice(0, 80), instructions: "", exercises: p.exercises } })} />
+                  document: { name: p.name.slice(0, 80), instructions: "", exercises: p.exercises } })} />}
             </View>)}
-            <Text style={e.texto}>Uma cópia usa a primeira carga de referência de cada exercício. Revise as orientações e o descanso antes de entregar.</Text>
+            {souTreinador && <Text style={e.texto}>Uma cópia usa a primeira carga de referência de cada exercício. Revise as orientações e o descanso antes de entregar.</Text>}
             <View style={e.linha}>
               <Acao titulo="Treinos anteriores" acao={() => carregarPlanosAluno(paginaPlanos - 1)} executar={executar} cor={cor} disabled={ocupado || paginaPlanos === 0} />
               <Acao titulo="Mais treinos do aluno" acao={() => carregarPlanosAluno(paginaPlanos + 1)} executar={executar} cor={cor} disabled={ocupado || (paginaPlanos + 1) * 20 >= planosAluno.total} />
             </View>
           </>}
-          <Text style={e.subtitulo}>Fichas do aluno</Text>
+          {souTreinador && <><Text style={e.subtitulo}>Fichas do aluno</Text>
           <Text style={e.texto}>Salve um rascunho e disponibilize quando estiver pronto. Cada atualização entregue cria uma nova versão em Meus treinos; o aluno escolhe quando começar a usá-la.</Text>
           <Botao titulo="Criar ficha" cor={cor} disabled={ocupado} onPress={() => setEditor({ id: novoIdSerie(), link_id: selecionado.id, revision: 0, published_revision: 0,
             document: { name: "", instructions: "", exercises: [{ name: "", sets: 3, reps: "8-12", weight: 0, rest: 60, instructions: "" }] } })} />
@@ -204,8 +252,9 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
             <Text style={e.subtitulo}>{f.document.name}</Text><Text style={e.texto}>{f.document.exercises.length} exercícios · revisão {f.revision} · {f.published_revision === f.revision ? "Disponibilizada" : "Rascunho com alterações não entregues"}</Text>
             <Botao titulo={`Editar ficha ${f.document.name}`} cor={cor} disabled={ocupado} onPress={() => setEditor(f)} />
           </View>)}
+          </>}
         </View>}
-        <View style={e.card}>
+        {(meuHistorico || areaAluno === "historico") && <View style={e.card}>
           <Text style={e.subtitulo}>Treinos realizados</Text>
           {<Acao titulo={"Atualizar acompanhamento"} acao={() => carregarPagina(pagina)} disabled={ocupado} executar={executar} cor={cor} />}
           {historico && <Text style={e.texto}>{historico.last30} treinos nos últimos 30 dias · {historico.total} concluídos no histórico</Text>}
@@ -227,7 +276,7 @@ function Painel({ usuarioId, cor, onFechar, voltarRef }: { usuarioId: string; co
           </View>)}
           <View style={e.linha}>{<Acao titulo={"Página anterior"} acao={() => carregarPagina(pagina - 1)} disabled={ocupado || (pagina === 0)} executar={executar} cor={cor} />}
             {<Acao titulo={"Próxima página"} acao={() => carregarPagina(pagina + 1)} disabled={ocupado || (!historico || (pagina + 1) * 20 >= historico.total)} executar={executar} cor={cor} />}</View>
-        </View>
+        </View>}
       </> : <>
         <Text style={e.texto}>Você pode ter um treinador e também acompanhar outras pessoas. O vínculo só começa após o aceite de quem vai treinar.</Text>
         <View style={e.card}>
@@ -337,4 +386,17 @@ const e = StyleSheet.create({
   input: { color: "#F1F5F2", backgroundColor: "#101312", borderColor: "#526057", borderWidth: 1, padding: 12, minHeight: 46, borderRadius: 10 },
   linha: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   codigo: { color: "#F1F5F2", fontSize: 15, lineHeight: 24 },
+  identidade: { flexDirection: "row", alignItems: "center", gap: 14, marginVertical: 4 },
+  avatarAluno: { width: 58, height: 58, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  inicialAluno: { fontSize: 26, fontWeight: "800" },
+  rotuloAluno: { fontSize: 10, fontWeight: "800", letterSpacing: 1.4, marginBottom: 4 },
+  nomeAluno: { color: "#F1F5F2", fontSize: 22, fontWeight: "800" },
+  resumoAluno: { flexDirection: "row", gap: 10 },
+  indicadorAluno: { flex: 1, borderRadius: 14, backgroundColor: "#191E1B", padding: 14, gap: 5 },
+  numeroAluno: { fontSize: 28, fontWeight: "800" },
+  blocoAluno: { flexDirection: "row", alignItems: "center", backgroundColor: "#191E1B", borderWidth: 1, borderColor: "#354039", borderRadius: 18, padding: 16, gap: 14, minHeight: 104 },
+  iconeBloco: { width: 48, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  emojiBloco: { fontSize: 24 },
+  textoBloco: { flex: 1, gap: 4, minWidth: 0 },
+  setaBloco: { fontSize: 27, fontWeight: "700" },
 });
