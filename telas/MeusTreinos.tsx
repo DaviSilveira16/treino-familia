@@ -15,10 +15,9 @@ import {
 } from "react-native";
 import { Alert } from "../servicos/alerta";
 import RepetirCarga from "../componentes/RepetirCarga";
-import * as ImagePicker from "expo-image-picker";
-import type { ImagePickerOptions } from "expo-image-picker";
-import { prepararFotoExercicio } from "../servicos/fotoExercicio";
-import { EntradaGaleriaWeb } from "../componentes/SeletorGaleriaWeb";
+import { useFotoExercicio } from "../componentes/fotos/useFotoExercicio";
+import ModalFotoExercicio from "../componentes/fotos/ModalFotoExercicio";
+import { EntradaGaleriaWeb } from "../componentes/fotos/SeletorGaleriaWeb";
 import { supabase } from "../supabase";
 import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import {
@@ -159,8 +158,6 @@ export default function MeusTreinos({
   const reordenandoRef = useRef(false);
   const [repetirCarga, setRepetirCarga] = useState(false);
   const cargasAntesDeRepetir = useRef<SerieCarga[]>([]);
-  const [fotoCarregandoId, setFotoCarregandoId] = useState<string | null>(null);
-  const fotoEmEnvioRef = useRef(false);
   const scrollYAtualRef = useRef(0);
   const scrollOrigemFormularioRef = useRef(0);
   const scrollOrigemPainelRef = useRef(0);
@@ -174,9 +171,15 @@ export default function MeusTreinos({
   const formularioExercicioRef = useRef<React.ComponentRef<typeof View> | null>(null);
   const formularioCargaRef = useRef<React.ComponentRef<typeof View> | null>(null);
   const rolagemFrameRef = useRef<number | null>(null);
-  const [origemFotoAberta, setOrigemFotoAberta] = useState<Exercicio | null>(
-    null,
-  );
+  const { origemFotoAberta, setOrigemFotoAberta, fotoCarregandoId, fotoEmEnvioRef, adicionarOuTrocarFoto, escolherFonteFoto, confirmarExclusaoFoto } = useFotoExercicio<Exercicio>({
+    usuarioId,
+    avisar: mostrarMensagem,
+    aoSalvar: (exercicio, caminho, url) => setExercicios((atuais) =>
+      atuais.map((item) => item.id === exercicio.id ? { ...item, photo_path: caminho, photo_url: url } : item),
+    ),
+    salvarVinculo: apiAluno ? (exercicio, caminho) =>
+      alterarTreinoAluno("set_photo", { exercise_id: exercicio.id, photo_path: caminho }, exercicio.plan_id) : undefined,
+  });
   function selecionarTreino(treino: Treino | null) {
     rolagemSolicitadaRef.current = null;
     if (treinoSelecionado?.id !== treino?.id) {
@@ -858,7 +861,7 @@ export default function MeusTreinos({
         return;
       }
 
-      registrarMudancaDeDados();
+      registrarMudancaDeDados(treino.id);
       setTreinos((atuais) => atuais.filter((item) => item.id !== treino.id));
 
       if (treinoSelecionado?.id === treino.id) {
@@ -936,7 +939,7 @@ export default function MeusTreinos({
         return;
       }
 
-      registrarMudancaDeDados();
+      registrarMudancaDeDados(treinoSelecionado.id);
       setExercicios((atuais) =>
         [...atuais, data as Exercicio].sort((a, b) => a.position - b.position),
       );
@@ -1005,7 +1008,7 @@ export default function MeusTreinos({
               : exercicio,
         ),
       );
-      registrarMudancaDeDados();
+      registrarMudancaDeDados(treino.id);
     } catch (erro) {
       let erroReversao: unknown;
       try {
@@ -1111,7 +1114,7 @@ export default function MeusTreinos({
         return;
       }
 
-      registrarMudancaDeDados();
+      registrarMudancaDeDados(exercicioEditando.plan_id);
       setExercicios((atuais) =>
         atuais.map((item) =>
           item.id === exercicioEditando.id
@@ -1173,7 +1176,7 @@ export default function MeusTreinos({
         return;
       }
 
-      registrarMudancaDeDados();
+      registrarMudancaDeDados(exercicio.plan_id);
       setExercicios((atuais) =>
         atuais.filter((item) => item.id !== exercicio.id),
       );
@@ -1202,152 +1205,6 @@ export default function MeusTreinos({
 
   function escolherOrigemFoto(exercicio: Exercicio) {
     setOrigemFotoAberta(exercicio);
-  }
-
-  function escolherFonteFoto(origem: "biblioteca" | "camera") {
-    const exercicio = origemFotoAberta;
-    if (!exercicio || Platform.OS === "web" || fotoEmEnvioRef.current) return;
-
-    setOrigemFotoAberta(null);
-    void adicionarOuTrocarFoto(exercicio, origem);
-  }
-
-  function liberarFotoWeb(imagem?: ImagePicker.ImagePickerAsset) {
-    if (
-      Platform.OS === "web" &&
-      imagem?.uri.startsWith("blob:") &&
-      typeof URL.revokeObjectURL === "function"
-    )
-      URL.revokeObjectURL(imagem.uri);
-  }
-
-  async function adicionarOuTrocarFoto(
-    exercicio: Exercicio,
-    origem: "biblioteca" | "camera",
-    fotoCapturada?: ImagePicker.ImagePickerAsset,
-  ) {
-    if (fotoEmEnvioRef.current) {
-      liberarFotoWeb(fotoCapturada);
-      return;
-    }
-
-    fotoEmEnvioRef.current = true;
-    setFotoCarregandoId(exercicio.id);
-    try {
-      if (!usuarioId) {
-        mostrarMensagem("Sessão inválida", "Entre novamente na sua conta.");
-        return;
-      }
-      if (!fotoCapturada && Platform.OS === "web") return;
-      if (!fotoCapturada && origem === "camera") {
-        const permissao = await ImagePicker.requestCameraPermissionsAsync();
-        if (!permissao.granted) {
-          mostrarMensagem(
-            "Permissão necessária",
-            "Permita o acesso à câmera nas configurações do aparelho.",
-          );
-          return;
-        }
-      }
-      const opcoesImagem: ImagePickerOptions = {
-        mediaTypes: ["images"],
-        allowsMultipleSelection: false,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.75,
-        base64: Platform.OS !== "web",
-      };
-      const resultado = fotoCapturada
-        ? null
-        : origem === "camera"
-          ? await ImagePicker.launchCameraAsync(opcoesImagem)
-          : await ImagePicker.launchImageLibraryAsync(opcoesImagem);
-      if (resultado?.canceled || (!fotoCapturada && !resultado?.assets[0]))
-        return;
-      const imagem = fotoCapturada ?? resultado!.assets[0];
-      const { arquivoImagem, contentType, extensao } =
-        await prepararFotoExercicio(imagem);
-      // Executado no evento de envio da foto, após o seletor, nunca no render.
-      // eslint-disable-next-line react-hooks/purity
-      const novoCaminho = `${usuarioId}/${exercicio.id}/${Date.now()}.${extensao}`;
-      const { error: erroUpload } = await supabase.storage
-        .from("exercise-photos")
-        .upload(novoCaminho, arquivoImagem, {
-          contentType,
-          cacheControl: "3600",
-          upsert: false,
-        });
-
-      if (erroUpload) {
-        mostrarMensagem("Não foi possível enviar a foto", erroUpload.message);
-        return;
-      }
-
-      if (apiAluno) {
-        if (await alterarTreinoAluno("set_photo", { exercise_id: exercicio.id, photo_path: novoCaminho }, exercicio.plan_id))
-          mostrarMensagem("Foto salva", "A foto do exercício foi atualizada.");
-        return;
-      }
-      const { error: erroAtualizarExercicio } = await supabase
-        .from("exercises")
-        .update({ photo_path: novoCaminho })
-        .eq("id", exercicio.id)
-        .eq("plan_id", exercicio.plan_id)
-        .eq("user_id", usuarioId);
-
-      if (erroAtualizarExercicio) {
-        await supabase.storage.from("exercise-photos").remove([novoCaminho]);
-        mostrarMensagem(
-          "Não foi possível salvar a foto",
-          erroAtualizarExercicio.message,
-        );
-        return;
-      }
-
-      const { data: fotoAssinada, error: erroUrl } = await supabase.storage
-        .from("exercise-photos")
-        .createSignedUrl(novoCaminho, 604800);
-
-      registrarMudancaDeDados();
-      setExercicios((atuais) =>
-        atuais.map((item) =>
-          item.id === exercicio.id
-            ? {
-                ...item,
-                photo_path: novoCaminho,
-                photo_url: fotoAssinada?.signedUrl ?? null,
-              }
-            : item,
-        ),
-      );
-
-      if (exercicio.photo_path) {
-        await supabase.storage
-          .from("exercise-photos")
-          .remove([exercicio.photo_path]);
-      }
-
-      if (erroUrl) {
-        mostrarMensagem(
-          "Foto salva",
-          "A foto foi salva. Ela aparecerá após recarregar os exercícios.",
-        );
-        return;
-      }
-
-      mostrarMensagem("Foto salva", "A foto do exercício foi atualizada.");
-    } catch (erro) {
-      mostrarMensagem(
-        "Erro ao adicionar foto",
-        erro instanceof Error
-          ? erro.message
-          : "Não foi possível selecionar ou enviar a foto.",
-      );
-    } finally {
-      liberarFotoWeb(fotoCapturada);
-      fotoEmEnvioRef.current = false;
-      setFotoCarregandoId(null);
-    }
   }
 
   async function abrirRegistroCarga(exercicio: Exercicio) {
@@ -1519,7 +1376,6 @@ export default function MeusTreinos({
         return;
       }
 
-      registrarMudancaDeDados();
       const { error: erroLimparSeriesAntigas } = await supabase
         .from("exercise_load_defaults")
         .delete()
@@ -1534,6 +1390,7 @@ export default function MeusTreinos({
         return;
       }
 
+      registrarMudancaDeDados(treinoSelecionado.id);
       const maiorCargaNova = Math.max(
         ...seriesValidadas.map((serie) => serie.weight_kg),
       );
@@ -1558,6 +1415,19 @@ export default function MeusTreinos({
       setSalvando(false);
     }
   }
+
+  const botaoAtualizarTreinos = (
+    <TouchableOpacity
+      accessibilityRole="button"
+      style={{ alignSelf: "flex-start", paddingVertical: 14 }}
+      onPress={() => {
+        registrarMudancaDeDados(treinoSelecionado?.id);
+        setRecarregar((valor) => valor + 1);
+      }}
+    >
+      <Text style={estilos.textoCancelarFormulario}>Atualizar meus treinos</Text>
+    </TouchableOpacity>
+  );
 
   if (carregando) {
     return (
@@ -1604,9 +1474,7 @@ export default function MeusTreinos({
         {!!usuarioId && !aluno && <Acompanhamento usuarioId={usuarioId} corTema={corTema} onFechar={() => {
           registrarMudancaDeDados(); setRecarregar(valor => valor + 1);
         }} />}
-        <TouchableOpacity accessibilityRole="button" style={{ paddingVertical: 14 }} onPress={() => {
-          registrarMudancaDeDados(); setRecarregar(valor => valor + 1);
-        }}><Text style={estilos.textoCancelarFormulario}>Atualizar meus treinos</Text></TouchableOpacity>
+        {!treinoSelecionado ? botaoAtualizarTreinos : null}
 
         {!!erroAluno && <Text accessibilityRole="alert" style={estilos.textoSecundario}>{erroAluno}</Text>}
         <View style={estilos.formulario}>
@@ -1759,6 +1627,7 @@ export default function MeusTreinos({
                     </Text>
                   </TouchableOpacity>
                 )}
+                {!mostrarFormularioExercicio && !exercicioEditando && !exercicioParaCarga ? botaoAtualizarTreinos : null}
               </View>
               {mostrarFormularioExercicio && (
                 <View
@@ -2190,150 +2059,14 @@ export default function MeusTreinos({
           </View>
         </KeyboardAvoidingView>
       </Modal>
-      <Modal
-        transparent
-        animationType="fade"
-        visible={Boolean(origemFotoAberta)}
-        onRequestClose={() => setOrigemFotoAberta(null)}
-        statusBarTranslucent
-      >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: "#000D",
-            justifyContent: "center",
-            padding: 16,
-          }}
-        >
-          <View
-            style={{
-              width: "100%",
-              maxWidth: 480,
-              alignSelf: "center",
-              backgroundColor: "#191E1B",
-              borderRadius: 18,
-              padding: 16,
-              gap: 14,
-              borderWidth: 1,
-              borderColor: "#303A33",
-            }}
-          >
-            <Text
-              style={{
-                color: "#F0F3F1",
-                fontSize: 20,
-                fontWeight: "800",
-                textAlign: "center",
-              }}
-            >
-              Visualizar foto
-            </Text>
-            <Text
-              style={{
-                color: "#A4ADA7",
-                fontSize: 14,
-                textAlign: "center",
-              }}
-              numberOfLines={2}
-            >
-              {origemFotoAberta?.name ?? "Foto do exercício"}
-            </Text>
-            {origemFotoAberta?.photo_url ? (
-              <Image
-                accessibilityLabel={`Foto do exercício ${origemFotoAberta.name}`}
-                source={{ uri: origemFotoAberta.photo_url }}
-                resizeMode="contain"
-                style={{
-                  width: "100%",
-                  height: 280,
-                  maxHeight: "55%",
-                  borderRadius: 12,
-                  backgroundColor: "#0D110F",
-                }}
-              />
-            ) : (
-              <View
-                style={{
-                  width: "100%",
-                  height: 160,
-                  borderRadius: 12,
-                  backgroundColor: "#0D110F",
-                  borderWidth: 1,
-                  borderColor: "#303A33",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: 18,
-                }}
-              >
-                <Text
-                  style={{
-                    color: "#A4ADA7",
-                    textAlign: "center",
-                    lineHeight: 21,
-                  }}
-                >
-                  Este exercício ainda não tem foto. Escolha uma imagem da
-                  galeria para adicioná-la.
-                </Text>
-              </View>
-            )}
-            {Platform.OS !== "web" ? (
-              <>
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel="Escolher uma foto da galeria"
-                  style={{
-                    minHeight: 50,
-                    justifyContent: "center",
-                    alignItems: "center",
-                    padding: 12,
-                    borderRadius: 10,
-                    backgroundColor: corTema,
-                  }}
-                  disabled={Boolean(fotoCarregandoId)}
-                  onPress={() => escolherFonteFoto("biblioteca")}
-                >
-                  <Text style={{ color: "#101312", fontWeight: "800" }}>
-                    Escolher foto da galeria
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  onPress={() => escolherFonteFoto("camera")}
-                  disabled={Boolean(fotoCarregandoId)}
-                  style={{
-                    minHeight: 46,
-                    justifyContent: "center",
-                    padding: 11,
-                    borderRadius: 10,
-                    borderWidth: 1,
-                    borderColor: corTema,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: corTema,
-                      fontWeight: "800",
-                      textAlign: "center",
-                    }}
-                  >
-                    Tirar foto com a câmera
-                  </Text>
-                </TouchableOpacity>
-              </>
-            ) : null}
-            <TouchableOpacity
-              accessibilityRole="button"
-              onPress={() => setOrigemFotoAberta(null)}
-              style={{ minHeight: 40, justifyContent: "center" }}
-            >
-              <Text style={{ color: "#A4ADA7", textAlign: "center" }}>
-                Fechar visualização
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <ModalFotoExercicio
+        origemFotoAberta={origemFotoAberta}
+        fotoCarregandoId={fotoCarregandoId}
+        corTema={corTema}
+        escolherFonteFoto={escolherFonteFoto}
+        onExcluir={apiAluno ? undefined : confirmarExclusaoFoto}
+        onFechar={() => setOrigemFotoAberta(null)}
+      />
     </View>
   );
 }

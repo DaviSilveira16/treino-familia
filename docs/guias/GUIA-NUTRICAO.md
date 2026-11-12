@@ -17,7 +17,7 @@ Cada cartão abre sua área com botão de retorno. Ao abrir um diário pelo hist
 ## Instalação no Supabase
 
 1. Faça uma cópia de segurança do banco do projeto.
-2. No SQL Editor do **mesmo projeto Supabase usado pelo app**, execute [202610280001_nutricao.sql](supabase/migrations/202610280001_nutricao.sql).
+2. No SQL Editor do **mesmo projeto Supabase usado pelo app**, execute [202610280001_nutricao.sql](../../supabase/migrations/202610280001_nutricao.sql).
 3. Execute depois a migração de catálogo `202610280002_catalogo_taco.sql`, entregue separadamente, para disponibilizar os alimentos da TACO.
 4. Recarregue o aplicativo e use “Sincronizar” em Nutrição. Cadastros feitos antes da migração permanecem na fila deste aparelho.
 
@@ -112,4 +112,4 @@ PGlite não foi adicionado às dependências do aplicativo. A execução no proj
 
 Os cenários de navegador usam contas e backend fictícios, com todas as chamadas externas interceptadas. Eles não modificam dados reais. Chrome/WebKit móveis não substituem a validação em aparelhos Android/iPhone físicos nem uma build nativa; nenhuma publicação ou migração remota foi executada nesta entrega.
 
-O modelo de gasto, suas limitações e as fontes da TACO e da equação de repouso estão em [FONTES-NUTRICAO.md](FONTES-NUTRICAO.md).
+O modelo de gasto, suas limitações e as fontes da TACO e da equação de repouso estão em [FONTES-NUTRICAO.md](../referencias/FONTES-NUTRICAO.md).

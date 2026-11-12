@@ -569,7 +569,12 @@ function filtered(table, search) {
               role: "owner",
             });
           }
-          tables[table].push(...inserted);
+          const conflito = url.searchParams.get("on_conflict")?.split(",");
+          for (const registro of inserted) {
+            const anterior = conflito && tables[table].find((row) => conflito.every((coluna) => row[coluna] === registro[coluna]));
+            if (anterior) Object.assign(anterior, registro);
+            else tables[table].push(registro);
+          }
           rows = inserted;
         } else rows.forEach((row) => Object.assign(row, body));
       }
@@ -712,7 +717,7 @@ function filtered(table, search) {
     };
     const exercisePhotoRegression = async () => {
       phase = "exercise photos";
-      const input = page.getByLabel("Escolher foto de Agachamento teste", { exact: true });
+      const input = page.getByLabel("Escolher foto de Agachamento teste", { exact: true }).filter({ visible: true });
       await input.waitFor();
       assert.equal(await page.locator('input[type="file"]:visible').count(), 0, "Os campos de arquivo não aparecem no cartão");
       const initialUploads = photoUploads.length;
@@ -727,8 +732,7 @@ function filtered(table, search) {
         );
         await choosePhoto(input);
         await saved;
-        await page.waitForFunction((label) => !document.querySelector(`button[aria-label="${label}"]`)?.disabled,
-          "Escolher foto de Agachamento teste");
+        await input.and(page.locator("button:not([disabled])")).waitFor();
         assert.equal(await page.locator('body > input[type="file"]').count(), 0, "Remove o seletor após escolher a foto");
         const photo = photoUploads.at(-1);
         assert.ok(photo.path.startsWith(`exercise-photos/${uid}/${eid}/`));
@@ -811,6 +815,8 @@ function filtered(table, search) {
           rect.top + Math.min(rect.height, 160) < window.innerHeight - 100;
       }, id);
       await esperarDestino("inicio-treino-com-cronometro");
+      await page.getByTestId("inicio-treino-com-cronometro")
+        .getByRole("button", { name: "Atualizar meus treinos", exact: true }).waitFor();
       const botaoInicio = await page.getByText("▶ Iniciar treino com cronômetro", { exact: true }).boundingBox();
       assert.ok(botaoInicio && botaoInicio.y >= 0 && botaoInicio.y + botaoInicio.height < 784,
         "O botão do cronômetro precisa estar visível sem rolagem adicional do teste");
@@ -824,6 +830,89 @@ function filtered(table, search) {
       await page.screenshot({ path: path.join(output, "web-rolagem-iniciar-treino.png") });
       assert.deepEqual(errors, []);
       console.log("OK UI — 31 treinos: seleção alinha cronômetro, adicionar alinha formulário e cancelar permite selecionar novamente.");
+      await context.close();
+      return;
+    }
+    if (process.env.SMOKE_ACTIVE_PLAN_ONLY) {
+      const continuar = () => page.getByRole("button", { name: /Continuar treino: Plano teste/ }).click();
+      const cargaAtiva = (numero) => page.getByRole("textbox", { name: `Agachamento teste, série ${numero}, carga em quilos`, exact: true });
+      const abrirMeusTreinos = async () => {
+        await page.getByRole("button", { name: "Ir para treinos", exact: true }).click();
+        await page.getByText("Meus treinos", { exact: true }).filter({ visible: true }).first().click();
+        await page.getByRole("button", { name: "Abrir treino Plano teste", exact: true }).click();
+      };
+      await continuar();
+      await page.getByRole("button", { name: "Concluir Agachamento teste, série 1", exact: true }).click();
+      await page.getByRole("button", { name: "Desmarcar Agachamento teste, série 1", exact: true }).waitFor();
+      await abrirMeusTreinos();
+      await page.getByText("Cargas", { exact: true }).filter({ visible: true }).click();
+      await page.getByRole("textbox", { name: "Carga da série 1", exact: true }).fill("50");
+      await page.getByRole("textbox", { name: "Carga da série 2", exact: true }).fill("55");
+      await page.getByText("Salvar cargas", { exact: true }).click();
+      await page.getByText("Salvar cargas", { exact: true }).waitFor({ state: "hidden" });
+      await continuar();
+      assert.equal(await cargaAtiva(1).inputValue(), "20");
+      assert.equal(await cargaAtiva(2).inputValue(), "55");
+
+      await exercisePhotoRegression();
+      const visualizar = page.getByLabel("Visualizar foto de Agachamento teste", { exact: true }).filter({ visible: true });
+      await visualizar.click();
+      await page.getByLabel("Foto do exercício Agachamento teste", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Fechar visualização", exact: true }).click();
+      await abrirMeusTreinos();
+      await visualizar.click();
+      await page.getByLabel("Foto do exercício Agachamento teste", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Fechar visualização", exact: true }).click();
+      await page.getByText("Editar", { exact: true }).filter({ visible: true }).click();
+      await page.getByRole("textbox", { name: "Editar nome do exercício", exact: true }).fill("Agachamento revisado");
+      await page.getByRole("textbox", { name: "Editar quantidade de séries", exact: true }).fill("1");
+      await page.getByText("Salvar edição", { exact: true }).click();
+      await page.getByText("Salvar edição", { exact: true }).waitFor({ state: "hidden" });
+      await continuar();
+      await page.getByRole("button", { name: "Expandir Agachamento revisado", exact: true }).click();
+      assert.equal(await cargaAtiva(1).inputValue(), "20");
+      assert.equal(await page.getByRole("textbox", { name: /Agachamento.*série 2, carga em quilos/ }).count(), 0);
+      const registroExercicio = tables.exercises.find((e) => e.id === eid);
+      const caminhoFoto = registroExercicio.photo_path;
+      const fotoRevisada = page.getByRole("button", { name: "Visualizar foto de Agachamento revisado", exact: true });
+      await fotoRevisada.click();
+      await page.getByRole("button", { name: "Excluir foto", exact: true }).click();
+      await fotoRevisada.waitFor({ state: "hidden" });
+      assert.equal(registroExercicio.photo_path, null);
+      assert.equal(await cargaAtiva(1).inputValue(), "20");
+      await abrirMeusTreinos();
+      const miniatura = page.getByLabel("Visualizar foto de Agachamento revisado", { exact: true }).filter({ visible: true });
+      await miniatura.waitFor();
+      await miniatura.locator("img, [role='img']").waitFor({ state: "hidden" });
+      assert.equal(storedPhotos.has(`exercise-photos/${caminhoFoto}`), false);
+      assert.deepEqual(errors, []);
+      console.log("OK UI — atualização do plano e exclusão de foto compartilhada preservam a série concluída.");
+      await context.close();
+      return;
+    }
+    if (process.env.SMOKE_CARDS_ONLY) {
+      const continuar = () => page.getByRole("button", { name: /Continuar treino: Plano teste/ }).click();
+      const expandir = page.getByRole("button", { name: "Expandir Agachamento teste", exact: true });
+      const recolher = page.getByRole("button", { name: "Recolher Agachamento teste", exact: true });
+      await continuar();
+      await recolher.click();
+      await page.waitForFunction((chave) => JSON.parse(localStorage.getItem(chave))?.recolhido === true,
+        `@treino-familia:cartao-exercicio:v1:${uid}:${sid}:${eid}`);
+      await page.reload();
+      await continuar();
+      await expandir.waitFor();
+      await expandir.click();
+      await setOffline(true);
+      for (const numero of [1, 2]) {
+        await page.getByRole("button", { name: `Concluir Agachamento teste, série ${numero}`, exact: true }).click();
+      }
+      await expandir.waitFor();
+      await expandir.click();
+      await page.getByRole("button", { name: "Desmarcar Agachamento teste, série 2", exact: true }).click();
+      await page.getByRole("button", { name: "Concluir Agachamento teste, série 2", exact: true }).click();
+      await expandir.waitFor();
+      assert.deepEqual(errors, []);
+      console.log("OK UI — cartão recolhido preservado ao reabrir, fechamento automático, reabertura e nova conclusão offline.");
       await context.close();
       return;
     }

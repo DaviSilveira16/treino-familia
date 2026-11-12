@@ -90,7 +90,7 @@ export async function renomearTreino(usuarioId: string, treinoId: string, nome: 
     .eq("id", treinoId).eq("user_id", usuarioId).select("id, name").single();
   if (error) throw new Error(error.code === "23505" ? "Você já tem um treino com esse nome. Escolha outro." : error.message);
   if (data?.id !== treinoId || data.name !== name) throw new Error("O servidor não confirmou o novo nome. Atualize a lista.");
-  registrarMudancaDeDados();
+  registrarMudancaDeDados(treinoId);
   return data as { id: string; name: string };
 }
 

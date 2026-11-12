@@ -14,7 +14,7 @@ import {
 import { useFocusEffect } from "@react-navigation/native";
 import { Alert } from "../servicos/alerta";
 import * as ImagePicker from "expo-image-picker";
-import { EntradaGaleriaWeb } from "../componentes/SeletorGaleriaWeb";
+import { EntradaGaleriaWeb } from "../componentes/fotos/SeletorGaleriaWeb";
 import ImagemLeve from "./ImagemLeve";
 import { File as ArquivoExpo } from "expo-file-system";
 import { decodificarFotoBase64 } from "../servicos/fotoExercicio";

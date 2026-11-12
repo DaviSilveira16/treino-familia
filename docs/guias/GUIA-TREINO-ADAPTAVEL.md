@@ -14,7 +14,7 @@
 - **Adicionar novos exercícios ao original**: acrescenta os exercícios criados na sessão. As séries, repetições e cargas realizadas dos exercícios cadastrados passam a ser o padrão do próximo treino. Retirar um exercício da sessão não o exclui do plano.
 - **Usar só nesta sessão**: mantém as adaptações de exercícios apenas no histórico. As séries, repetições e cargas realizadas dos exercícios já cadastrados passam a ser o padrão do próximo treino. É a opção inicialmente selecionada.
 
-Essa atualização automática depende da migração [202610290001_ultimas_cargas_treino.sql](supabase/migrations/202610290001_ultimas_cargas_treino.sql). Veja [GUIA-CARGAS-ULTIMA-SESSAO.md](GUIA-CARGAS-ULTIMA-SESSAO.md) para aplicar e conhecer a proteção contra reenvios antigos.
+Essa atualização automática depende da migração [202610290001_ultimas_cargas_treino.sql](../../supabase/migrations/202610290001_ultimas_cargas_treino.sql). Veja [GUIA-CARGAS-ULTIMA-SESSAO.md](GUIA-CARGAS-ULTIMA-SESSAO.md) para aplicar e conhecer a proteção contra reenvios antigos.
 
 Exercícios avulsos ficam guardados com seu nome e valores no histórico. Para trocar o nome/aparelho depois de registrar séries, adicione outro exercício: isso preserva a identificação do que já foi realizado.
 

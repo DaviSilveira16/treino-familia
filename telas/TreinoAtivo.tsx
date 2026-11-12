@@ -9,6 +9,7 @@ import { useIsFocused } from "@react-navigation/native";
 
 import {
   ActivityIndicator,
+  Image,
   Platform,
   Modal,
   TextInput,
@@ -87,6 +88,12 @@ import {
 } from "../servicos/treinoAdaptavel";
 import { useVoltarDoModal } from "../servicos/voltarModal";
 import { estilos } from "./TreinoAtivo.estilos";
+import { aplicarMudancasDoPlano, lerPlanoAtivo, type PlanoBase } from "../servicos/planoTreinoAtivo";
+import { assinarMudancasDeDados } from "../servicos/revisaoDados";
+import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
+import { EntradaGaleriaWeb } from "../componentes/fotos/SeletorGaleriaWeb";
+import ModalFotoExercicio from "../componentes/fotos/ModalFotoExercicio";
+import { useFotoExercicio } from "../componentes/fotos/useFotoExercicio";
 
 const CHAVE_PREFERENCIA_DESCANSO = "@treino-familia:descanso-segundos:v1";
 
@@ -97,7 +104,6 @@ type Props = {
   onVoltar: () => void;
   corTema?: string;
 };
-type ExercicioBase = PlanoExercicio;
 type SerieAtiva = SerieRascunho;
 type SessaoAtiva = { id: string; plan_id: string; started_at: string };
 type RegistroSalvo = {
@@ -138,11 +144,22 @@ export default function TreinoAtivo({
   onVoltar,
   corTema = "#35D07F",
 }: Props) {
-  const { planId, planName } = route.params;
+  const { planId } = route.params;
+  const [planName, setPlanName] = useState(route.params.planName);
   const estaEmFoco = useIsFocused();
   const [usuarioId, setUsuarioId] = useState("");
   const [perfil, setPerfil] = useState<PerfilTreino | null>(null);
-  const [exercicios, setExercicios] = useState<ExercicioBase[]>([]);
+  const [exercicios, setExercicios] = useState<PlanoExercicio[]>([]);
+  const [fotos, setFotos] = useState<Record<string, string>>({});
+  const { origemFotoAberta, setOrigemFotoAberta, fotoCarregandoId, adicionarOuTrocarFoto, escolherFonteFoto, confirmarExclusaoFoto } = useFotoExercicio({
+    usuarioId,
+    avisar,
+    aoSalvar: (exercicio, caminho, url) => {
+      setExercicios((atuais) => atuais.map((e) => e.id === exercicio.id ? { ...e, photo_path: caminho } : e));
+      if (caminho && url) setFotos((atuais) => ({ ...atuais, [caminho]: url }));
+    },
+  });
+  useVoltarDoModal(Boolean(origemFotoAberta), () => setOrigemFotoAberta(null));
   const [series, setSeries] = useState<SerieAtiva[]>([]);
   const [sessao, setSessao] = useState<SessaoAtiva | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -220,6 +237,7 @@ export default function TreinoAtivo({
   const prontoRef = useRef(false);
   const sincronizandoRef = useRef(false);
   const seriesRef = useRef(series);
+  const planoBaseRef = useRef<PlanoBase | undefined>(undefined);
   const sessaoRef = useRef(sessao);
   const exerciciosRef = useRef(exercicios);
   const usuarioRef = useRef(usuarioId);
@@ -327,9 +345,10 @@ export default function TreinoAtivo({
         versao: 1,
         usuarioId: usuarioRef.current,
         planId,
-        planName,
+        planName: planoBaseRef.current?.nome ?? planName,
         sessao: sessaoAtual,
         exercicios: exerciciosRef.current,
+        planoBase: planoBaseRef.current,
         series: novasSeries ?? seriesRef.current,
         intensidade: intensidadeRef.current,
         esforco: esforcoRef.current,
@@ -514,6 +533,8 @@ export default function TreinoAtivo({
         );
       const idUsuario = usuarioEmCache.id;
       let local = await lerRascunho(idUsuario, planId);
+      planoBaseRef.current = local?.planoBase;
+      if (local?.planName) setPlanName(local.planName);
       criacaoPendenteRef.current = Boolean(local?.criacaoPendente);
       novaSessaoAtivaRef.current = Boolean(local?.novaSessaoAtiva);
       usuarioRef.current = idUsuario;
@@ -571,77 +592,16 @@ export default function TreinoAtivo({
         );
         return;
       }
-      const { data: listaExercicios, error: erroExercicios } = await supabase
-        .from("exercises")
-        .select("id, name, sets_goal, reps_goal")
-        .eq("user_id", idUsuario)
-        .eq("plan_id", planId)
-        .order("position", { ascending: true });
-      if (erroExercicios) throw erroExercicios;
-      const base = (listaExercicios ?? []) as ExercicioBase[];
-      if (base.length === 0) {
-        if (local) {
-          // Exercícios removidos remotamente: preservar o rascunho para conferência.
-          setExercicios(local.exercicios);
-          setSeries(local.series);
-          setSessao(local.sessao);
-          setIntensidade(local.intensidade);
-          setEsforco(local.esforco ?? "nao_informado");
-          if (local.descanso) {
-            setDescanso(local.descanso);
-            descansoRef.current = local.descanso;
-          }
-          setFinalizacao(local.finalizacao);
-          finalizacaoRef.current = local.finalizacao;
-          setRestaurado(true);
-          setBloqueioSessao(true);
-          setMensagem(
-            "Os exercícios deste plano não estão mais disponíveis no servidor. Seu rascunho local foi preservado sem enviar alterações.",
-          );
-        } else {
-          setExercicios([]);
-          setSeries([]);
-          setMensagem(
-            "Este treino ainda não tem exercícios. Adicione exercícios em Meus treinos.",
-          );
-        }
+      const planoAtual = await lerPlanoAtivo(idUsuario, planId);
+      if (planoAtual.nome) setPlanName(planoAtual.nome);
+      const { exercicios: base, series: listas } = planoAtual;
+      if (!base.length && !local) {
+        setExercicios([]);
+        setSeries([]);
+        setMensagem("Este treino ainda não tem exercícios. Adicione exercícios em Meus treinos.");
         return;
       }
-
-      const ids = base.map((exercicio) => exercicio.id);
-      const { data: padroes, error: erroPadroes } = await supabase
-        .from("exercise_load_defaults")
-        .select("exercise_id, set_number, reps, weight_kg")
-        .eq("user_id", idUsuario)
-        .in("exercise_id", ids)
-        .order("set_number", { ascending: true });
-      if (erroPadroes) throw erroPadroes;
-
-      const listas = base.flatMap((exercicio) => {
-        const referencia = (padroes ?? []).filter(
-          (item) => item.exercise_id === exercicio.id,
-        );
-        const quantidade = Math.min(
-          20,
-          Math.max(Number(exercicio.sets_goal) || 1, referencia.length, 1),
-        );
-        const repeticoesPadrao =
-          String(exercicio.reps_goal || "8").match(/\d+/)?.[0] ?? "8";
-        return Array.from({ length: quantidade }, (_, indice) => {
-          const existente = referencia.find(
-            (item) => Number(item.set_number) === indice + 1,
-          );
-          return {
-            chave: `${exercicio.id}:${indice + 1}`,
-            exercise_id: exercicio.id,
-            exercise_name: exercicio.name,
-            set_number: indice + 1,
-            reps: existente ? String(existente.reps) : repeticoesPadrao,
-            weight_kg: existente ? String(existente.weight_kg) : "",
-            concluida: false,
-          } as SerieAtiva;
-        });
-      });
+      planoBaseRef.current = planoAtual.nome ? planoAtual : local?.planoBase;
       setExercicios(base);
       exerciciosRef.current = base;
 
@@ -733,16 +693,20 @@ export default function TreinoAtivo({
         .order("set_number", { ascending: true });
       if (erroSalvas) throw erroSalvas;
       const registros = (salvas ?? []) as RegistroSalvo[];
+      const mesmoRascunho = local?.sessao.id === ativa.id ? local : null;
+      const atualizado = mesmoRascunho && planoAtual.nome
+        ? aplicarMudancasDoPlano(mesmoRascunho, mesmoRascunho.planoBase ?? mesmoRascunho, planoAtual)
+        : mesmoRascunho ?? planoAtual;
       const mescladas = mesclarSeries(
-        local?.sessao.id === ativa.id ? local.series : listas,
+        atualizado.series,
         registros,
-        local?.sessao.id === ativa.id ? local : null,
+        mesmoRascunho ? { ...mesmoRascunho, series: atualizado.series } : null,
       );
       setSeries(mescladas);
       seriesRef.current = mescladas;
+      setExercicios(atualizado.exercicios);
+      exerciciosRef.current = atualizado.exercicios;
       if (local?.sessao.id === ativa.id) {
-        setExercicios(local.exercicios);
-        exerciciosRef.current = local.exercicios;
         setIntensidade(local.intensidade);
         setEsforco(local.esforco ?? "nao_informado");
         if (local.descanso) {
@@ -776,6 +740,7 @@ export default function TreinoAtivo({
             );
             return;
           }
+          planoBaseRef.current = local.planoBase;
           criacaoPendenteRef.current = Boolean(local.criacaoPendente);
           novaSessaoAtivaRef.current = Boolean(local.novaSessaoAtiva);
           setUsuarioId(id);
@@ -822,6 +787,69 @@ export default function TreinoAtivo({
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  useEffect(() => {
+    if (!estaEmFoco || !usuarioId) return;
+    const caminhos = exercicios.filter((e) => !e.removido).map((e) => e.photo_path);
+    let ativo = true;
+    void obterFotosAssinadas("exercise-photos", caminhos, 604800, usuarioId).then((urls) => {
+      if (ativo) setFotos((atuais) => Object.fromEntries(caminhos.flatMap((caminho) => {
+        const url = caminho && (urls.get(caminho) ?? atuais[caminho]);
+        return caminho && url ? [[caminho, url]] : [];
+      })));
+    }).catch(() => {});
+    return () => { ativo = false; };
+  }, [estaEmFoco, usuarioId, exercicios]);
+
+  useEffect(() => {
+    if (!estaEmFoco || carregando || !sessao || !usuarioId || bloqueioSessao || finalizacao || editorId || revisaoFim) return;
+    let ativo = true;
+    let pedido = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    function agendar() {
+      const versao = ++pedido;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        void lerPlanoAtivo(usuarioId, planId).then((plano) => {
+          if (!plano.nome) return;
+          function aplicar() {
+            if (!ativo || versao !== pedido || sessaoRef.current?.id !== sessao?.id || usuarioRef.current !== usuarioId || finalizacaoRef.current || bloqueioRef.current) return;
+            if (salvandoRef.current || chaveSalvandoRef.current || sincronizandoRef.current) {
+              timer = setTimeout(aplicar, 250);
+              return;
+            }
+            const anterior = planoBaseRef.current;
+            if (anterior && JSON.stringify(anterior) === JSON.stringify(plano)) return;
+            const atual = { exercicios: exerciciosRef.current, series: seriesRef.current };
+            const mesclado = aplicarMudancasDoPlano(atual, anterior ?? atual, plano);
+            planoBaseRef.current = plano;
+            if (plano.nome) setPlanName(plano.nome);
+            exerciciosRef.current = mesclado.exercicios;
+            seriesRef.current = mesclado.series;
+            setExercicios(mesclado.exercicios);
+            setSeries(mesclado.series);
+            void salvarLocal().catch(() => setMensagem("Não foi possível guardar a atualização neste aparelho."));
+          }
+          aplicar();
+        }).catch(() => {});
+      }, 150);
+    }
+    const remover = assinarMudancasDeDados((planoAlterado) => { if (planoAlterado === planId) agendar(); });
+    agendar();
+    if (typeof window !== "undefined") {
+      window.addEventListener("focus", agendar);
+      window.addEventListener("online", agendar);
+    }
+    return () => {
+      ativo = false;
+      clearTimeout(timer);
+      remover();
+      if (typeof window !== "undefined") {
+        window.removeEventListener("focus", agendar);
+        window.removeEventListener("online", agendar);
+      }
+    };
+  }, [estaEmFoco, carregando, sessao, usuarioId, planId, bloqueioSessao, finalizacao, editorId, revisaoFim, salvarLocal]);
   useEffect(() => {
     let ativo = true;
     AsyncStorage.getItem(CHAVE_PREFERENCIA_DESCANSO)
@@ -972,6 +1000,7 @@ export default function TreinoAtivo({
             "Adicione exercícios ao plano ou escolha uma cópia com exercícios.",
           );
         await liberarTreinosEncerrados(usuarioId);
+        novo.planoBase = planoBaseRef.current;
         novo.descanso = {
           fimEm: null,
           pausado: false,
@@ -1975,10 +2004,39 @@ export default function TreinoAtivo({
             ) : null}
             {exercicios
               .filter((e) => !e.removido)
-              .map((exercicio) => (
+              .map((exercicio) => {
+                const url = exercicio.photo_path ? fotos[exercicio.photo_path] : undefined;
+                const exercicioFoto = { ...exercicio, plan_id: planId, photo_url: url };
+                const bloquearFoto = Boolean(fotoCarregandoId || finalizacao || bloqueioSessao);
+                return (
                 <CartaoExercicioTreino
-                  key={exercicio.id}
+                  key={`${usuarioId}:${sessao.id}:${exercicio.id}`}
+                  chaveRecolhimento={`@treino-familia:cartao-exercicio:v1:${usuarioId}:${sessao.id}:${exercicio.id}`}
                   exercicio={exercicio}
+                  acoesFoto={!exercicio.avulso ? (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                      {url ? (
+                        <TouchableOpacity accessibilityRole="button"
+                          accessibilityLabel={`Visualizar foto de ${exercicio.name}`}
+                          onPress={() => setOrigemFotoAberta(exercicioFoto)}>
+                          <Image source={{ uri: url }} style={{ width: 64, height: 64, borderRadius: 10 }} />
+                        </TouchableOpacity>
+                      ) : null}
+                      {Platform.OS === "web" ? (
+                        <EntradaGaleriaWeb rotulo={`Escolher foto de ${exercicio.name}`}
+                          texto={fotoCarregandoId === exercicio.id ? "Enviando foto…" : "Foto"}
+                          corTema={corTema} compacto disabled={bloquearFoto}
+                          onSelecionar={(imagem) => void adicionarOuTrocarFoto(exercicioFoto, "biblioteca", imagem)}
+                          onErro={(erro) => avisar("Não foi possível escolher a foto", erro.message)} />
+                      ) : (
+                        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Escolher câmera ou fototeca de ${exercicio.name}`}
+                          disabled={bloquearFoto} style={estilos.botaoSecundario}
+                          onPress={() => setOrigemFotoAberta(exercicioFoto)}>
+                          <Text style={estilos.textoBotaoSecundario}>{fotoCarregandoId === exercicio.id ? "Enviando foto…" : "Foto"}</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ) : null}
                   series={seriesPorExercicio.get(exercicio.id) ?? []}
                   recorde={maioresSeries[exercicio.id]}
                   cor={corTema}
@@ -1995,7 +2053,8 @@ export default function TreinoAtivo({
                   onAdicionarSerie={(id) => void adicionarSerie(id)}
                   onRetirarSerie={(s) => void removerSerie(s)}
                 />
-              ))}
+                );
+              })}
             <View style={estilos.cartao}>
               <Text style={estilos.tituloCartao}>Encerrar e revisar</Text>
               <Text style={estilos.secundario}>
@@ -2122,6 +2181,14 @@ export default function TreinoAtivo({
           </ScrollView>
         </View>
       </Modal>
+      <ModalFotoExercicio
+        origemFotoAberta={origemFotoAberta}
+        fotoCarregandoId={fotoCarregandoId}
+        corTema={corTema}
+        escolherFonteFoto={escolherFonteFoto}
+        onExcluir={confirmarExclusaoFoto}
+        onFechar={() => setOrigemFotoAberta(null)}
+      />
       {editorId !== null ? (
         <EditorExercicioSessao
           key={editorId}

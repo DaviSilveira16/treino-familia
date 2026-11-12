@@ -1,4 +1,5 @@
-import React, { memo, useRef, useState } from "react";
+import React, { memo, useEffect, useRef, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import RepetirCarga from "./RepetirCarga";
 import {
   ActivityIndicator,
@@ -14,6 +15,8 @@ import type { RecordeExercicio } from "../servicos/maioresSeriesTreino";
 type Props = {
   exercicio: PlanoExercicio;
   series: SerieRascunho[];
+  chaveRecolhimento?: string;
+  acoesFoto?: React.ReactNode;
   recorde?: RecordeExercicio;
   cor: string;
   proximaChave?: string;
@@ -148,6 +151,8 @@ const ControleSerie = memo(function ControleSerie({
 export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
   exercicio,
   series,
+  chaveRecolhimento,
+  acoesFoto,
   recorde,
   cor,
   proximaChave,
@@ -163,7 +168,40 @@ export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
   onAdicionarSerie,
   onRetirarSerie,
 }: Props) {
-  const [recolhido, setRecolhido] = useState(false);
+  const concluidas = series.filter((serie) => serie.concluida).length;
+  const completo = series.length > 0 && concluidas === series.length;
+  const [estadoCartao, setEstadoCartao] = useState<{
+    completo: boolean;
+    recolhido: boolean | null;
+  }>({ completo, recolhido: null });
+  const [preferenciaLida, setPreferenciaLida] = useState(false);
+  if (chaveRecolhimento && estadoCartao.completo !== completo) {
+    setEstadoCartao({ completo, recolhido: null });
+  }
+  const recolhido = estadoCartao.recolhido ?? Boolean(chaveRecolhimento && completo);
+
+  useEffect(() => {
+    if (!chaveRecolhimento) return;
+    let ativo = true;
+    void AsyncStorage.getItem(chaveRecolhimento)
+      .then((valor) => {
+        if (!ativo || !valor) return;
+        const salvo = JSON.parse(valor) as typeof estadoCartao;
+        if (typeof salvo?.recolhido !== "boolean") return;
+        setEstadoCartao((atual) => atual.recolhido === null && atual.completo === salvo.completo ? salvo : atual);
+      })
+      .catch(() => {})
+      .finally(() => { if (ativo) setPreferenciaLida(true); });
+    return () => { ativo = false; };
+  }, [chaveRecolhimento]);
+
+  useEffect(() => {
+    if (!chaveRecolhimento || !preferenciaLida) return;
+    const gravacao = estadoCartao.recolhido === null
+      ? AsyncStorage.removeItem(chaveRecolhimento)
+      : AsyncStorage.setItem(chaveRecolhimento, JSON.stringify(estadoCartao));
+    void gravacao.catch(() => {});
+  }, [chaveRecolhimento, estadoCartao, preferenciaLida]);
   const [repetir, setRepetir] = useState(false);
   const cargasAntesDeRepetir = useRef<Record<string, string>>({});
   const mudarCampo: Props["onCampo"] = (chave, campo, valor) => {
@@ -176,7 +214,7 @@ export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
         accessibilityRole="button"
         accessibilityLabel={`${recolhido ? "Expandir" : "Recolher"} ${exercicio.name}`}
         accessibilityState={{ expanded: !recolhido }}
-        onPress={() => setRecolhido((valor) => !valor)}
+        onPress={() => setEstadoCartao({ completo, recolhido: !recolhido })}
         style={{
           minHeight: 44,
           flexDirection: "row",
@@ -191,11 +229,12 @@ export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
         </Text>
       </TouchableOpacity>
       <Text style={estilos.ajuda}>
-        {series.filter((serie) => serie.concluida).length}/{series.length}{" "}
+        {concluidas}/{series.length}{" "}
         séries concluídas
       </Text>
       {!recolhido ? (
         <>
+          {acoesFoto}
           {exercicio.avulso ? (
             <Text style={[estilos.ajuda, { color: cor }]}>
               Adaptado nesta sessão

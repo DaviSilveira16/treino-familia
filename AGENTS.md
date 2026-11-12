@@ -25,9 +25,17 @@ Run lint and typecheck before declaring any task done.
 
 ## Navigation & Routing
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+- Use the existing **React Navigation** stack and route types in `App.tsx`. Keep screen components in `telas/` and preserve the app's Android and iPhone back behavior.
+
+## Project layout
+
+- Find guides, diagnostics, and source references in the [documentation index](docs/README.md).
+- Shared photo controls, preview, and upload logic live in `componentes/fotos/`.
+
+## Graphify
+
+- For changes that span multiple screens or services, orient yourself with `graphify query "..." --budget 700`, then verify the relevant code and migrations directly. Inferred links are leads to check.
+- Build or refresh the local graph with `graphify extract . --code-only --no-cluster` followed by `graphify cluster-only . --no-label`. Keep `.graphifyignore` in effect and keep credentials, user data, and build outputs out of the scan.
 
 ## Building with EAS
 

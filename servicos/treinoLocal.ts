@@ -30,6 +30,7 @@ export type PlanoExercicio = {
   name: string;
   sets_goal: number;
   reps_goal: string;
+  photo_path?: string | null;
   avulso?: boolean;
   removido?: boolean;
 };
@@ -46,6 +47,7 @@ export type TreinoRascunho = {
   sessao: SessaoRascunho;
   exercicios: PlanoExercicio[];
   series: SerieRascunho[];
+  planoBase?: { nome?: string; exercicios: PlanoExercicio[]; series: SerieRascunho[] };
   intensidade: "leve" | "moderada" | "intensa";
   esforco: EsforcoPercebido;
   salvoEm: string;

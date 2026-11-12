@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import type { ImagePickerAsset } from "expo-image-picker";
-import { abrirSeletorDeFotosWeb } from "../servicos/seletorGaleriaWeb";
+import { abrirSeletorDeFotosWeb } from "../../servicos/seletorGaleriaWeb";
 
 type Props = {
   disabled?: boolean;
