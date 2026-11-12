@@ -150,6 +150,7 @@ export function prepararModeloTreino(
       return {
         id: novoIdSerie(),
         origemId: exercicio.id,
+        photo_path: exercicio.photo_path ?? null,
         name: exercicio.name,
         sets_goal: referencias.length,
         reps_goal: exercicio.reps_goal,

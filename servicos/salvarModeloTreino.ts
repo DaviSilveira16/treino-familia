@@ -2,6 +2,48 @@ import { supabase } from "../supabase";
 import type { TreinoRascunho } from "./treinoLocal";
 
 export class ConflitoModeloTreino extends Error {}
+
+async function copiarFotoDoExercicio(
+  usuarioId: string,
+  planId: string,
+  exercicioId: string,
+  origemId: string,
+  origem: string,
+) {
+  const [dono, exercicio, arquivo, ...resto] = origem.split("/");
+  if (
+    dono !== usuarioId ||
+    exercicio !== origemId ||
+    resto.length ||
+    !arquivo ||
+    !/^[\w.-]+\.[a-z0-9]+$/i.test(arquivo)
+  ) return;
+
+  const destino = `${usuarioId}/${exercicioId}/${arquivo}`;
+  const bucket = supabase.storage.from("exercise-photos");
+  const { error: erroCopia } = await bucket.copy(origem, destino);
+  if (erroCopia) {
+    // Se a resposta se perdeu, a cópia pode existir desde a tentativa anterior.
+    const { data: copiada } = await bucket.exists(destino);
+    if (!copiada) {
+      // A foto de origem pode ter sido excluída enquanto a sessão estava offline.
+      const { data: existe } = await bucket.exists(origem);
+      if (!existe && "code" in erroCopia && erroCopia.code === "NoSuchKey")
+        return;
+      throw erroCopia;
+    }
+  }
+
+  const { error } = await supabase
+    .from("exercises")
+    .update({ photo_path: destino })
+    .eq("id", exercicioId)
+    .eq("plan_id", planId)
+    .eq("user_id", usuarioId)
+    .is("photo_path", null);
+  if (error) throw error;
+}
+
 /** Stable client IDs + read-before-insert make a lost response safe to retry. */
 export async function salvarModeloDoTreino(
   local: TreinoRascunho,
@@ -36,10 +78,11 @@ export async function salvarModeloDoTreino(
       "O novo treino foi alterado em outro lugar. A sessão continua preservada para revisão.",
     );
 
+  const fotosPendentes: { id: string; origemId: string; caminho: string }[] = [];
   for (const [indice, exercicio] of modelo.exercicios.entries()) {
     const { data: existente, error: erroExercicio } = await supabase
       .from("exercises")
-      .select("id, plan_id, name, sets_goal, reps_goal")
+      .select("id, plan_id, name, sets_goal, reps_goal, photo_path")
       .eq("id", exercicio.id)
       .eq("user_id", usuarioId)
       .maybeSingle();
@@ -80,6 +123,12 @@ export async function salvarModeloDoTreino(
           position,
         });
       if (error) throw error;
+    }
+    if (!prepararApenas && !existente?.photo_path) {
+      const caminho = exercicio.photo_path === undefined
+        ? local.exercicios?.find((item) => item.id === exercicio.origemId)?.photo_path
+        : exercicio.photo_path;
+      if (caminho) fotosPendentes.push({ id: exercicio.id, origemId: exercicio.origemId, caminho });
     }
     for (const serie of validarReferenciasPlanejadas ? exercicio.series : []) {
       const { data: referencia, error: erroReferencia } = await supabase
@@ -162,21 +211,24 @@ export async function salvarModeloDoTreino(
       .eq("user_id", usuarioId)
       .maybeSingle();
     if (error) throw error;
-    if (sessao?.plan_id === modelo.planId) return;
-    const { data, error: erroMover } = await supabase
-      .from("workout_sessions")
-      .update({ plan_id: modelo.planId })
-      .eq("id", sessaoId)
-      .eq("user_id", usuarioId)
-      .eq("plan_id", local.planId)
-      .eq("status", "concluido")
-      .eq("finished_at", local.finalizacao.finishedAt)
-      .select("id")
-      .maybeSingle();
-    if (erroMover) throw erroMover;
-    if (!data)
-      throw new ConflitoModeloTreino(
-        "O vínculo do treino mudou durante o envio. A sessão foi preservada.",
-      );
+    if (sessao?.plan_id !== modelo.planId) {
+      const { data, error: erroMover } = await supabase
+        .from("workout_sessions")
+        .update({ plan_id: modelo.planId })
+        .eq("id", sessaoId)
+        .eq("user_id", usuarioId)
+        .eq("plan_id", local.planId)
+        .eq("status", "concluido")
+        .eq("finished_at", local.finalizacao.finishedAt)
+        .select("id")
+        .maybeSingle();
+      if (erroMover) throw erroMover;
+      if (!data)
+        throw new ConflitoModeloTreino(
+          "O vínculo do treino mudou durante o envio. A sessão foi preservada.",
+        );
+    }
   }
+  for (const foto of fotosPendentes)
+    await copiarFotoDoExercicio(usuarioId, modelo.planId, foto.id, foto.origemId, foto.caminho);
 }

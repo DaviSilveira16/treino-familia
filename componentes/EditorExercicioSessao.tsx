@@ -1,6 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import type { ImagePickerAsset } from "expo-image-picker";
 import {
+  Image,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -8,6 +11,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { EntradaGaleriaWeb } from "./fotos/SeletorGaleriaWeb";
+import { selecionarFotoNativa, type FonteFoto } from "./fotos/useFotoExercicio";
+
 export type DadosEditorExercicio = {
   nome: string;
   series: string;
@@ -27,16 +33,43 @@ export default function EditorExercicioSessao({
   nomeBloqueado: boolean;
   cor: string;
   onFechar: () => void;
-  onSalvar: (dados: DadosEditorExercicio) => Promise<void>;
+  onSalvar: (dados: DadosEditorExercicio, foto?: ImagePickerAsset) => Promise<void>;
 }) {
   const [dados, setDados] = useState(inicial),
     [erro, setErro] = useState(""),
     [salvando, setSalvando] = useState(false);
+  const [foto, setFoto] = useState<ImagePickerAsset>();
+  const [selecionandoFoto, setSelecionandoFoto] = useState(false);
+  const [erroFoto, setErroFoto] = useState("");
+  const ocupado = salvando || selecionandoFoto;
+  const uriFoto = foto?.uri;
+  useEffect(() => {
+    if (Platform.OS === "web" && uriFoto?.startsWith("blob:"))
+      return () => URL.revokeObjectURL(uriFoto);
+  }, [uriFoto]);
+
+  function selecionarFoto(imagem: ImagePickerAsset) {
+    setFoto(imagem);
+    setErroFoto("");
+  }
+
+  async function abrirFotoNativa(origem: FonteFoto) {
+    setSelecionandoFoto(true);
+    setErroFoto("");
+    try {
+      const imagem = await selecionarFotoNativa(origem);
+      if (imagem) selecionarFoto(imagem);
+    } catch (e) {
+      setErroFoto(e instanceof Error ? e.message : "Não foi possível selecionar a foto.");
+    } finally {
+      setSelecionandoFoto(false);
+    }
+  }
   const salvar = async () => {
     setSalvando(true);
     setErro("");
     try {
-      await onSalvar(dados);
+      await onSalvar(dados, foto);
     } catch (e) {
       setErro(
         e instanceof Error
@@ -53,7 +86,7 @@ export default function EditorExercicioSessao({
       animationType="fade"
       visible
       onRequestClose={() => {
-        if (!salvando) onFechar();
+        if (!ocupado) onFechar();
       }}
     >
       <View style={s.fundo}>
@@ -87,7 +120,7 @@ export default function EditorExercicioSessao({
                   onChangeText={(valor) =>
                     setDados((atual) => ({ ...atual, [campo]: valor }))
                   }
-                  editable={!salvando && !(campo === "nome" && nomeBloqueado)}
+                  editable={!ocupado && !(campo === "nome" && nomeBloqueado)}
                   maxLength={campo === "nome" ? 100 : 10}
                   keyboardType={
                     campo === "nome"
@@ -100,6 +133,43 @@ export default function EditorExercicioSessao({
                 />
               </View>
             ))}
+            {!editando ? (
+              <View style={s.grupo}>
+                <Text style={s.texto}>Foto (opcional)</Text>
+                {uriFoto ? (
+                  <View style={s.linhaFoto}>
+                    <Image accessibilityLabel="Prévia da foto do novo exercício"
+                      source={{ uri: uriFoto }} style={s.previa} />
+                    <TouchableOpacity accessibilityRole="button" disabled={ocupado}
+                      style={s.botao} onPress={() => setFoto(undefined)}>
+                      <Text style={s.texto}>Remover foto selecionada</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+                {Platform.OS === "web" ? (
+                  <View style={s.linhaFoto}>
+                    <EntradaGaleriaWeb rotulo="Escolher foto do novo exercício" texto="Galeria"
+                      corTema={cor} disabled={ocupado} onSelecionar={selecionarFoto}
+                      onErro={(e) => setErroFoto(e.message)} />
+                    <EntradaGaleriaWeb rotulo="Tirar foto do novo exercício" texto="Câmera"
+                      capture="environment" corTema={cor} disabled={ocupado}
+                      onSelecionar={selecionarFoto} onErro={(e) => setErroFoto(e.message)} />
+                  </View>
+                ) : (
+                  <View style={s.linhaFoto}>
+                    <TouchableOpacity accessibilityRole="button" disabled={ocupado}
+                      style={s.botao} onPress={() => void abrirFotoNativa("biblioteca")}>
+                      <Text style={s.texto}>Escolher da galeria</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity accessibilityRole="button" disabled={ocupado}
+                      style={s.botao} onPress={() => void abrirFotoNativa("camera")}>
+                      <Text style={s.texto}>Tirar foto</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                {erroFoto ? <Text accessibilityRole="alert" style={s.erro}>{erroFoto}</Text> : null}
+              </View>
+            ) : null}
             {nomeBloqueado ? (
               <Text style={s.ajuda}>
                 Já há séries registradas. Para trocar o aparelho, adicione outro
@@ -115,7 +185,7 @@ export default function EditorExercicioSessao({
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel="Salvar exercício na sessão"
-              disabled={salvando}
+              disabled={ocupado}
               onPress={() => void salvar()}
               style={[s.botao, { backgroundColor: cor }]}
             >
@@ -125,7 +195,7 @@ export default function EditorExercicioSessao({
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
-              disabled={salvando}
+              disabled={ocupado}
               onPress={onFechar}
               style={s.botao}
             >
@@ -153,6 +223,8 @@ const s = StyleSheet.create({
   texto: { color: "#E1E8E3", fontWeight: "700" },
   ajuda: { color: "#A4ADA7", lineHeight: 20, fontSize: 12 },
   grupo: { gap: 6 },
+  linhaFoto: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  previa: { width: 64, height: 64, borderRadius: 10 },
   input: {
     backgroundColor: "#101312",
     borderColor: "#45544A",

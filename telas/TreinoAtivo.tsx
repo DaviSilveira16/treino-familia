@@ -72,6 +72,7 @@ import {
   carregarMaioresSeries,
   type RecordeExercicio,
 } from "../servicos/maioresSeriesTreino";
+import type { ImagePickerAsset } from "expo-image-picker";
 import EditorExercicioSessao, {
   type DadosEditorExercicio,
 } from "../componentes/EditorExercicioSessao";
@@ -151,9 +152,14 @@ export default function TreinoAtivo({
   const [perfil, setPerfil] = useState<PerfilTreino | null>(null);
   const [exercicios, setExercicios] = useState<PlanoExercicio[]>([]);
   const [fotos, setFotos] = useState<Record<string, string>>({});
-  const { origemFotoAberta, setOrigemFotoAberta, fotoCarregandoId, adicionarOuTrocarFoto, escolherFonteFoto, confirmarExclusaoFoto } = useFotoExercicio({
+  const { origemFotoAberta, setOrigemFotoAberta, fotoCarregandoId, fotoEmEnvioRef, adicionarOuTrocarFoto, escolherFonteFoto, confirmarExclusaoFoto } = useFotoExercicio<PlanoExercicio & {
+    plan_id: string;
+    sessaoId: string;
+    photo_url?: string;
+  }>({
     usuarioId,
     avisar,
+    salvarFotoLocal: salvarFotoDeExercicioAvulso,
     aoSalvar: (exercicio, caminho, url) => {
       setExercicios((atuais) => atuais.map((e) => e.id === exercicio.id ? { ...e, photo_path: caminho } : e));
       if (caminho && url) setFotos((atuais) => ({ ...atuais, [caminho]: url }));
@@ -1272,6 +1278,31 @@ export default function TreinoAtivo({
     !salvandoRef.current &&
     !chaveSalvandoRef.current &&
     !!sessaoRef.current;
+  async function salvarFotoDeExercicioAvulso(
+    exercicio: PlanoExercicio & { sessaoId: string },
+    caminho: string | null,
+  ) {
+    if (!exercicio.avulso) return undefined;
+    if (sessaoRef.current?.id !== exercicio.sessaoId) return false;
+
+    let alterada = false;
+    await atualizarRascunho(usuarioId, planId, (atual) => {
+      if (atual.sessao.id !== exercicio.sessaoId || atual.finalizacao ||
+          atual.encerradaNoServidor || atual.exclusaoSolicitada) return atual;
+      const anterior = atual.exercicios.find((item) => item.id === exercicio.id);
+      if (!anterior?.avulso || anterior.removido ||
+          (anterior.photo_path ?? null) !== (exercicio.photo_path ?? null)) return atual;
+      alterada = true;
+      return {
+        ...atual,
+        exercicios: atual.exercicios.map((item) =>
+          item.id === exercicio.id ? { ...item, photo_path: caminho } : item,
+        ),
+      };
+    });
+    return alterada;
+  }
+
   async function guardarAdaptacao(
     novosExercicios: PlanoExercicio[],
     novasSeries: SerieAtiva[],
@@ -1303,7 +1334,10 @@ export default function TreinoAtivo({
             );
             return {
               ...atual,
-              exercicios: novosExercicios,
+              exercicios: novosExercicios.map((item) => {
+                const anterior = item.avulso && atual.exercicios.find((e) => e.id === item.id);
+                return anterior ? { ...item, photo_path: anterior.photo_path } : item;
+              }),
               salvoEm: new Date().toISOString(),
               series: novasSeries.map((serie) => {
                 const anterior = anteriores.get(serie.chave),
@@ -1336,8 +1370,9 @@ export default function TreinoAtivo({
     }
     void sincronizar();
   }
-  async function salvarExercicio(dados: DadosEditorExercicio) {
-    if (!podeAdaptar())
+  async function salvarExercicio(dados: DadosEditorExercicio, foto?: ImagePickerAsset) {
+    const sessaoAtual = sessaoRef.current;
+    if (!sessaoAtual || !podeAdaptar() || (foto && fotoEmEnvioRef.current))
       throw new Error("Aguarde o envio atual antes de editar o exercício.");
     const novo = criarExercicioSessao(
       dados.nome,
@@ -1353,6 +1388,13 @@ export default function TreinoAtivo({
         [...exerciciosRef.current, novo.exercicio],
         [...seriesRef.current, ...novo.series],
       );
+      if (foto) {
+        void adicionarOuTrocarFoto(
+          { ...novo.exercicio, plan_id: planId, sessaoId: sessaoAtual.id },
+          "biblioteca",
+          foto,
+        );
+      }
     } else {
       const atuais = seriesRef.current.filter(
         (s) => s.exercise_id === anterior.id && !s.excluida,
@@ -1506,6 +1548,7 @@ export default function TreinoAtivo({
       bloqueioRef.current ||
       salvandoRef.current ||
       chaveSalvandoRef.current ||
+      fotoEmEnvioRef.current ||
       !sessaoRef.current
     )
       return;
@@ -1539,6 +1582,7 @@ export default function TreinoAtivo({
       !usuarioId ||
       !revisaoFim ||
       finalizacaoRef.current ||
+      fotoEmEnvioRef.current ||
       salvandoRef.current
     )
       return;
@@ -2006,14 +2050,14 @@ export default function TreinoAtivo({
               .filter((e) => !e.removido)
               .map((exercicio) => {
                 const url = exercicio.photo_path ? fotos[exercicio.photo_path] : undefined;
-                const exercicioFoto = { ...exercicio, plan_id: planId, photo_url: url };
+                const exercicioFoto = { ...exercicio, plan_id: planId, sessaoId: sessao.id, photo_url: url };
                 const bloquearFoto = Boolean(fotoCarregandoId || finalizacao || bloqueioSessao);
                 return (
                 <CartaoExercicioTreino
                   key={`${usuarioId}:${sessao.id}:${exercicio.id}`}
                   chaveRecolhimento={`@treino-familia:cartao-exercicio:v1:${usuarioId}:${sessao.id}:${exercicio.id}`}
                   exercicio={exercicio}
-                  acoesFoto={!exercicio.avulso ? (
+                  acoesFoto={(
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                       {url ? (
                         <TouchableOpacity accessibilityRole="button"
@@ -2036,7 +2080,7 @@ export default function TreinoAtivo({
                         </TouchableOpacity>
                       )}
                     </View>
-                  ) : null}
+                  )}
                   series={seriesPorExercicio.get(exercicio.id) ?? []}
                   recorde={maioresSeries[exercicio.id]}
                   cor={corTema}
@@ -2065,6 +2109,7 @@ export default function TreinoAtivo({
                 disabled={
                   salvando ||
                   chaveEmSalvamento !== null ||
+                  Boolean(fotoCarregandoId) ||
                   bloqueioSessao ||
                   Boolean(finalizacao)
                 }
@@ -2072,11 +2117,13 @@ export default function TreinoAtivo({
                 style={[estilos.botaoPrimario, { backgroundColor: corTema }]}
               >
                 <Text style={estilos.textoPrimario}>
-                  {salvando
-                    ? "Salvando..."
-                    : finalizacao
-                      ? "Encerramento aguardando confirmação"
-                      : "Finalizar e salvar treino"}
+                  {fotoCarregandoId
+                    ? "Aguardando envio da foto…"
+                    : salvando
+                      ? "Salvando..."
+                      : finalizacao
+                        ? "Encerramento aguardando confirmação"
+                        : "Finalizar e salvar treino"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -2367,7 +2414,7 @@ export default function TreinoAtivo({
               <TouchableOpacity
                 accessibilityRole="button"
                 accessibilityLabel="Confirmar conclusão do treino"
-                disabled={salvando}
+                disabled={salvando || Boolean(fotoCarregandoId)}
                 onPress={() => void confirmarConclusao()}
                 style={[estilos.botaoPrimario, { backgroundColor: corTema }]}
               >

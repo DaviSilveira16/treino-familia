@@ -429,10 +429,23 @@ function filtered(table, search) {
           headers,
         });
       }
+      if (url.pathname === "/storage/v1/object/copy") {
+        const { bucketId, sourceKey, destinationKey } = request.postDataJSON();
+        const source = storedPhotos.get(`${bucketId}/${sourceKey}`);
+        const path = `${bucketId}/${destinationKey}`;
+        if (!source) return route.fulfill({ status: 404, json: { code: "NoSuchKey" }, headers });
+        if (storedPhotos.has(path))
+          return route.fulfill({ status: 409, json: { code: "KeyAlreadyExists" }, headers });
+        storedPhotos.set(path, { ...source, path });
+        // Simula cópia gravada com resposta perdida.
+        return route.fulfill({ status: 503, json: { message: "Resposta perdida" }, headers });
+      }
       if (url.pathname.startsWith("/storage/v1/object/")) {
         const photoPath = decodeURIComponent(
           url.pathname.slice("/storage/v1/object/".length),
         );
+        if (request.method() === "HEAD")
+          return route.fulfill({ status: storedPhotos.has(photoPath) ? 200 : 404, headers });
         if (request.method() === "POST") {
           const photo = { path: photoPath, ...uploadedImage(request) };
           storedPhotos.set(photoPath, photo);
@@ -830,6 +843,84 @@ function filtered(table, search) {
       await page.screenshot({ path: path.join(output, "web-rolagem-iniciar-treino.png") });
       assert.deepEqual(errors, []);
       console.log("OK UI — 31 treinos: seleção alinha cronômetro, adicionar alinha formulário e cancelar permite selecionar novamente.");
+      await context.close();
+      return;
+    }
+    if (process.env.SMOKE_MODEL_PHOTOS_ONLY) {
+      const continuar = () => page.getByRole("button", { name: /Continuar treino: Plano teste/ }).click();
+      const botao = (name) => page.getByRole("button", { name, exact: true });
+      const campo = (name) => page.getByRole("textbox", { name, exact: true });
+      const escolherFoto = async (nome) => {
+        await choosePhoto(page.getByLabel(`Escolher foto de ${nome}`, { exact: true }));
+        await botao(`Visualizar foto de ${nome}`).waitFor();
+        return photoUploads.at(-1).path.slice("exercise-photos/".length);
+      };
+      await continuar();
+      const fotoOriginal = await escolherFoto("Agachamento teste");
+
+      const avulso = "Remada com foto";
+      const abrirEditor = () => botao("Adicionar exercício durante o treino").click();
+      const galeria = page.getByLabel("Escolher foto do novo exercício", { exact: true });
+      const previa = page.getByLabel("Prévia da foto do novo exercício", { exact: true });
+      const enviosAntes = photoUploads.length;
+
+      await abrirEditor();
+      await choosePhoto(galeria);
+      await previa.waitFor();
+      await botao("Remover foto selecionada").click();
+      await previa.waitFor({ state: "hidden" });
+      await choosePhoto(galeria);
+      await previa.waitFor();
+      await botao("Cancelar").click();
+      await galeria.waitFor({ state: "hidden" });
+      assert.equal(photoUploads.length, enviosAntes, "Cancelar o editor não envia a foto");
+
+      await abrirEditor();
+      await choosePhoto(galeria);
+      await previa.waitFor();
+      await botao("Salvar exercício na sessão").click();
+      await page.getByRole("alert").filter({ visible: true }).waitFor();
+      await previa.waitFor();
+      assert.equal(photoUploads.length, enviosAntes, "Dados inválidos não enviam a foto");
+      await campo("Nome do exercício/aparelho").fill(avulso);
+      await campo("Quantidade de séries").fill("2");
+      await campo("Repetições iniciais").fill("12");
+      await campo("Carga inicial em kg").fill("18");
+      await botao("Salvar exercício na sessão").click();
+      await botao(`Visualizar foto de ${avulso}`).waitFor();
+      assert.equal(photoUploads.length, enviosAntes + 1);
+      const fotoAvulsa = photoUploads.at(-1).path.slice("exercise-photos/".length);
+      await page.reload();
+      await continuar();
+      await botao(`Visualizar foto de ${avulso}`).waitFor();
+      await botao(`Concluir ${avulso}, série 1`).click();
+      await page.getByText("Finalizar e salvar treino", { exact: true }).click();
+      await botao("Criar novo treino").click();
+      const nomeNovo = "Treino com fotos copiadas";
+      await campo("Nome do novo treino").fill(nomeNovo);
+      await campo("Duração do treino em minutos").fill("3");
+      await botao("Confirmar conclusão do treino").click();
+      await page.waitForFunction((key) => !localStorage.getItem(key), draftKey);
+
+      const novo = tables.workout_plans.find((p) => p.name === nomeNovo);
+      assert.ok(novo);
+      assert.equal(tables.workout_sessions.find((s) => s.id === sid).plan_id, novo.id);
+      for (const [nome, origem] of [["Agachamento teste", fotoOriginal], [avulso, fotoAvulsa]]) {
+        const exercicio = tables.exercises.find((e) => e.plan_id === novo.id && e.name === nome);
+        assert.ok(exercicio?.photo_path?.startsWith(`${uid}/${exercicio.id}/`));
+        assert.notEqual(exercicio.photo_path, origem);
+        assert.deepEqual(storedPhotos.get(`exercise-photos/${exercicio.photo_path}`).body,
+          storedPhotos.get(`exercise-photos/${origem}`).body);
+      }
+
+      await botao("Ir para treinos").click();
+      await page.getByText("Meus treinos", { exact: true }).filter({ visible: true }).first().click();
+      await botao(`Abrir treino ${nomeNovo}`).click();
+      for (const nome of ["Agachamento teste", avulso])
+        await page.getByLabel(`Visualizar foto de ${nome}`, { exact: true }).filter({ visible: true })
+          .locator("img, [role='img']").waitFor();
+      assert.deepEqual(errors, []);
+      console.log("OK UI — fotos de exercícios originais e avulsos aparecem no novo treino com arquivos independentes.");
       await context.close();
       return;
     }

@@ -7,17 +7,51 @@ import { registrarMudancaDeDados } from "../../servicos/revisaoDados";
 import { supabase } from "../../supabase";
 
 export type ExercicioComFoto = { id: string; plan_id: string; name: string; photo_path?: string | null; photo_url?: string | null };
-type FonteFoto = "biblioteca" | "camera";
+export type FonteFoto = "biblioteca" | "camera";
 
-export function useFotoExercicio<T extends ExercicioComFoto>({ usuarioId, avisar, aoSalvar, salvarVinculo }: {
+export async function selecionarFotoNativa(origem: FonteFoto) {
+  if (origem === "camera") {
+    const permissao = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permissao.granted)
+      throw new Error("Permita o acesso à câmera nas configurações do aparelho.");
+  }
+  const opcoes: ImagePicker.ImagePickerOptions = {
+    mediaTypes: ["images"],
+    allowsMultipleSelection: false,
+    allowsEditing: true,
+    aspect: [1, 1],
+    quality: 0.75,
+    base64: true,
+  };
+  const resultado = origem === "camera"
+    ? await ImagePicker.launchCameraAsync(opcoes)
+    : await ImagePicker.launchImageLibraryAsync(opcoes);
+  return resultado.assets?.[0];
+}
+
+export function useFotoExercicio<T extends ExercicioComFoto>({ usuarioId, avisar, aoSalvar, salvarVinculo, salvarFotoLocal }: {
   usuarioId: string;
   avisar: (titulo: string, mensagem: string) => void;
   aoSalvar: (exercicio: T, caminho: string | null, url: string | null) => void;
   salvarVinculo?: (exercicio: T, caminho: string) => Promise<boolean>;
+  salvarFotoLocal?: (exercicio: T, caminho: string | null) => Promise<boolean | undefined>;
 }) {
   const [origemFotoAberta, setOrigemFotoAberta] = useState<T | null>(null);
   const [fotoCarregandoId, setFotoCarregandoId] = useState<string | null>(null);
   const fotoEmEnvioRef = useRef(false);
+
+  async function vincularFoto(exercicio: T, caminho: string | null) {
+    const salvoLocal = await salvarFotoLocal?.(exercicio, caminho);
+    if (salvoLocal !== undefined) return salvoLocal;
+
+    const atualizar = supabase.from("exercises").update({ photo_path: caminho })
+      .eq("id", exercicio.id).eq("plan_id", exercicio.plan_id).eq("user_id", usuarioId);
+    const { data, error } = await (exercicio.photo_path
+      ? atualizar.eq("photo_path", exercicio.photo_path)
+      : atualizar.is("photo_path", null)).select("id").maybeSingle();
+    if (error) throw error;
+    return Boolean(data);
+  }
 
   async function adicionarOuTrocarFoto(exercicio: T, origem: FonteFoto, capturada?: ImagePicker.ImagePickerAsset) {
     const liberar = () => {
@@ -29,21 +63,7 @@ export function useFotoExercicio<T extends ExercicioComFoto>({ usuarioId, avisar
     try {
       if (!usuarioId) throw new Error("Entre novamente na sua conta.");
       if (!capturada && Platform.OS === "web") return;
-      if (!capturada && origem === "camera") {
-        const permissao = await ImagePicker.requestCameraPermissionsAsync();
-        if (!permissao.granted) {
-          avisar("Permissão necessária", "Permita o acesso à câmera nas configurações do aparelho.");
-          return;
-        }
-      }
-      const opcoes: ImagePicker.ImagePickerOptions = {
-        mediaTypes: ["images"], allowsMultipleSelection: false, allowsEditing: true,
-        aspect: [1, 1], quality: 0.75, base64: Platform.OS !== "web",
-      };
-      const resultado = capturada ? null : origem === "camera"
-        ? await ImagePicker.launchCameraAsync(opcoes)
-        : await ImagePicker.launchImageLibraryAsync(opcoes);
-      const imagem = capturada ?? resultado?.assets?.[0];
+      const imagem = capturada ?? await selecionarFotoNativa(origem);
       if (!imagem) return;
 
       const { arquivoImagem, contentType, extensao } = await prepararFotoExercicio(imagem);
@@ -58,13 +78,7 @@ export function useFotoExercicio<T extends ExercicioComFoto>({ usuarioId, avisar
         if (await salvarVinculo(exercicio, caminho)) avisar("Foto salva", "A foto do exercício foi atualizada.");
         return;
       }
-      const atualizar = supabase.from("exercises").update({ photo_path: caminho })
-        .eq("id", exercicio.id).eq("plan_id", exercicio.plan_id).eq("user_id", usuarioId);
-      const { data: salvo, error: erroVinculo } = await (exercicio.photo_path
-        ? atualizar.eq("photo_path", exercicio.photo_path)
-        : atualizar.is("photo_path", null)).select("id").maybeSingle();
-      if (erroVinculo) throw erroVinculo;
-      if (!salvo) {
+      if (!(await vincularFoto(exercicio, caminho))) {
         await bucket.remove([caminho]);
         throw new Error("O exercício ou a foto mudou. Abra o exercício novamente para atualizar a imagem.");
       }
@@ -99,11 +113,8 @@ export function useFotoExercicio<T extends ExercicioComFoto>({ usuarioId, avisar
       if (!usuarioId || auth.session?.user.id !== usuarioId) {
         throw new Error("A conta ativa mudou. Abra o exercício novamente.");
       }
-      const { data, error } = await supabase.from("exercises").update({ photo_path: null })
-        .eq("id", exercicio.id).eq("plan_id", exercicio.plan_id).eq("user_id", usuarioId)
-        .eq("photo_path", caminho).select("id").maybeSingle();
-      if (error) throw error;
-      if (!data) throw new Error("A foto mudou. Abra o exercício novamente e confira a imagem atual.");
+      if (!(await vincularFoto(exercicio, null)))
+        throw new Error("A foto mudou. Abra o exercício novamente e confira a imagem atual.");
 
       aoSalvar(exercicio, null, null);
       setOrigemFotoAberta(null);

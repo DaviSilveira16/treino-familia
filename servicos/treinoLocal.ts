@@ -88,6 +88,7 @@ export type ModeloTreinoPendente = {
   exercicios: {
     id: string;
     origemId: string;
+    photo_path?: string | null;
     name: string;
     sets_goal: number;
     reps_goal: string;
@@ -159,18 +160,24 @@ export function gravarRascunho(rascunho: TreinoRascunho): Promise<void> {
           atual.exclusaoSolicitada)
       )
         return;
+      const mesmaSessao = atual?.sessao.id === rascunho.sessao.id ? atual : null;
+      const fotosLocais = new Map(
+        mesmaSessao?.exercicios.filter((item) => item.avulso)
+          .map((item) => [item.id, item.photo_path]),
+      );
+      const proximo = {
+        ...rascunho,
+        exercicios: rascunho.exercicios.map((item) =>
+          fotosLocais.has(item.id) ? { ...item, photo_path: fotosLocais.get(item.id) } : item,
+        ),
+      };
+      if (mesmaSessao?.sessaoConfirmadaNoServidor) {
+        proximo.sessaoConfirmadaNoServidor = true;
+        proximo.criacaoPendente = false;
+      }
       await AsyncStorage.setItem(
         chave(rascunho.usuarioId, rascunho.planId),
-        JSON.stringify(
-          atual?.sessao.id === rascunho.sessao.id &&
-            atual.sessaoConfirmadaNoServidor
-            ? {
-                ...rascunho,
-                sessaoConfirmadaNoServidor: true,
-                criacaoPendente: false,
-              }
-            : rascunho,
-        ),
+        JSON.stringify(proximo),
       );
       notificar();
     });
