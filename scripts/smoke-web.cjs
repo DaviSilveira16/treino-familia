@@ -152,6 +152,13 @@ const tables = {
     },
   ],
   cardio_sessions: [],
+  physical_measurements: [3, 45, 100].map((dias, indice) => ({
+    id: `medicao-${dias}`, user_id: uid,
+    measured_at: new Date(now - dias * 86400000).toISOString().slice(0, 10),
+    created_at: new Date(now - dias * 86400000).toISOString(),
+    weight_kg: 75 + indice * 2, waist_cm: 80 + indice * 3,
+    body_fat_percentage: 15 + indice, notes: null,
+  })),
 };
 const storedPhotos = new Map(),
   photoUploads = [];
@@ -177,7 +184,9 @@ let backendOffline = false,
 let holdSync = false,
   releaseSync;
 let holdDetailsSid = null,
+  loseFinishSid = null,
   releaseDetails;
+let falharCopiaFoto = false;
 let denyWorkoutDelete = false;
 let releasePost,
   releaseFeed,
@@ -248,7 +257,13 @@ function filtered(table, search) {
               ? row[key] > expected
               : operator === "lt"
                 ? row[key] < expected
-                : operator === "in"
+                : operator === "lte"
+                  ? row[key] <= expected
+                  : operator === "is" && expected === "null"
+                    ? row[key] == null
+                    : operator === "not" && expected === "is.null"
+                      ? row[key] != null
+                      : operator === "in"
                   ? expected
                       .slice(1, -1)
                       .split(",")
@@ -306,6 +321,7 @@ function filtered(table, search) {
     });
     let phase = "initial";
     let forcedOffline = false,
+      ultimaQuedaForcada = 0,
       offlineReports = 0;
     const cancelledRequests = new Set(),
       nativeFetchReports = [],
@@ -317,6 +333,7 @@ function filtered(table, search) {
       fetchFailures.push(failure);
     });
     const setOffline = async (value) => {
+      if (value) ultimaQuedaForcada = Date.now();
       forcedOffline = value;
       await context.setOffline(value);
     };
@@ -348,7 +365,8 @@ function filtered(table, search) {
       ) {
         nativeFetchReports.push({
           url: nativeUrl,
-          offline: forcedOffline,
+          // O WebKit pode despachar o erro da queda depois de reativar a rede.
+          offline: forcedOffline || Date.now() - ultimaQuedaForcada < 1000,
           at: Date.now(),
         });
         return;
@@ -383,7 +401,7 @@ function filtered(table, search) {
         "access-control-allow-headers":
           request.headers()["access-control-request-headers"] ||
           "authorization,apikey,content-type,x-client-info,prefer,range,accept,content-profile,accept-profile",
-        "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+        "access-control-allow-methods": "GET,HEAD,POST,PATCH,DELETE,OPTIONS",
         "content-type": "application/json",
       };
       if (request.method() === "OPTIONS")
@@ -430,6 +448,8 @@ function filtered(table, search) {
         });
       }
       if (url.pathname === "/storage/v1/object/copy") {
+        if (falharCopiaFoto)
+          return route.fulfill({ status: 503, json: { message: "Storage indisponível" }, headers });
         const { bucketId, sourceKey, destinationKey } = request.postDataJSON();
         const source = storedPhotos.get(`${bucketId}/${sourceKey}`);
         const path = `${bucketId}/${destinationKey}`;
@@ -549,6 +569,12 @@ function filtered(table, search) {
       }
       if (["POST", "PATCH"].includes(request.method())) {
         const body = request.postDataJSON();
+        if (table === "workout_sessions" && request.method() === "PATCH" &&
+            body.status === "concluido" && url.searchParams.get("id") === `eq.${loseFinishSid}`) {
+          loseFinishSid = null;
+          rows.forEach((row) => Object.assign(row, body));
+          return route.fulfill({ status: 503, json: { message: "Resposta da conclusão perdida" }, headers });
+        }
         if (
           table === "workout_sessions" &&
           request.method() === "PATCH" &&
@@ -846,7 +872,8 @@ function filtered(table, search) {
       await context.close();
       return;
     }
-    if (process.env.SMOKE_MODEL_PHOTOS_ONLY) {
+    if (process.env.SMOKE_MODEL_PHOTOS_ONLY || process.env.SMOKE_PHOTO_RETRY_ONLY) {
+      const testarReenvio = Boolean(process.env.SMOKE_PHOTO_RETRY_ONLY);
       const continuar = () => page.getByRole("button", { name: /Continuar treino: Plano teste/ }).click();
       const botao = (name) => page.getByRole("button", { name, exact: true });
       const campo = (name) => page.getByRole("textbox", { name, exact: true });
@@ -899,12 +926,30 @@ function filtered(table, search) {
       const nomeNovo = "Treino com fotos copiadas";
       await campo("Nome do novo treino").fill(nomeNovo);
       await campo("Duração do treino em minutos").fill("3");
+      falharCopiaFoto = testarReenvio;
       await botao("Confirmar conclusão do treino").click();
       await page.waitForFunction((key) => !localStorage.getItem(key), draftKey);
 
       const novo = tables.workout_plans.find((p) => p.name === nomeNovo);
       assert.ok(novo);
       assert.equal(tables.workout_sessions.find((s) => s.id === sid).plan_id, novo.id);
+      if (testarReenvio) {
+        assert.equal(tables.exercises.filter((e) => e.plan_id === novo.id && e.photo_path).length, 0);
+        await page.reload();
+        await page.getByText("2 fotos aguardando envio", { exact: true }).waitFor();
+        await page.getByText("Meus treinos", { exact: true }).filter({ visible: true }).first().click();
+        await botao("Abrir treino Plano teste").click();
+        await page.getByText("▶ Iniciar treino com cronômetro", { exact: true }).click();
+        await page.getByText("▶ Iniciar treino", { exact: true }).click();
+        await page.waitForFunction((key) => {
+          const treino = JSON.parse(localStorage.getItem(key) || "null");
+          return treino?.novaSessaoAtiva && treino.sessaoConfirmadaNoServidor;
+        }, draftKey);
+        assert.ok(tables.workout_sessions.some((sessao) => sessao.id !== sid && sessao.status === "em_andamento"));
+        falharCopiaFoto = false;
+        await page.evaluate(() => window.dispatchEvent(new Event("online")));
+      }
+      await page.waitForFunction(() => !Object.keys(localStorage).some((key) => key.includes(":fotos-modelo:v1:")));
       for (const [nome, origem] of [["Agachamento teste", fotoOriginal], [avulso, fotoAvulsa]]) {
         const exercicio = tables.exercises.find((e) => e.plan_id === novo.id && e.name === nome);
         assert.ok(exercicio?.photo_path?.startsWith(`${uid}/${exercicio.id}/`));
@@ -913,6 +958,12 @@ function filtered(table, search) {
           storedPhotos.get(`exercise-photos/${origem}`).body);
       }
 
+      if (testarReenvio) {
+        assert.deepEqual(errors, []);
+        console.log("OK UI — uma sessão nova inicia com fotos pendentes e o envio é retomado.");
+        await context.close();
+        return;
+      }
       await botao("Ir para treinos").click();
       await page.getByText("Meus treinos", { exact: true }).filter({ visible: true }).first().click();
       await botao(`Abrir treino ${nomeNovo}`).click();
@@ -1088,21 +1139,24 @@ function filtered(table, search) {
       name: "Repetir carga nas séries abertas de Agachamento teste",
       exact: true,
     });
-    await repetir.click();
-    await page
-      .getByRole("textbox", {
-        name: "Agachamento teste, série 1, carga em quilos",
-        exact: true,
-      })
-      .fill("32");
-    assert.equal(
-      await page
-        .getByRole("textbox", {
-          name: "Agachamento teste, série 2, carga em quilos",
-          exact: true,
-        })
-        .inputValue(),
-      "32",
+    for (let tentativa = 0; tentativa < 3; tentativa++) {
+      const marcado = repetir.getByText("✓", { exact: true });
+      if (await marcado.isVisible()) break;
+      await repetir.click();
+      try {
+        await marcado.waitFor({ timeout: 700 });
+        break;
+      } catch (erro) {
+        if (tentativa === 2) throw erro;
+      }
+    }
+    const cargaPrimeira = page.getByRole("textbox", {
+      name: "Agachamento teste, série 1, carga em quilos", exact: true,
+    });
+    await cargaPrimeira.click();
+    await cargaPrimeira.fill("32");
+    await page.waitForFunction(() =>
+      document.querySelector('input[aria-label="Agachamento teste, série 2, carga em quilos"]')?.value === "32",
     );
     await page
       .getByRole("textbox", {
@@ -1224,11 +1278,21 @@ function filtered(table, search) {
         exact: true,
       })
       .click();
-    // O WebKit pode restaurar o foco do modal recém-fechado. Clique como
-    // o usuário faria antes de preencher, garantindo que o input receba texto.
-    await cargaPrincipal.click();
-    await cargaPrincipal.fill("30");
-    assert.equal(await cargaPrincipal.inputValue(), "30");
+    // Espera a gravação local de desmarcar e a atualização do input controlado.
+    await page.waitForFunction((key) => !JSON.parse(localStorage.getItem(key))?.series[0]?.concluida, draftKey);
+    for (let tentativa = 0; tentativa < 3; tentativa++) {
+      await cargaPrincipal.click();
+      await cargaPrincipal.fill("30");
+      try {
+        await page.waitForFunction((rotulo) => {
+          const campo = document.querySelector(`input[aria-label="${rotulo}"]`);
+          return campo?.value === "30";
+        }, "Agachamento teste, série 1, carga em quilos", { timeout: 800 });
+        break;
+      } catch (erro) {
+        if (tentativa === 2) throw erro;
+      }
+    }
     await page.waitForFunction((key) => {
       const salvo = JSON.parse(localStorage.getItem(key));
       return salvo?.series[0]?.weight_kg === "30" && !salvo.series[0].concluida;
@@ -1756,12 +1820,17 @@ function filtered(table, search) {
       path: path.join(output, "web-sessao-ausente-reenvio.png"),
     });
     holdDetailsSid = missingSid;
+    loseFinishSid = missingSid;
     await page
       .getByRole("button", {
         name: "Enviar treino salvo neste aparelho",
         exact: true,
       })
       .click();
+    for (let tentativa = 0; loseFinishSid && tentativa < 50; tentativa++)
+      await page.waitForTimeout(100);
+    assert.equal(loseFinishSid, null, "A primeira conclusão perdeu a resposta");
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
     await page.waitForFunction(
       (key) =>
         Boolean(
@@ -2419,6 +2488,18 @@ function filtered(table, search) {
       1,
       "Selecionar o cardio existente não registra atividade sem confirmação",
     );
+    phase = "filtros da evolução física";
+    await page.getByRole("button", { name: "Ir para treinos", exact: true }).click();
+    await page.getByText("Evolução física", { exact: true }).filter({ visible: true }).first().click();
+    await page.getByText("Peso · 1 medição", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "90 dias", exact: true }).click();
+    await page.getByText("Peso · 2 medições · Variação: -2 kg", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Cintura", exact: true }).click();
+    await page.getByRole("button", { name: "365 dias", exact: true }).click();
+    await page.getByText("Cintura · 3 medições · Variação: -6 cm", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Gordura corporal", exact: true }).click();
+    await page.getByText("Gordura corporal · 3 medições · Variação: -2 p.p.", { exact: true }).waitFor();
+
     const unexpectedFetch = nativeFetchReports.filter(
       (report) =>
         !report.offline &&

@@ -64,26 +64,33 @@ function filtrar(rows, params) {
     const req = route.request(), url = new URL(req.url());
     if (url.origin === origin) return route.continue();
     if (url.origin !== backend) return route.fulfill({ status: 200, json: {} });
+    const cors = {
+      "access-control-allow-origin": origin,
+      "access-control-allow-methods": "GET,POST,HEAD,OPTIONS",
+      "access-control-allow-headers": req.headers()["access-control-request-headers"] || "apikey,authorization,content-type,x-client-info",
+    };
+    if (req.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+    const responder = (json) => route.fulfill({ json, headers: cors });
     if (offline) return route.abort("internetdisconnected");
-    if (url.pathname.startsWith("/auth/")) return route.fulfill({ json: url.pathname.endsWith("/user") ? usuario : sessao });
+    if (url.pathname.startsWith("/auth/")) return responder(url.pathname.endsWith("/user") ? usuario : sessao);
     if (url.pathname.endsWith("/rpc/nutrition_save_document")) {
       const p = req.postDataJSON();
-      if (receipts.has(p.p_operation_id)) return route.fulfill({ json: receipts.get(p.p_operation_id) });
+      if (receipts.has(p.p_operation_id)) return responder(receipts.get(p.p_operation_id));
       const table = tables[tipoTabela[p.p_type]];
       let linha = table.find((r) => r.id === p.p_id || p.p_type === "day" && r.document.data === p.p_document.data);
-      if ((linha?.revision || 0) !== p.p_expected_revision) return route.fulfill({ json: { status: "conflict", id: linha.id, revision: linha.revision, document: linha.document } });
+      if ((linha?.revision || 0) !== p.p_expected_revision) return responder({ status: "conflict", id: linha.id, revision: linha.revision, document: linha.document });
       if (!linha) { linha = { id: p.p_id, user_id: uid, revision: 0 }; table.push(linha); }
       linha.document = { ...p.p_document, ...(p.p_type === "preferences" ? {} : { id: linha.id }) };
       if (p.p_type === "day") linha.local_date = p.p_document.data;
       linha.revision++;
       const resposta = { status: "ok", id: linha.id, revision: linha.revision };
       receipts.set(p.p_operation_id, resposta);
-      return route.fulfill({ json: resposta });
+      return responder(resposta);
     }
     const table = url.pathname.split("/").pop();
     let rows = filtrar(tables[table] || [], url.searchParams);
     if (table === "nutrition_foods") rows = tables.nutrition_foods;
-    return route.fulfill({ json: req.headers().accept?.includes("application/vnd.pgrst.object+json") ? rows[0] || null : rows });
+    return responder(req.headers().accept?.includes("application/vnd.pgrst.object+json") ? rows[0] || null : rows);
   });
   await context.addInitScript(({ authKey, sessao, standalone }) => {
     if (!localStorage.getItem(authKey)) localStorage.setItem(authKey, JSON.stringify(sessao));
@@ -98,13 +105,14 @@ function filtrar(rows, params) {
     await page.screenshot({ path: path.join(output, "painel-nutricao.png"), fullPage: true });
     await page.getByRole("button", { name: "Abrir Minhas metas", exact: true }).click();
     await page.getByRole("textbox", { name: "Meta alimentar (kcal/dia)", exact: true }).fill("2000");
-    await page.getByRole("textbox", { name: "Gasto diário base sem treinos (kcal)", exact: true }).fill("2500");
-    await page.getByRole("button", { name: "Salvar metas", exact: true }).click();
+    await page.getByRole("textbox", { name: "Informar outro gasto base (opcional, kcal/dia)", exact: true }).fill("2500");
+    await page.getByRole("button", { name: "Salvar metas e atualizar a Análise", exact: true }).click();
     await page.getByRole("button", { name: "Abrir Alimentação de hoje", exact: true }).click();
     await page.getByRole("button", { name: "Adicionar alimento em Café da manhã", exact: true }).click();
     await page.getByRole("button", { name: `Escolher ${alimento.nome}`, exact: true }).click();
     await page.getByRole("textbox", { name: "Quantidade em gramas", exact: true }).fill("500");
     await page.getByRole("button", { name: "Adicionar alimento planejado", exact: true }).click();
+    await page.getByRole("button", { name: "Adicionar alimento planejado", exact: true }).waitFor({ state: "hidden" });
     await page.getByText("2.000 kcal", { exact: false }).first().waitFor();
     await page.getByRole("button", { name: "Comi todas as refeições como estão", exact: true }).click();
     await page.getByRole("button", { name: "Concluir registros do dia", exact: true }).click();

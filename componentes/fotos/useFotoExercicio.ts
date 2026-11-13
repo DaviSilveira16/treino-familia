@@ -84,7 +84,7 @@ export function useFotoExercicio<T extends ExercicioComFoto>({ usuarioId, avisar
       }
       const { data: assinatura } = await bucket.createSignedUrl(caminho, 604800);
       aoSalvar(exercicio, caminho, assinatura?.signedUrl ?? null);
-      registrarMudancaDeDados(exercicio.plan_id);
+      registrarMudancaDeDados(exercicio.plan_id, "plano");
       if (exercicio.photo_path) await bucket.remove([exercicio.photo_path]);
       avisar("Foto salva", "A foto do exercício foi atualizada.");
     } catch (erro) {
@@ -118,7 +118,7 @@ export function useFotoExercicio<T extends ExercicioComFoto>({ usuarioId, avisar
 
       aoSalvar(exercicio, null, null);
       setOrigemFotoAberta(null);
-      registrarMudancaDeDados(exercicio.plan_id);
+      registrarMudancaDeDados(exercicio.plan_id, "plano");
       const { error: erroArquivo } = await supabase.storage.from("exercise-photos").remove([caminho]);
       if (erroArquivo) avisar("Foto retirada do exercício", "O armazenamento não confirmou a exclusão do arquivo.");
     } catch (erro) {

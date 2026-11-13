@@ -37,6 +37,16 @@ type Medicao = {
   notes: string | null;
 };
 
+const metricas = {
+  weight_kg: { rotulo: "Peso", unidade: "kg" },
+  waist_cm: { rotulo: "Cintura", unidade: "cm" },
+  body_fat_percentage: { rotulo: "Gordura corporal", unidade: "%" },
+};
+type Metrica = keyof typeof metricas;
+const periodos = [30, 90, 365] as const;
+
+type PontoMedicao = Pick<Medicao, "id" | "measured_at"> & { valor: number };
+
 type CamposMedicao = {
   weight_kg: string;
   body_fat_percentage: string;
@@ -98,6 +108,50 @@ export default function EvolucaoFisica({
   const [dataMedicao, setDataMedicao] = useState(dataHojeLocal());
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
+
+  const [periodo, setPeriodo] = useState<(typeof periodos)[number]>(30);
+  const [metrica, setMetrica] = useState<Metrica>("weight_kg");
+  const [tendencia, setTendencia] = useState<{
+    contexto: string; pontos: PontoMedicao[]; erro?: boolean;
+  } | null>(null);
+  const [revisaoGrafico, setRevisaoGrafico] = useState(0);
+  const contextoGrafico = `${usuarioId}:${periodo}:${metrica}:${revisaoGrafico}`;
+
+  useEffect(() => {
+    if (!usuarioId) return;
+    const controller = new AbortController();
+    async function carregarPeriodo() {
+      const hoje = new Date();
+      const inicio = new Date(hoje);
+      inicio.setDate(hoje.getDate() - periodo + 1);
+      const formatarDia = (data: Date) => [
+        data.getFullYear(), String(data.getMonth() + 1).padStart(2, "0"),
+        String(data.getDate()).padStart(2, "0"),
+      ].join("-");
+      const pontos: PontoMedicao[] = [];
+      const tamanho = 500;
+      for (let pagina = 0; ; pagina += tamanho) {
+        const { data, error } = await supabase.from("physical_measurements")
+          .select("id, measured_at, weight_kg, waist_cm, body_fat_percentage").eq("user_id", usuarioId)
+          .gte("measured_at", formatarDia(inicio)).lte("measured_at", formatarDia(hoje))
+          .not(metrica, "is", null).order("measured_at").order("created_at").order("id")
+          .range(pagina, pagina + tamanho - 1).abortSignal(controller.signal);
+        if (error) throw error;
+        for (const item of data ?? []) {
+          const valor = item[metrica];
+          if (valor != null && Number.isFinite(Number(valor)))
+            pontos.push({ id: item.id, measured_at: item.measured_at, valor: Number(valor) });
+        }
+        if ((data?.length ?? 0) < tamanho) break;
+      }
+      if (!controller.signal.aborted) setTendencia({ contexto: contextoGrafico, pontos });
+    }
+    void carregarPeriodo().catch(() => {
+      if (!controller.signal.aborted)
+        setTendencia({ contexto: contextoGrafico, pontos: [], erro: true });
+    });
+    return () => controller.abort();
+  }, [usuarioId, periodo, metrica, contextoGrafico]);
 
   const carregarMedicoes = useCallback(async (idUsuario: string) => {
     const { data, error } = await supabase
@@ -170,17 +224,16 @@ export default function EvolucaoFisica({
     };
   }, [medicoes]);
 
+  const periodoAtual = tendencia?.contexto === contextoGrafico ? tendencia : null;
+  const pontos = periodoAtual?.pontos;
   const dadosGrafico = useMemo(() => {
-    return medicoes
-      .filter((item) => item.weight_kg !== null)
-      .slice(0, 8)
-      .reverse();
-  }, [medicoes]);
-
-  const pesoMaximo = Math.max(
-    ...dadosGrafico.map((item) => item.weight_kg ?? 0),
-    1,
-  );
+    if (!pontos || pontos.length <= 8) return pontos ?? [];
+    return Array.from({ length: 8 }, (_, indice) => pontos[Math.round(indice * (pontos.length - 1) / 7)]);
+  }, [pontos]);
+  const valorMaximo = Math.max(...dadosGrafico.map((item) => item.valor), 1);
+  const variacaoPeriodo = pontos && pontos.length > 1
+    ? pontos[pontos.length - 1].valor - pontos[0].valor : null;
+  const { rotulo, unidade } = metricas[metrica];
 
   function atualizarCampo(campo: keyof CamposMedicao, valor: string) {
     setCampos((atual) => ({ ...atual, [campo]: valor }));
@@ -264,6 +317,7 @@ export default function EvolucaoFisica({
       setCampos(camposVazios);
       setDataMedicao(dataHojeLocal());
 
+      setRevisaoGrafico((atual) => atual + 1);
       await carregarMedicoes(usuarioId);
 
       Alert.alert("Medição salva", "Sua evolução física foi atualizada.");
@@ -421,47 +475,56 @@ export default function EvolucaoFisica({
         </TouchableOpacity>
       </View>
 
-      {dadosGrafico.length > 1 ? (
-        <View style={styles.cartao}>
-          <Text style={styles.tituloCartao}>Variação do peso</Text>
-
-          <Text style={styles.textoSecundario}>
-            Últimas {dadosGrafico.length} medições registradas
-          </Text>
-
-          <View style={styles.grafico}>
-            {dadosGrafico.map((item) => {
-              const altura = Math.max(
-                8,
-                ((item.weight_kg ?? 0) / pesoMaximo) * 120,
-              );
-
-              return (
-                <View style={styles.colunaGrafico} key={item.id}>
-                  <Text style={styles.valorGrafico}>
-                    {(item.weight_kg ?? 0).toLocaleString("pt-BR", {
-                      maximumFractionDigits: 1,
-                    })}
-                  </Text>
-
-                  <View style={styles.baseBarra}>
-                    <View
-                      style={[
-                        styles.barra,
-                        { height: altura, backgroundColor: corTema },
-                      ]}
-                    />
-                  </View>
-
-                  <Text style={styles.dataGrafico}>
-                    {formatarData(item.measured_at).slice(0, 5)}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
+      <View style={styles.cartao}>
+        <Text style={styles.tituloCartao}>Evolução no período</Text>
+        <View style={styles.filtrosGrafico}>
+          {periodos.map((dias) => (
+            <TouchableOpacity key={dias} accessibilityRole="button"
+              accessibilityState={{ selected: dias === periodo }}
+              style={[styles.filtroGrafico, dias === periodo && { borderColor: corTema }]}
+              onPress={() => setPeriodo(dias)}>
+              <Text style={styles.textoSecundario}>{dias} dias</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-      ) : null}
+        <View style={styles.filtrosGrafico}>
+          {(Object.keys(metricas) as Metrica[]).map((campo) => (
+            <TouchableOpacity key={campo} accessibilityRole="button"
+              accessibilityState={{ selected: campo === metrica }}
+              style={[styles.filtroGrafico, campo === metrica && { borderColor: corTema }]}
+              onPress={() => setMetrica(campo)}>
+              <Text style={styles.textoSecundario}>{metricas[campo].rotulo}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {!periodoAtual ? <ActivityIndicator color={corTema} /> : periodoAtual.erro ? (
+          <TouchableOpacity accessibilityRole="button" onPress={() => setRevisaoGrafico((atual) => atual + 1)}>
+            <Text style={styles.textoSecundario}>Não foi possível carregar o gráfico. Tentar novamente</Text>
+          </TouchableOpacity>
+        ) : dadosGrafico.length ? (
+          <>
+            <Text style={styles.textoSecundario}>
+              {rotulo} · {pontos?.length} {pontos?.length === 1 ? "medição" : "medições"}
+              {variacaoPeriodo === null ? "" : ` · Variação: ${variacaoPeriodo > 0 ? "+" : ""}${formatarValor(variacaoPeriodo, metrica === "body_fat_percentage" ? "p.p." : unidade)}`}
+            </Text>
+            <View style={styles.grafico}>
+              {dadosGrafico.map((item) => (
+                <View style={styles.colunaGrafico} key={item.id}
+                  accessible accessibilityLabel={`${formatarData(item.measured_at)}, ${formatarValor(item.valor, unidade)}`}>
+                  <Text style={styles.valorGrafico}>{item.valor.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}</Text>
+                  <View style={styles.baseBarra}>
+                    <View style={[styles.barra, { height: Math.max(2, item.valor / valorMaximo * 120), backgroundColor: corTema }]} />
+                  </View>
+                  <Text style={styles.dataGrafico}>{formatarData(item.measured_at).slice(0, 5)}</Text>
+                </View>
+              ))}
+            </View>
+            {pontos && pontos.length > dadosGrafico.length ? (
+              <Text style={styles.textoSecundario}>O gráfico exibe {dadosGrafico.length} medições distribuídas pelo período.</Text>
+            ) : null}
+          </>
+        ) : <Text style={styles.textoSecundario}>Nenhuma medição de {rotulo.toLowerCase()} neste período.</Text>}
+      </View>
 
       <View style={styles.cartao}>
         <Text style={styles.tituloCartao}>Histórico de medições</Text>
@@ -637,6 +700,8 @@ const styles = StyleSheet.create({
   },
   botaoDesabilitado: { opacity: 0.65 },
   botaoSalvarTexto: { color: "#101312", fontSize: 15, fontWeight: "800" },
+  filtrosGrafico: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  filtroGrafico: { minHeight: 44, justifyContent: "center", paddingHorizontal: 8, borderWidth: 1, borderColor: "#303832", borderRadius: 10 },
   grafico: {
     flexDirection: "row",
     alignItems: "flex-end",

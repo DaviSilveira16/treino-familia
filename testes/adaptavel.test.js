@@ -38,12 +38,14 @@ const db = {
   workout_sets: [],
 };
 const faults = new Map();
+const requisicoes = [];
 function query(table) {
   const filters = [];
   let action = "select",
     value,
     single = false,
     ordering,
+    inicio = 0,
     max = Infinity;
   const q = {
     select() {
@@ -51,6 +53,15 @@ function query(table) {
     },
     eq(k, v) {
       filters.push((r) => r[k] === v);
+      return q;
+    },
+    in(k, valores) {
+      filters.push((r) => valores.includes(r[k]));
+      return q;
+    },
+    range(primeiro, ultimo) {
+      inicio = primeiro;
+      max = ultimo + 1;
       return q;
     },
     is(k, v) {
@@ -69,7 +80,7 @@ function query(table) {
       max = n;
       return q;
     },
-    order(k, opts) {
+    order(k, opts = { ascending: true }) {
       ordering = [k, opts.ascending];
       return q;
     },
@@ -96,6 +107,7 @@ function query(table) {
       return q;
     },
     then(resolve, reject) {
+      requisicoes.push(`${table}:${action}`);
       return Promise.resolve()
         .then(() => {
           let rows = db[table].filter((r) => filters.every((f) => f(r)));
@@ -105,7 +117,7 @@ function query(table) {
                 (a[ordering[0]] > b[ordering[0]] ? 1 : -1) *
                 (ordering[1] ? 1 : -1),
             );
-          rows = rows.slice(0, max);
+          rows = rows.slice(inicio, max);
           if (action === "insert") {
             const added = Array.isArray(value) ? value : [value];
             for (const row of added) {
@@ -329,7 +341,12 @@ async function concluir() {
     await local.lerRascunho("u1", "p1"),
     "Fila permanece durante criação parcial do modelo",
   );
+  const inicioMedicao = requisicoes.length;
   assert.equal((await concluir()).concluido, true);
+  const consultasConclusao = requisicoes.slice(inicioMedicao);
+  assert.equal(consultasConclusao.filter((item) => item === "exercise_load_defaults:select").length, 1);
+  assert.equal(consultasConclusao.filter((item) => item === "exercise_load_defaults:insert").length, 1);
+  assert.equal(consultasConclusao.filter((item) => item === "workout_sessions:update").length, 1);
   assert.equal(db.workout_plans.length, 2);
   assert.equal(db.exercises.filter((e) => e.plan_id === novo.planId).length, 2);
   assert.equal(db.workout_sessions[0].plan_id, novo.planId);

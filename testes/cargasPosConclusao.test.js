@@ -14,6 +14,7 @@ function query(table) {
   const q = {
     select() { return q; },
     eq(k, v) { filtros.push((r) => r[k] === v); return q; },
+    in(k, valores) { filtros.push((r) => valores.includes(r[k])); return q; },
     maybeSingle() { single = true; return q; },
     then(resolve, reject) {
       return Promise.resolve().then(() => {

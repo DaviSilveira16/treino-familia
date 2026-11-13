@@ -17,6 +17,7 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
     fetch: async (input, init) => {
       const inicio = Date.now();
       let rotulo = "supabase.outro";
+      let copiaNoServidor = false;
       try {
         const endereco =
           typeof input === "string"
@@ -25,6 +26,7 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
               ? input.url
               : String(input);
         const caminho = new URL(endereco).pathname;
+        copiaNoServidor = caminho.endsWith("/storage/v1/object/copy");
         const tabela = caminho.match(
           /\/(?:rest\/v1|rpc)\/([a-z_]{1,35})(?:\/|$)/i,
         )?.[1];
@@ -35,8 +37,10 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
         /* O monitoramento nunca deve impedir uma solicitação. */
       }
       try {
-        // Uploads de fotos podem levar mais tempo numa rede móvel.
-        const resposta = rotulo === "supabase.storage"
+        // O upload pode levar mais tempo. A cópia no servidor e o HEAD têm
+        // prazo para liberar o próximo reenvio quando a conexão fica parada.
+        const metodo = init?.method ?? (typeof input === "object" && "method" in input ? input.method : "");
+        const resposta = rotulo === "supabase.storage" && metodo.toUpperCase() !== "HEAD" && !copiaNoServidor
           ? await fetch(input, init)
           : await requisicaoComPrazo(input, init);
         registrarTempo(rotulo, inicio, !resposta.ok);

@@ -3,47 +3,6 @@ import type { TreinoRascunho } from "./treinoLocal";
 
 export class ConflitoModeloTreino extends Error {}
 
-async function copiarFotoDoExercicio(
-  usuarioId: string,
-  planId: string,
-  exercicioId: string,
-  origemId: string,
-  origem: string,
-) {
-  const [dono, exercicio, arquivo, ...resto] = origem.split("/");
-  if (
-    dono !== usuarioId ||
-    exercicio !== origemId ||
-    resto.length ||
-    !arquivo ||
-    !/^[\w.-]+\.[a-z0-9]+$/i.test(arquivo)
-  ) return;
-
-  const destino = `${usuarioId}/${exercicioId}/${arquivo}`;
-  const bucket = supabase.storage.from("exercise-photos");
-  const { error: erroCopia } = await bucket.copy(origem, destino);
-  if (erroCopia) {
-    // Se a resposta se perdeu, a cópia pode existir desde a tentativa anterior.
-    const { data: copiada } = await bucket.exists(destino);
-    if (!copiada) {
-      // A foto de origem pode ter sido excluída enquanto a sessão estava offline.
-      const { data: existe } = await bucket.exists(origem);
-      if (!existe && "code" in erroCopia && erroCopia.code === "NoSuchKey")
-        return;
-      throw erroCopia;
-    }
-  }
-
-  const { error } = await supabase
-    .from("exercises")
-    .update({ photo_path: destino })
-    .eq("id", exercicioId)
-    .eq("plan_id", planId)
-    .eq("user_id", usuarioId)
-    .is("photo_path", null);
-  if (error) throw error;
-}
-
 /** Stable client IDs + read-before-insert make a lost response safe to retry. */
 export async function salvarModeloDoTreino(
   local: TreinoRascunho,
@@ -78,128 +37,115 @@ export async function salvarModeloDoTreino(
       "O novo treino foi alterado em outro lugar. A sessão continua preservada para revisão.",
     );
 
-  const fotosPendentes: { id: string; origemId: string; caminho: string }[] = [];
-  for (const [indice, exercicio] of modelo.exercicios.entries()) {
-    const { data: existente, error: erroExercicio } = await supabase
+  const ids = modelo.exercicios.map((exercicio) => exercicio.id);
+  if (ids.length) {
+    const { data: existentes, error: erroExercicios } = await supabase
       .from("exercises")
-      .select("id, plan_id, name, sets_goal, reps_goal, photo_path")
-      .eq("id", exercicio.id)
+      .select("id, plan_id, name, sets_goal, reps_goal")
       .eq("user_id", usuarioId)
-      .maybeSingle();
-    if (erroExercicio) throw erroExercicio;
-    if (existente) {
-      if (
-        existente.plan_id !== modelo.planId ||
-        existente.name !== exercicio.name ||
-        (validarReferenciasPlanejadas &&
-          (Number(existente.sets_goal) !== exercicio.sets_goal ||
-            String(existente.reps_goal) !== exercicio.reps_goal))
-      )
+      .in("id", ids);
+    if (erroExercicios) throw erroExercicios;
+    const porId = new Map((existentes ?? []).map((item) => [item.id, item]));
+    const novos = [];
+    for (const [indice, exercicio] of modelo.exercicios.entries()) {
+      const existente = porId.get(exercicio.id);
+      if (!existente) {
+        novos.push({
+          id: exercicio.id, user_id: usuarioId, plan_id: modelo.planId,
+          name: exercicio.name, sets_goal: exercicio.sets_goal,
+          reps_goal: exercicio.reps_goal, position: indice,
+        });
+        continue;
+      }
+      if (existente.plan_id !== modelo.planId || existente.name !== exercicio.name ||
+          (validarReferenciasPlanejadas &&
+            (Number(existente.sets_goal) !== exercicio.sets_goal ||
+              String(existente.reps_goal) !== exercicio.reps_goal)))
         throw new ConflitoModeloTreino(
           "Um exercício do novo modelo foi alterado. Seus dados locais foram preservados.",
         );
-    } else {
-      let position = indice;
+    }
+    if (novos.length) {
       if (modelo.modo === "adicionar") {
         const { data: ultimos, error } = await supabase
-          .from("exercises")
-          .select("position")
-          .eq("user_id", usuarioId)
-          .eq("plan_id", modelo.planId)
-          .order("position", { ascending: false })
-          .limit(1);
+          .from("exercises").select("position").eq("user_id", usuarioId)
+          .eq("plan_id", modelo.planId).order("position", { ascending: false }).limit(1);
         if (error) throw error;
-        position = Number(ultimos?.[0]?.position ?? -1) + 1;
+        const primeiraPosicao = Number(ultimos?.[0]?.position ?? -1) + 1;
+        novos.forEach((exercicio, indice) => { exercicio.position = primeiraPosicao + indice; });
       }
-      const { error } = await supabase
-        .from("exercises")
-        .insert({
-          id: exercicio.id,
-          user_id: usuarioId,
-          plan_id: modelo.planId,
-          name: exercicio.name,
-          sets_goal: exercicio.sets_goal,
-          reps_goal: exercicio.reps_goal,
-          position,
-        });
+      const { error } = await supabase.from("exercises").insert(novos);
       if (error) throw error;
     }
-    if (!prepararApenas && !existente?.photo_path) {
-      const caminho = exercicio.photo_path === undefined
-        ? local.exercicios?.find((item) => item.id === exercicio.origemId)?.photo_path
-        : exercicio.photo_path;
-      if (caminho) fotosPendentes.push({ id: exercicio.id, origemId: exercicio.origemId, caminho });
-    }
-    for (const serie of validarReferenciasPlanejadas ? exercicio.series : []) {
-      const { data: referencia, error: erroReferencia } = await supabase
-        .from("exercise_load_defaults")
-        .select("reps, weight_kg")
-        .eq("user_id", usuarioId)
-        .eq("exercise_id", exercicio.id)
-        .eq("set_number", serie.set_number)
-        .maybeSingle();
-      if (erroReferencia) throw erroReferencia;
-      if (referencia) {
-        if (
-          Number(referencia.reps) !== serie.reps ||
-          Number(referencia.weight_kg) !== serie.weight_kg
-        )
-          throw new ConflitoModeloTreino(
-            "As cargas do novo modelo foram alteradas. Confira antes de reenviar.",
-          );
-      } else {
-        const { error } = await supabase
-          .from("exercise_load_defaults")
-          .insert({ user_id: usuarioId, exercise_id: exercicio.id, ...serie });
+
+    if (validarReferenciasPlanejadas) {
+      // Pagina porque um modelo pode ter mais séries que o limite do PostgREST.
+      const referencias = new Map<string, { reps: number; weight_kg: number }>();
+      const tamanhoPagina = 500;
+      for (let inicio = 0; ; inicio += tamanhoPagina) {
+        const { data, error } = await supabase.from("exercise_load_defaults")
+          .select("exercise_id, set_number, reps, weight_kg").eq("user_id", usuarioId)
+          .in("exercise_id", ids).order("exercise_id").order("set_number")
+          .range(inicio, inicio + tamanhoPagina - 1);
+        if (error) throw error;
+        for (const serie of data ?? [])
+          referencias.set(`${serie.exercise_id}:${serie.set_number}`, serie);
+        if ((data?.length ?? 0) < tamanhoPagina) break;
+      }
+      const ausentes = [];
+      for (const exercicio of modelo.exercicios) {
+        for (const serie of exercicio.series) {
+          const existente = referencias.get(`${exercicio.id}:${serie.set_number}`);
+          if (!existente) {
+            ausentes.push({ user_id: usuarioId, exercise_id: exercicio.id, ...serie });
+          } else if (Number(existente.reps) !== serie.reps || Number(existente.weight_kg) !== serie.weight_kg) {
+            throw new ConflitoModeloTreino(
+              "As cargas do novo modelo foram alteradas. Confira antes de reenviar.",
+            );
+          }
+        }
+      }
+      if (ausentes.length) {
+        const { error } = await supabase.from("exercise_load_defaults").insert(ausentes);
         if (error) throw error;
       }
     }
   }
-  // History snapshots keep their names/values; link them to the chosen template only after it is complete.
-  for (const exercicio of modelo.exercicios) {
-    const series = local.series.filter(
-      (s) =>
-        s.exercise_id === exercicio.origemId &&
-        s.concluida &&
-        !s.excluida &&
-        s.registroId,
-    );
-    for (const serie of series) {
-      const { data: registro, error } = await supabase
-        .from("workout_sets")
-        .select("id, exercise_id")
-        .eq("id", serie.registroId!)
-        .eq("user_id", usuarioId)
-        .eq("session_id", sessaoId)
-        .maybeSingle();
-      if (error) throw error;
-      if (!registro)
-        throw new ConflitoModeloTreino(
-          "Uma série da sessão foi removida durante o salvamento. O rascunho continua preservado.",
-        );
-      if (registro.exercise_id === exercicio.id) continue;
+
+  const destinoPorOrigem = new Map(modelo.exercicios.map((item) => [item.origemId, item.id]));
+  const series = local.series.filter((s) => s.concluida && !s.excluida && s.registroId &&
+    destinoPorOrigem.has(s.exercise_id));
+  // Agrupa o vínculo por exercício e mantém a verificação do valor anterior.
+  for (let inicio = 0; inicio < series.length; inicio += 150) {
+    const lote = series.slice(inicio, inicio + 150);
+    const { data, error } = await supabase.from("workout_sets").select("id, exercise_id")
+      .eq("user_id", usuarioId).eq("session_id", sessaoId).in("id", lote.map((s) => s.registroId!));
+    if (error) throw error;
+    const porId = new Map((data ?? []).map((s) => [s.id, s]));
+    const grupos = new Map<string, { origem: string | null; ids: string[] }>();
+    for (const serie of lote) {
+      const registro = porId.get(serie.registroId!);
+      const destino = destinoPorOrigem.get(serie.exercise_id)!;
       const origem = serie.avulsa ? null : serie.exercise_id;
-      if (registro.exercise_id !== origem)
+      if (registro?.exercise_id === destino) continue;
+      if (!registro || registro.exercise_id !== origem)
         throw new ConflitoModeloTreino(
-          "Uma série foi alterada em outro aparelho. Confira o histórico antes de reenviar.",
+          "Uma série da sessão mudou durante o salvamento. O rascunho continua preservado.",
         );
-      let consulta = supabase
-        .from("workout_sets")
-        .update({ exercise_id: exercicio.id })
-        .eq("id", serie.registroId!)
-        .eq("user_id", usuarioId)
-        .eq("session_id", sessaoId);
-      consulta =
-        origem === null
-          ? consulta.is("exercise_id", null)
-          : consulta.eq("exercise_id", origem);
-      const { data: atualizada, error: erroAtualizacao } = await consulta
-        .select("id")
-        .maybeSingle();
-      if (erroAtualizacao) throw erroAtualizacao;
-      if (!atualizada)
+      const grupo = grupos.get(destino) ?? { origem, ids: [] };
+      grupo.ids.push(registro.id);
+      grupos.set(destino, grupo);
+    }
+    for (const [destino, grupo] of grupos) {
+      const consulta = supabase.from("workout_sets").update({ exercise_id: destino })
+        .eq("user_id", usuarioId).eq("session_id", sessaoId).in("id", grupo.ids);
+      const { data: atualizadas, error: erro } = await (grupo.origem === null
+        ? consulta.is("exercise_id", null)
+        : consulta.eq("exercise_id", grupo.origem)).select("id");
+      if (erro) throw erro;
+      if (atualizadas?.length !== grupo.ids.length)
         throw new ConflitoModeloTreino(
-          "A série mudou durante o salvamento. Seus dados foram preservados.",
+          "Uma série mudou durante o salvamento. Seus dados foram preservados.",
         );
     }
   }
@@ -229,6 +175,4 @@ export async function salvarModeloDoTreino(
         );
     }
   }
-  for (const foto of fotosPendentes)
-    await copiarFotoDoExercicio(usuarioId, modelo.planId, foto.id, foto.origemId, foto.caminho);
 }

@@ -5,6 +5,7 @@ import {
   arquivarConclusaoRemota,
   copiarRascunhoParaReenvio,
   marcarSessaoEncerrada,
+  guardarFotosModelo,
   atualizarRascunho,
   lerRascunho,
   listarRascunhos,
@@ -324,28 +325,51 @@ async function enviar(
         "O servidor já encerrou esta sessão, mas ainda existem séries locais pendentes. Confira a conclusão no servidor; sua cópia será preservada.",
       );
 
-    for (const seriePendente of local.series.filter(
-      (serie) => serie.pendente,
-    )) {
+    const pendentes = local.series.filter((serie) => serie.pendente);
+    const consultaSeries = () => supabase.from("workout_sets")
+      .select("id, exercise_id, set_number, reps, weight_kg")
+      .eq("user_id", usuarioId).eq("session_id", sessaoId);
+    type RegistroSerie = { id: string; exercise_id: string | null; set_number: number; reps: number; weight_kg: number };
+    const indiceRemoto = new Map<string, RegistroSerie[]>();
+    const leituraEmLote = Boolean(local.finalizacao && pendentes.length > 1);
+    if (leituraEmLote) {
+      await medir("treino.lerSeriesPendentes", async () => {
+        const tamanho = 500;
+        for (let inicio = 0; ; inicio += tamanho) {
+          const { data, error } = await consultaSeries().order("id").range(inicio, inicio + tamanho - 1);
+          if (error) throw error;
+          for (const registro of data ?? []) {
+            const chave = registro.exercise_id
+              ? `${registro.exercise_id}:${registro.set_number}`
+              : registro.id;
+            const grupo = indiceRemoto.get(chave) ?? [];
+            grupo.push(registro);
+            indiceRemoto.set(chave, grupo);
+          }
+          if ((data?.length ?? 0) < tamanho) break;
+        }
+      });
+    }
+
+    for (const seriePendente of pendentes) {
       let item = seriePendente;
       await garantirEnvioPermitido(usuarioId, sessaoId);
-      let busca = supabase
-        .from("workout_sets")
-        .select("id, reps, weight_kg")
-        .eq("user_id", usuarioId)
-        .eq("session_id", sessaoId);
-      if (item.avulsa) {
-        if (!item.registroId)
-          throw new Error(
-            "Exercício da sessão sem identificador local. Reabra o treino para conferir.",
-          );
-        busca = busca.eq("id", item.registroId);
-      } else
-        busca = busca
-          .eq("exercise_id", item.exercise_id)
-          .eq("set_number", item.set_number);
-      const { data: existentes, error: erroBusca } = await busca.limit(2);
-      if (erroBusca) throw erroBusca;
+      if (item.avulsa && !item.registroId)
+        throw new Error(
+          "Exercício da sessão sem identificador local. Reabra o treino para conferir.",
+        );
+      let existentes: RegistroSerie[] | null;
+      if (leituraEmLote) {
+        const chave = item.avulsa ? item.registroId! : `${item.exercise_id}:${item.set_number}`;
+        existentes = indiceRemoto.get(chave) ?? [];
+      } else {
+        const busca = consultaSeries();
+        const { data, error } = await (item.avulsa
+          ? busca.eq("id", item.registroId!)
+          : busca.eq("exercise_id", item.exercise_id).eq("set_number", item.set_number)).limit(2);
+        if (error) throw error;
+        existentes = data;
+      }
       if ((existentes ?? []).length > 1)
         throw new ConflitoTreino(
           "Há séries duplicadas no servidor. Seu rascunho foi preservado para conferência.",
@@ -520,7 +544,7 @@ async function enviar(
         throw new Error(
           "O rascunho mudou durante o envio. Reabra o treino para conferir.",
         );
-      registrarMudancaDeDados();
+      registrarMudancaDeDados(undefined, "rascunho");
     }
     local = await lerRascunho(usuarioId, planId);
     if (local?.finalizacao && !local.series.some((serie) => serie.pendente)) {
@@ -554,8 +578,9 @@ async function enviar(
       const finalizacao = local.finalizacao;
       // O plano e os exercícios devem existir antes de a confirmação tirar a tela.
       // IDs persistidos permitem retomar uma resposta perdida sem duplicar o plano.
-      await salvarModeloDoTreino(local, true);
-      if (finalizacao.modelo) registrarMudancaDeDados();
+      if (finalizacao.modelo && (situacao !== "confirmada" ||
+          (finalizacao.modelo.modo === "novo" && remota?.plan_id !== finalizacao.modelo.planId)))
+        await medir("treino.prepararModelo", () => salvarModeloDoTreino(local!, true));
       if (situacao !== "confirmada") {
         let encerrar = supabase
           .from("workout_sessions")
@@ -578,13 +603,12 @@ async function enviar(
               ? encerrar.is("status", null)
               : encerrar.eq("status", remota!.status);
         } else encerrar = encerrar.eq("status", "em_andamento");
-        const { data, error } = await encerrar.select("id").maybeSingle();
+        const { data, error } = await medir("treino.confirmarConclusao", () => encerrar.select("id").maybeSingle());
         if (error) throw error;
         if (!data)
           throw new ConflitoTreino(
             "O encerramento mudou durante o envio. A conclusão local foi preservada para conferência.",
           );
-        registrarMudancaDeDados();
       }
       local = await marcarSessaoEncerrada(
         usuarioId,
@@ -600,42 +624,44 @@ async function enviar(
         ).catch(() => {});
       if (!local || local.sessao.id !== sessaoId)
         throw new Error("A sessão local mudou após a confirmação.");
-      // Até a confirmação dos detalhes, a fila continua no disco, inclusive após reabrir.
+      // Repara sessões antigas ou cuja resposta de conclusão se perdeu.
+      if (situacao === "confirmada") {
+        await garantirEnvioPermitido(usuarioId, sessaoId);
+        const { data: detalhes, error: erroDetalhes } = await supabase
+          .from("workout_sessions")
+          .update({
+            ...finalizacao.metricas,
+            ...(finalizacao.modelo?.modo === "novo"
+              ? { plan_id: finalizacao.modelo.planId }
+              : {}),
+          })
+          .eq("id", sessaoId)
+          .eq("user_id", usuarioId)
+          .eq("status", "concluido")
+          .eq("finished_at", finalizacao.finishedAt)
+          .select("id")
+          .maybeSingle();
+        if (erroDetalhes)
+          throw new Error(
+            "O encerramento foi enviado. Os detalhes permanecem guardados até a próxima sincronização.",
+          );
+        if (!detalhes)
+          throw new ConflitoTreino(
+            "O encerramento remoto mudou. Seus detalhes locais continuam preservados.",
+          );
+      }
       await garantirEnvioPermitido(usuarioId, sessaoId);
-      const { data: detalhes, error: erroDetalhes } = await supabase
-        .from("workout_sessions")
-        .update({
-          ...finalizacao.metricas,
-          ...(finalizacao.modelo?.modo === "novo"
-            ? { plan_id: finalizacao.modelo.planId }
-            : {}),
-        })
-        .eq("id", sessaoId)
-        .eq("user_id", usuarioId)
-        .eq("status", "concluido")
-        .eq("finished_at", finalizacao.finishedAt)
-        .select("id")
-        .maybeSingle();
-      if (erroDetalhes)
-        throw new Error(
-          "O encerramento foi enviado. Os detalhes permanecem guardados até a próxima sincronização.",
-        );
-      if (!detalhes)
-        throw new ConflitoTreino(
-          "O encerramento remoto mudou. Seus detalhes locais continuam preservados.",
-        );
-      await garantirEnvioPermitido(usuarioId, sessaoId);
-      await salvarModeloDoTreino(local);
-      await atualizarRascunho(usuarioId, planId, (atual) =>
+      if (finalizacao.modelo) await guardarFotosModelo(local);
+      const restante = await atualizarRascunho(usuarioId, planId, (atual) =>
         atual.sessao.id === sessaoId &&
         atual.finalizacao?.finishedAt === finalizacao.finishedAt &&
         !atual.series.some((serie) => serie.pendente)
           ? null
           : atual,
       );
-      registrarMudancaDeDados();
+      registrarMudancaDeDados(undefined, "atividade");
       return {
-        rascunho: await lerRascunho(usuarioId, planId),
+        rascunho: restante,
         concluido: true,
         encerrado: true,
       };
@@ -967,9 +993,12 @@ export async function liberarTreinosEncerrados(usuarioId: string) {
         "Existe uma sessão realmente em andamento ou ainda não enviada. Conclua ou envie essa sessão antes de iniciar outra.",
       );
     }
-    if (atual.finalizacao?.modelo && remota?.status === "concluido") {
-      await salvarModeloDoTreino(atual);
-      registrarMudancaDeDados();
+    if (remota && situacaoConclusao(remota, atual) === "confirmada" && atual.finalizacao?.modelo) {
+      if (atual.finalizacao.modelo.modo === "novo" && remota.plan_id !== atual.finalizacao.modelo.planId)
+        await salvarModeloDoTreino(atual);
+      // Também recupera rascunhos concluídos por versões que copiavam fotos aqui.
+      await guardarFotosModelo(atual);
+      registrarMudancaDeDados(undefined, "atividade");
     }
     await arquivarParaNovoTreino(
       usuarioId,

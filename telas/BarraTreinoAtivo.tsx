@@ -6,10 +6,12 @@ import {
   lerResumoTreinoAtivo,
   listarRascunhos,
   listarExclusoesPendentes,
+  listarFotosModelo,
   type ResumoTreinoAtivo,
 } from "../servicos/treinoLocal";
 import { sincronizarTreinosPendentes } from "../servicos/treinoSincronizacao";
 import { assinarMudancasDeDados } from "../servicos/revisaoDados";
+import { sincronizarFotosModelo } from "../servicos/fotosModeloTreino";
 
 type BarraProps = {
   usuarioId: string;
@@ -55,6 +57,7 @@ function Barra({
   onAbrirNutricao,
 }: BarraProps) {
   const [resumo, setResumo] = useState<ResumoTreinoAtivo | null>(null);
+  const [fotosPendentes, setFotosPendentes] = useState(0);
   const [pendenciasNutricao, setPendenciasNutricao] = useState(0);
   const [erroNutricao, setErroNutricao] = useState<string | null>(null);
   const [sincronizando, setSincronizando] = useState(false);
@@ -63,6 +66,7 @@ function Barra({
     let ativo = true;
     let versao = 0;
     let haRascunhos = false;
+    let haFotos = false;
 
     const atualizar = async () => {
       const pedido = ++versao;
@@ -85,11 +89,26 @@ function Barra({
       }
     };
 
+    const atualizarFotos = async () => {
+      const fotos = await listarFotosModelo(usuarioId).catch(() => null);
+      if (!ativo || !fotos) return;
+      const quantidade = fotos.filter(({ foto }) => Boolean(foto)).length;
+      haFotos = quantidade > 0;
+      setFotosPendentes(quantidade);
+    };
+    const tentarFotos = () => {
+      void atualizarFotos();
+      void sincronizarFotosModelo(usuarioId).then(atualizarFotos, atualizarFotos);
+    };
     const tentarTreinos = () => {
-      void sincronizarTreinosPendentes(usuarioId).then(atualizar).catch(atualizar);
+      void sincronizarTreinosPendentes(usuarioId).then(atualizar, atualizar);
+      tentarFotos();
     };
     const cancelarRascunhos = assinarRascunhos(atualizar);
-    const cancelarMudancas = assinarMudancasDeDados(atualizar);
+    const cancelarMudancas = assinarMudancasDeDados((_plano, origem) => {
+      void atualizar();
+      if (origem === "atividade") tentarFotos();
+    });
     const rede = NetInfo.addEventListener((estado) => {
       if (estado.isConnected && estado.isInternetReachable !== false)
         tentarTreinos();
@@ -103,7 +122,7 @@ function Barra({
     const tentar = () => {
       if (
         ativo &&
-        haRascunhos &&
+        (haRascunhos || haFotos) &&
         (typeof navigator === "undefined" || navigator.onLine !== false)
       )
         tentarTreinos();
@@ -146,7 +165,7 @@ function Barra({
   }
 
   const mostrarNutricao = pendenciasNutricao > 0 || Boolean(erroNutricao);
-  if (!visivel || (!resumo && !mostrarNutricao)) return null;
+  if (!visivel || (!resumo && !mostrarNutricao && !fotosPendentes)) return null;
 
   return (
     <View style={estilos.grupo}>
@@ -179,6 +198,14 @@ function Barra({
           </View>
           <Text style={[estilos.seta, { color: corTema }]}>›</Text>
         </TouchableOpacity>
+      ) : null}
+
+      {fotosPendentes ? (
+        <View style={estilos.barraNutricao} accessibilityLiveRegion="polite">
+          <Text style={estilos.detalhes}>
+            {fotosPendentes === 1 ? "1 foto aguardando envio" : `${fotosPendentes} fotos aguardando envio`}
+          </Text>
+        </View>
       ) : null}
 
       {mostrarNutricao ? (

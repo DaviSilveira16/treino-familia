@@ -25,3 +25,13 @@ jobs:
       - run: npm run test:ui
         env:
           SMOKE_BROWSER: webkit
+      - name: Fotos ao salvar novo treino
+        run: npm run test:ui
+        env:
+          SMOKE_MODEL_PHOTOS_ONLY: '1'
+      - name: Próximo treino com foto pendente
+        run: npm run test:ui
+        env:
+          SMOKE_PHOTO_RETRY_ONLY: '1'
+      - name: Diário de nutrição
+        run: npm run test:nutricao:ui

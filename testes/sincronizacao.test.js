@@ -167,6 +167,16 @@ const draft = {
       metricas: { duration_minutes: 10 },
     },
   }));
+  const confirmada = await sync.sincronizarRascunho("u1", "p1");
+  assert.equal(confirmada.concluido, true);
+  assert.equal(state.failMetrics, true, "Uma conclusão nova não repete a gravação de métricas");
+
+  // Recupera um rascunho legado de uma sessão já concluída.
+  await local.gravarRascunho({
+    ...draft, novaSessaoAtiva: true, sessao: { ...draft.sessao, id: "legada" },
+    series: [], finalizacao: { finishedAt, notes: "Teste", metricas: { duration_minutes: 10 } },
+  });
+  state.session = { ...state.session, id: "legada" };
   const parcial = await sync.sincronizarRascunho("u1", "p1");
   assert.ok(parcial.erro);
   assert.equal(

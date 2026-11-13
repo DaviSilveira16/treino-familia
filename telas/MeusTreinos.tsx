@@ -23,6 +23,7 @@ import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import {
   registrarMudancaDeDados,
   obterRevisaoDeDados,
+  assinarMudancasDeDados,
 } from "../servicos/revisaoDados";
 import {
   lerCache,
@@ -70,6 +71,15 @@ type Props = {
   aluno?: ContextoTreinosAluno;
   registrarVoltar?: (fechar: (() => void) | null) => void;
 };
+
+function mensagemOperacaoTreino(erro: unknown) {
+  if (erro && typeof erro === "object") {
+    if ("code" in erro && erro.code === "PGRST202")
+      return "A atualização do banco para esta operação ainda precisa ser aplicada.";
+    if ("message" in erro && typeof erro.message === "string") return erro.message;
+  }
+  return "Não foi possível confirmar a operação. Reabra o treino para conferir.";
+}
 
 export default function MeusTreinos({
   onVoltar,
@@ -147,6 +157,7 @@ export default function MeusTreinos({
   );
   const [carregando, setCarregando] = useState(true);
   const [recarregar, setRecarregar] = useState(0);
+  const [revisaoFotos, setRevisaoFotos] = useState(0);
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
   const [carregandoCargas, setCarregandoCargas] = useState(false);
   const prefetchTreinosRef = useRef(new Set<string>());
@@ -470,6 +481,14 @@ export default function MeusTreinos({
   }, [focado, treinos, usuarioId, apiAluno]);
 
   useEffect(() => {
+    if (!focado || apiAluno || !treinoSelecionado?.id) return;
+    return assinarMudancasDeDados((planId, origem) => {
+      if (origem === "foto" && planId === treinoSelecionado.id)
+        setRevisaoFotos((valor) => valor + 1);
+    });
+  }, [focado, apiAluno, treinoSelecionado?.id]);
+
+  useEffect(() => {
     if (!focado || apiAluno) return;
     let ativo = true;
     const controlador = new AbortController();
@@ -538,58 +557,52 @@ export default function MeusTreinos({
           salvarCache(usuarioId, chave, { lista: [], cargas: {}, completo: true }, 20000);
           return;
         }
-        // Recupera referências ausentes sem substituir uma edição posterior
-        // feita pelo aluno ou por seu treinador.
-        const [urlsFotos, resultadoUltimaSessao, referenciasExistentes] = await Promise.all([
-          medir("meusTreinos.fotos", () =>
-            obterFotosAssinadas(
-              "exercise-photos",
-              listaBase.map((e) => e.photo_path),
-              604800,
-              usuarioId,
-            ),
-          ),
-          medir("meusTreinos.ultimaSessao", () =>
-            supabase
-              .from("workout_sessions")
-              .select("id")
-              .eq("plan_id", treinoId)
-              .eq("user_id", usuarioId)
-              .eq("status", "concluido")
-              .not("finished_at", "is", null)
-              .order("finished_at", { ascending: false })
-              .limit(1)
-              .abortSignal(controlador.signal)
-              .maybeSingle(),
-          ),
-          supabase.from("exercise_load_defaults").select("exercise_id").eq("user_id", usuarioId)
-            .in("exercise_id", listaBase.map(e => e.id)).abortSignal(controlador.signal),
+        const carregarReferencias = () => medir("meusTreinos.cargasReferencia", async () => {
+          const referencias = [];
+          const tamanho = 500;
+          for (let inicio = 0; ; inicio += tamanho) {
+            const { data, error } = await supabase.from("exercise_load_defaults")
+              .select("exercise_id, set_number, reps, weight_kg")
+              .eq("user_id", usuarioId).in("exercise_id", listaBase.map((e) => e.id))
+              .order("exercise_id").order("set_number").range(inicio, inicio + tamanho - 1)
+              .abortSignal(controlador.signal);
+            if (error) throw error;
+            referencias.push(...(data ?? []));
+            if ((data?.length ?? 0) < tamanho) return referencias;
+          }
+        });
+        const [urlsFotos, cargasSalvas] = await Promise.all([
+          medir("meusTreinos.fotos", () => obterFotosAssinadas(
+            "exercise-photos", listaBase.map((e) => e.photo_path), 604800, usuarioId,
+          )),
+          carregarReferencias(),
         ]);
         if (!ativo || controlador.signal.aborted) return;
-        if (referenciasExistentes.error) throw referenciasExistentes.error;
-        const comReferencia = new Set((referenciasExistentes.data ?? []).map(c => c.exercise_id));
-        const { data: ultimaSessao, error: erroUltimaSessao } = resultadoUltimaSessao;
         const listaComFotos = listaBase.map((e) => ({
-          ...e,
-          photo_url: e.photo_path
-            ? (urlsFotos.get(e.photo_path) ?? null)
-            : null,
+          ...e, photo_url: e.photo_path ? (urlsFotos.get(e.photo_path) ?? null) : null,
         }));
         setExercicios(listaComFotos);
-        if (erroUltimaSessao) {
-          mostrarMensagem(
-            "Erro ao sincronizar cargas",
-            erroUltimaSessao.message,
-          );
-        }
-        if (ultimaSessao && !erroUltimaSessao) {
+        let referencias = cargasSalvas;
+        const comReferencia = new Set(referencias.map((c) => c.exercise_id));
+        const semReferencia = listaBase.filter((e) => !comReferencia.has(e.id)).map((e) => e.id);
+        // Só consulta o histórico de planos legados com referências ausentes.
+        const ultimaSessao = semReferencia.length ? await medir("meusTreinos.ultimaSessao", async () => {
+          const { data, error } = await supabase.from("workout_sessions").select("id")
+            .eq("plan_id", treinoId).eq("user_id", usuarioId).eq("status", "concluido")
+            .not("finished_at", "is", null).order("finished_at", { ascending: false })
+            .limit(1).abortSignal(controlador.signal).maybeSingle();
+          if (error) throw error;
+          return data;
+        }) : null;
+        if (!ativo || controlador.signal.aborted) return;
+        if (ultimaSessao) {
           const { data: seriesHistoricas, error: erroSeriesHistoricas } =
             await medir("meusTreinos.historicoCargas", () => supabase
               .from("workout_sets")
               .select("exercise_id, set_number, reps, weight_kg")
               .eq("session_id", ultimaSessao.id)
               .eq("user_id", usuarioId)
-              .in("exercise_id", listaBase.map((exercicio) => exercicio.id))
+              .in("exercise_id", semReferencia)
               .gt("set_number", 0)
               .gt("reps", 0)
               .gte("weight_kg", 0)
@@ -645,29 +658,13 @@ export default function MeusTreinos({
             }
 
           }
-          if (exerciciosHistoricos.size > 0) {
-            registrarMudancaDeDados();
+          if (referenciasHistoricas.length) {
+            registrarMudancaDeDados(treinoId, "plano");
             revisaoInicial = obterRevisaoDeDados();
+            referencias = await carregarReferencias();
           }
         }
-        const resultadoReferencias = await medir(
-          "meusTreinos.cargasReferencia",
-          () =>
-            supabase
-              .from("exercise_load_defaults")
-              .select("exercise_id, set_number, reps, weight_kg")
-              .eq("user_id", usuarioId)
-              .in("exercise_id", listaBase.map((e) => e.id))
-              .order("set_number", { ascending: true })
-              .abortSignal(controlador.signal),
-        );
         if (!ativo || controlador.signal.aborted) return;
-        const { data: referencias, error: erroReferencias } =
-          resultadoReferencias;
-        if (erroReferencias) {
-          mostrarMensagem("Erro ao carregar cargas", erroReferencias.message);
-          return;
-        }
         const cargas: Record<string, number> = {};
         for (const referencia of referencias ?? []) {
           const carga = Number(referencia.weight_kg);
@@ -678,14 +675,8 @@ export default function MeusTreinos({
             );
         }
         if (revisaoInicial !== obterRevisaoDeDados()) return;
-        const lista = listaBase.map((e) => ({
-          ...e,
-          photo_url: e.photo_path
-            ? (urlsFotos.get(e.photo_path) ?? null)
-            : null,
-        }));
-        salvarCache(usuarioId, chave, { lista, cargas, completo: true }, 20000);
-        setExercicios(lista);
+        salvarCache(usuarioId, chave, { lista: listaComFotos, cargas, completo: true }, 20000);
+        setExercicios(listaComFotos);
         setMaioresCargas((atuais) => ({ ...atuais, ...cargas }));
       } catch {
         if (ativo && !controlador.signal.aborted)
@@ -699,7 +690,7 @@ export default function MeusTreinos({
       ativo = false;
       controlador.abort();
     };
-  }, [focado, treinoSelecionado, usuarioId, apiAluno, recarregar]);
+  }, [focado, treinoSelecionado, usuarioId, apiAluno, recarregar, revisaoFotos]);
 
   async function criarTreino() {
     const nome = nomeNovoTreino.trim();
@@ -787,77 +778,9 @@ export default function MeusTreinos({
     setSalvando(true);
 
     try {
-      const { data: exerciciosDoTreino, error: erroBusca } = await supabase
-        .from("exercises")
-        .select("id")
-        .eq("plan_id", treino.id)
-        .eq("user_id", usuarioId);
-
-      if (erroBusca) {
-        mostrarMensagem(
-          "Erro",
-          `Não foi possível localizar os exercícios: ${erroBusca.message}`,
-        );
-        return;
-      }
-
-      const idsExercicios = (exerciciosDoTreino ?? []).map((item) => item.id);
-
-      if (idsExercicios.length > 0) {
-        const { error: erroDesvincularCargas } = await supabase
-          .from("workout_sets")
-          .update({ exercise_id: null })
-          .eq("user_id", usuarioId)
-          .in("exercise_id", idsExercicios);
-
-        if (erroDesvincularCargas) {
-          mostrarMensagem(
-            "Erro",
-            `Não foi possível preservar o histórico de cargas: ${erroDesvincularCargas.message}`,
-          );
-          return;
-        }
-      }
-
-      const { error: erroDesvincularSessoes } = await supabase
-        .from("workout_sessions")
-        .update({ plan_id: null })
-        .eq("user_id", usuarioId)
-        .eq("plan_id", treino.id);
-
-      if (erroDesvincularSessoes) {
-        mostrarMensagem(
-          "Erro",
-          `Não foi possível preservar o histórico do treino: ${erroDesvincularSessoes.message}`,
-        );
-        return;
-      }
-
-      const { error: erroExcluirExercicios } = await supabase
-        .from("exercises")
-        .delete()
-        .eq("plan_id", treino.id)
-        .eq("user_id", usuarioId);
-
-      if (erroExcluirExercicios) {
-        mostrarMensagem(
-          "Erro",
-          `Não foi possível remover os exercícios do treino: ${erroExcluirExercicios.message}`,
-        );
-        return;
-      }
-
-      const { error: erroExcluirTreino } = await supabase
-        .from("workout_plans")
-        .delete()
-        .eq("id", treino.id)
-        .eq("user_id", usuarioId);
-
-      if (erroExcluirTreino) {
-        mostrarMensagem(
-          "Erro",
-          `Não foi possível remover o treino: ${erroExcluirTreino.message}`,
-        );
+      const { error } = await supabase.rpc("tf_delete_own_workout_plan", { p_plan_id: treino.id });
+      if (error) {
+        mostrarMensagem("Erro ao excluir treino", mensagemOperacaoTreino(error));
         return;
       }
 
@@ -976,29 +899,17 @@ export default function MeusTreinos({
     }
     const posicaoMovido = movido.position;
     const posicaoVizinho = vizinho.position;
-    const definirPosicao = async (exercicio: Exercicio, position: number) => {
-      const { data, error } = await supabase
-        .from("exercises")
-        .update({ position })
-        .eq("id", exercicio.id)
-        .eq("plan_id", treino.id)
-        .eq("user_id", usuarioId)
-        .select("id")
-        .maybeSingle();
-      if (error) throw error;
-      if (!data)
-        throw new Error(`O servidor não confirmou a posição de ${exercicio.name}.`);
-    };
     reordenandoRef.current = true;
     setSalvando(true);
     try {
-      // A posição temporária permite trocar dois valores sem colidir caso o
-      // banco exija posições únicas dentro do treino.
-      const temporaria =
-        Math.max(...exercicios.map((exercicio) => exercicio.position), -1) + 1;
-      await definirPosicao(movido, temporaria);
-      await definirPosicao(vizinho, posicaoMovido);
-      await definirPosicao(movido, posicaoVizinho);
+      const { error } = await supabase.rpc("tf_move_own_exercise", {
+        p_plan_id: treino.id,
+        p_exercise_id: movido.id,
+        p_other_id: vizinho.id,
+        p_position: posicaoMovido,
+        p_other_position: posicaoVizinho,
+      });
+      if (error) throw error;
       setExercicios(
         ordem.map((exercicio) =>
           exercicio.id === movido.id
@@ -1010,54 +921,7 @@ export default function MeusTreinos({
       );
       registrarMudancaDeDados(treino.id);
     } catch (erro) {
-      let erroReversao: unknown;
-      try {
-        const { data, error } = await supabase
-          .from("exercises")
-          .select("id, position")
-          .eq("plan_id", treino.id)
-          .eq("user_id", usuarioId)
-          .in("id", [movido.id, vizinho.id]);
-        if (error) throw error;
-        const posicoesAtuais = new Map(
-          (data ?? []).map((exercicio) => [exercicio.id, exercicio.position]),
-        );
-        if (
-          posicoesAtuais.get(movido.id) !== posicaoMovido ||
-          posicoesAtuais.get(vizinho.id) !== posicaoVizinho
-        ) {
-          const baseTemporaria =
-            Math.max(
-              ...Array.from(posicoesAtuais.values()),
-              posicaoMovido,
-              posicaoVizinho,
-              -1,
-            ) + 1;
-          await definirPosicao(movido, baseTemporaria);
-          await definirPosicao(vizinho, baseTemporaria + 1);
-          await definirPosicao(movido, posicaoMovido);
-          await definirPosicao(vizinho, posicaoVizinho);
-        }
-      } catch (erro) {
-        erroReversao = erro;
-      }
-      const mensagemErro = (valor: unknown, alternativa: string) =>
-        valor instanceof Error
-          ? valor.message
-          : valor &&
-              typeof valor === "object" &&
-              "message" in valor &&
-              typeof valor.message === "string"
-            ? valor.message
-            : alternativa;
-      mostrarMensagem(
-        "Não foi possível mudar a ordem",
-        `${mensagemErro(erro, "O servidor recusou a alteração.")}${
-          erroReversao
-            ? ` A restauração também falhou: ${mensagemErro(erroReversao, "erro desconhecido")}. Reabra o treino para conferir a ordem atual.`
-            : " A ordem anterior foi restaurada."
-        }`,
-      );
+      mostrarMensagem("Não foi possível mudar a ordem", mensagemOperacaoTreino(erro));
     } finally {
       reordenandoRef.current = false;
       setSalvando(false);

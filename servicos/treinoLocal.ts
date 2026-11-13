@@ -95,6 +95,53 @@ export type ModeloTreinoPendente = {
     series: { set_number: number; reps: number; weight_kg: number }[];
   }[];
 };
+export type FotoModeloPendente = {
+  sessaoId: string;
+  planId: string;
+  exercicioId: string;
+  origem: string;
+  destino: string;
+};
+
+function prefixoFotosModelo(usuarioId: string) {
+  return `@treino-familia:fotos-modelo:v1:${usuarioId}:`;
+}
+
+export async function guardarFotosModelo(local: TreinoRascunho) {
+  const modelo = local.finalizacao?.modelo;
+  if (!modelo) return;
+  const prefixo = prefixoFotosModelo(local.usuarioId);
+  const origens = new Map(local.exercicios?.map((item) => [item.id, item.photo_path]));
+  const fotos = modelo.exercicios.flatMap((item) => {
+    const origem = item.photo_path === undefined ? origens.get(item.origemId) : item.photo_path;
+    const partes = origem?.split("/");
+    if (!origem || partes?.length !== 3 || partes[0] !== local.usuarioId ||
+        partes[1] !== item.origemId || !/^[\w.-]+\.[a-z0-9]+$/i.test(partes[2])) return [];
+    const foto: FotoModeloPendente = {
+      sessaoId: local.sessao.id, planId: modelo.planId, exercicioId: item.id, origem,
+      destino: `${local.usuarioId}/${item.id}/${partes[2]}`,
+    };
+    return [[`${prefixo}${foto.sessaoId}:${foto.exercicioId}`, JSON.stringify(foto)] as const];
+  });
+  if (fotos.length) await Promise.all(fotos.map(([id, foto]) => AsyncStorage.setItem(id, foto)));
+}
+
+export async function listarFotosModelo(usuarioId: string) {
+  const chaves = (await AsyncStorage.getAllKeys()).filter((id) => id.startsWith(prefixoFotosModelo(usuarioId)));
+  return Promise.all(chaves.map(async (id) => {
+    const texto = await AsyncStorage.getItem(id);
+    try {
+      return { id, foto: texto ? JSON.parse(texto) as FotoModeloPendente : null };
+    } catch {
+      return { id, foto: null };
+    }
+  }));
+}
+
+export function confirmarFotoModelo(id: string) {
+  return AsyncStorage.removeItem(id);
+}
+
 export type ResumoTreinoAtivo = {
   planId: string;
   planName: string;
@@ -108,17 +155,18 @@ export type ResumoTreinoAtivo = {
   conflito: boolean;
 };
 
-const ouvintes = new Set<() => void>();
-export function assinarRascunhos(ouvinte: () => void): () => void {
+type MudancaRascunho = "edicao" | "atividade";
+const ouvintes = new Set<(origem: MudancaRascunho) => void>();
+export function assinarRascunhos(ouvinte: (origem: MudancaRascunho) => void): () => void {
   ouvintes.add(ouvinte);
   return () => {
     ouvintes.delete(ouvinte);
   };
 }
-function notificar() {
+function notificar(origem: MudancaRascunho = "atividade") {
   ouvintes.forEach((ouvinte) => {
     try {
-      ouvinte();
+      ouvinte(origem);
     } catch {
       /* UI isolada */
     }
@@ -179,7 +227,7 @@ export function gravarRascunho(rascunho: TreinoRascunho): Promise<void> {
         chave(rascunho.usuarioId, rascunho.planId),
         JSON.stringify(proximo),
       );
-      notificar();
+      notificar(proximo.finalizacao ? "atividade" : "edicao");
     });
   fila = tarefa.catch(() => {});
   return tarefa;
@@ -209,7 +257,7 @@ export async function apagarRascunho(usuarioId: string, planId: string) {
   const tarefa = fila
     .catch(() => {})
     .then(() =>
-      AsyncStorage.removeItem(chave(usuarioId, planId)).then(notificar),
+      AsyncStorage.removeItem(chave(usuarioId, planId)).then(() => notificar()),
     );
   fila = tarefa.catch(() => {});
   await tarefa;
@@ -229,12 +277,13 @@ export function atualizarRascunho(
       const atual = JSON.parse(texto) as TreinoRascunho;
       if (atual.usuarioId !== usuarioId || atual.planId !== planId) return null;
       const proximo = alterar(atual);
+      if (proximo === atual) return atual;
       if (proximo) {
         await AsyncStorage.setItem(
           chave(usuarioId, planId),
           JSON.stringify(proximo),
         );
-        if (proximo.encerradaNoServidor)
+        if (proximo.encerradaNoServidor && !atual.encerradaNoServidor)
           await AsyncStorage.setItem(
             chaveEncerrada(usuarioId, proximo.sessao.id),
             "1",
@@ -246,7 +295,7 @@ export function atualizarRascunho(
         );
         await AsyncStorage.removeItem(chave(usuarioId, planId));
       }
-      notificar();
+      notificar(atual.finalizacao || proximo?.finalizacao ? "atividade" : "edicao");
       return proximo;
     });
   fila = tarefa.catch(() => {});

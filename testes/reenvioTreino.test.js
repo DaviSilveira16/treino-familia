@@ -248,6 +248,10 @@ function ambiente(sessao = null) {
   ]) {
     a = ambiente();
     await a.local.gravarRascunho(draft);
+    if (fault.endsWith(":detalhes")) {
+      a.state.lose = "workout_sessions:update";
+      assert.ok((await a.sync.reenviarConclusaoLocal("u1", "p1")).erro);
+    }
     a.state.lose = fault;
     const primeira = await a.sync.reenviarConclusaoLocal("u1", "p1");
     assert.ok(primeira.erro, fault);

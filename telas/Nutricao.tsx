@@ -110,7 +110,12 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
     if (!foco) return;
     let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => void carregar(), 0);
     const agendar = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => void carregar(), 250); };
-    const remover = assinarMudancasDeDados(agendar), removerRascunhos = assinarRascunhos(agendar);
+    const remover = assinarMudancasDeDados((_plano, origem) => {
+      if (!origem || origem === "atividade") agendar();
+    });
+    const removerRascunhos = assinarRascunhos((origem) => {
+      if (origem === "atividade") agendar();
+    });
     const app = AppState.addEventListener("change", (estadoApp) => { if (estadoApp === "active") agendar(); });
     if (typeof window !== "undefined") window.addEventListener("online", agendar);
     return () => { consultaRef.current += 1; if (timer) clearTimeout(timer); remover(); removerRascunhos(); app.remove(); if (typeof window !== "undefined") window.removeEventListener("online", agendar); };
@@ -119,12 +124,17 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
   const armazenado = estado.dias.find((dia) => dia.data === data);
   const padrao = modeloNaData(estado.modelos, estado.preferencias, data);
   const modeloPrevisto = data >= hoje ? padrao : null;
-  const previsto = useMemo(() => criarDia(usuarioId, data, config, modeloPrevisto), [usuarioId, data, config, modeloPrevisto]);
+  // Uma nova leitura da mesma versão da dieta não pode trocar os IDs do
+  // diário provisório enquanto o seletor de alimento estiver aberto.
+  const modeloPrevistoJson = modeloPrevisto ? JSON.stringify(modeloPrevisto) : null;
+  const previsto = useMemo(() => criarDia(usuarioId, data, null,
+    modeloPrevistoJson ? JSON.parse(modeloPrevistoJson) as ModeloDieta : null,
+  ), [usuarioId, data, modeloPrevistoJson]);
   const dia = armazenado
     ? data >= hoje
       ? { ...armazenado, configuracao: config }
       : armazenado
-    : previsto;
+    : { ...previsto, configuracao: config };
   const resumo = analisarDia(dia, atividades, data, hoje);
   const resumosSemana = semana.map((diaSemana) => {
     const salvo = estado.dias.find((d) => d.data === diaSemana) ?? null;
