@@ -12,7 +12,6 @@ import {
   Image,
   Platform,
   Modal,
-  TextInput,
   ScrollView,
   StatusBar,
   Text,
@@ -76,8 +75,7 @@ import type { ImagePickerAsset } from "expo-image-picker";
 import EditorExercicioSessao, {
   type DadosEditorExercicio,
 } from "../componentes/EditorExercicioSessao";
-import ResumoRegistroTreino from "../componentes/ResumoRegistroTreino";
-import RepetirCarga from "../componentes/RepetirCarga";
+import RevisaoConclusaoTreino from "../componentes/RevisaoConclusaoTreino";
 import ProgressoFinalizacao from "../componentes/ProgressoFinalizacao";
 import { estimarTempoFinalizacao } from "../servicos/tempoFinalizacao";
 import {
@@ -2260,180 +2258,37 @@ export default function TreinoAtivo({
           })()}
         />
       ) : null}
-      <Modal
-        transparent
-        animationType="fade"
-        visible={revisaoFim !== null}
-        onRequestClose={() => {
-          if (!salvando) setRevisaoFim(null);
+      <RevisaoConclusaoTreino
+        visivel={revisaoFim !== null}
+        salvando={salvando}
+        inicioFinalizacao={inicioFinalizacao}
+        estimativaFinalizacao={estimativaFinalizacao}
+        online={online}
+        corTema={corTema}
+        perfil={perfil}
+        seriesDoResumo={seriesDoResumo}
+        duracaoFinal={duracaoFinal}
+        setDuracaoFinal={setDuracaoFinal}
+        intensidade={intensidade}
+        setIntensidade={setIntensidade}
+        esforco={esforco}
+        setEsforco={setEsforco}
+        destinoModelo={destinoModelo}
+        setDestinoModelo={setDestinoModelo}
+        podeAdicionar={exercicios.some((e) => e.avulso && !e.removido)}
+        nomeNovoPlano={nomeNovoPlano}
+        setNomeNovoPlano={setNomeNovoPlano}
+        aceitarCargaZero={aceitarCargaZero}
+        setAceitarCargaZero={setAceitarCargaZero}
+        erroConclusao={erroConclusao}
+        fotoEmEnvio={Boolean(fotoCarregandoId)}
+        onFechar={() => setRevisaoFim(null)}
+        onEditarCargas={() => {
+          setRevisaoFim(null);
+          setMensagem("Desmarque a série concluída para editar sua carga e marque-a novamente ao terminar.");
         }}
-      >
-        <View style={{ flex: 1, backgroundColor: "#000B" }}>
-          <ScrollView
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{
-              flexGrow: 1,
-              justifyContent: "center",
-              padding: 18,
-            }}
-          >
-            <View
-              style={[
-                estilos.cartao,
-                { width: "100%", maxWidth: 560, alignSelf: "center", gap: 16 },
-              ]}
-            >
-              <Text style={estilos.tituloCartao}>
-                Revisar e concluir treino
-              </Text>
-              {salvando && inicioFinalizacao !== null ? (
-                <ProgressoFinalizacao
-                  inicio={inicioFinalizacao}
-                  estimativa={estimativaFinalizacao}
-                  salvando
-                  online={online}
-                  erro={false}
-                  cor={corTema}
-                />
-              ) : (
-                <Text style={estilos.secundario}>
-                  {estimativaFinalizacao === null
-                    ? "Ao confirmar, a conclusão será salva neste aparelho e enviada ao servidor. O tempo depende da conexão."
-                    : `Previsão de envio após confirmar: cerca de ${estimativaFinalizacao} s, com base nos envios anteriores deste aparelho. Pode variar conforme a conexão.`}
-                </Text>
-              )}
-              <ResumoRegistroTreino
-                perfil={perfil}
-                series={seriesDoResumo}
-                duracao={duracaoFinal}
-                onDuracao={setDuracaoFinal}
-                intensidade={intensidade}
-                onIntensidade={setIntensidade}
-                esforco={esforco}
-                onEsforco={setEsforco}
-                cor={corTema}
-                bloqueado={salvando}
-              />
-              <Text style={estilos.tituloCartao}>
-                Como guardar este treino?
-              </Text>
-              {(
-                [
-                  ["novo", "Criar novo treino"],
-                  ["adicionar", "Adicionar novos exercícios ao original"],
-                  ["sessao", "Usar só nesta sessão"],
-                ] as const
-              ).map(([modo, titulo]) => (
-                <TouchableOpacity
-                  key={modo}
-                  accessibilityRole="button"
-                  accessibilityLabel={titulo}
-                  accessibilityState={{ selected: destinoModelo === modo }}
-                  disabled={
-                    salvando ||
-                    (modo === "adicionar" &&
-                      !exercicios.some((e) => e.avulso && !e.removido))
-                  }
-                  onPress={() => setDestinoModelo(modo)}
-                  style={[
-                    estilos.botaoSecundario,
-                    {
-                      borderColor: destinoModelo === modo ? corTema : "#45544A",
-                    },
-                  ]}
-                >
-                  <Text style={estilos.textoOpcao}>
-                    {destinoModelo === modo ? "✓ " : ""}
-                    {titulo}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-              {destinoModelo === "novo" ? (
-                <TextInput
-                  accessibilityLabel="Nome do novo treino"
-                  placeholder="Ex.: Treino academia da viagem"
-                  placeholderTextColor="#828A85"
-                  value={nomeNovoPlano}
-                  onChangeText={setNomeNovoPlano}
-                  maxLength={100}
-                  editable={!salvando}
-                  style={{
-                    borderWidth: 1,
-                    borderColor: corTema,
-                    borderRadius: 10,
-                    padding: 12,
-                    color: "#F0F4F1",
-                  }}
-                />
-              ) : null}
-              <Text style={estilos.secundario}>
-                {destinoModelo === "novo"
-                  ? "Cria um plano com os exercícios e cargas desta sessão e vincula esta conclusão a ele. O original é preservado."
-                  : destinoModelo === "adicionar"
-                    ? "Acrescenta os exercícios novos ao original e atualiza as cargas e séries dos exercícios realizados para usar no próximo treino."
-                    : "Guarda as adaptações de exercícios só nesta sessão. As cargas e séries realizadas dos exercícios já cadastrados passam a ser o padrão do treino."}
-              </Text>
-              {seriesDoResumo.some((serie) => serie.weight_kg === 0) ? (
-                <View style={{ gap: 10 }}>
-                  <Text style={estilos.aviso}>
-                    Há{" "}
-                    {
-                      seriesDoResumo.filter((serie) => serie.weight_kg === 0)
-                        .length
-                    }{" "}
-                    série(s) concluída(s) sem carga informada ou com 0 kg.
-                  </Text>
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    accessibilityLabel="Editar cargas zeradas"
-                    disabled={salvando}
-                    style={estilos.botaoSecundario}
-                    onPress={() => {
-                      setRevisaoFim(null);
-                      setMensagem(
-                        "Desmarque a série concluída para editar sua carga e marque-a novamente ao terminar.",
-                      );
-                    }}
-                  >
-                    <Text style={estilos.textoOpcao}>Editar cargas</Text>
-                  </TouchableOpacity>
-                  <RepetirCarga
-                    marcado={aceitarCargaZero}
-                    onAlterar={setAceitarCargaZero}
-                    cor={corTema}
-                    bloqueado={salvando}
-                    rotulo="Concluir mesmo assim com carga zero"
-                  />
-                </View>
-              ) : null}
-              {erroConclusao ? (
-                <Text accessibilityRole="alert" style={estilos.aviso}>
-                  {erroConclusao}
-                </Text>
-              ) : null}
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel="Confirmar conclusão do treino"
-                disabled={salvando || Boolean(fotoCarregandoId)}
-                onPress={() => void confirmarConclusao()}
-                style={[estilos.botaoPrimario, { backgroundColor: corTema }]}
-              >
-                <Text style={estilos.textoPrimario}>
-                  {salvando ? "Guardando..." : "Confirmar conclusão do treino"}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                accessibilityRole="button"
-                disabled={salvando}
-                onPress={() => setRevisaoFim(null)}
-                style={estilos.botaoSecundario}
-              >
-                <Text style={estilos.textoOpcao}>Continuar treinando</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      </Modal>
+        onConfirmar={confirmarConclusao}
+      />
     </View>
   );
 }

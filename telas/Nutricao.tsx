@@ -111,7 +111,7 @@ export default function Nutricao({ usuarioId, metadados, corTema = "#35D07F", on
     let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => void carregar(), 0);
     const agendar = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => void carregar(), 250); };
     const remover = assinarMudancasDeDados((_plano, origem) => {
-      if (!origem || origem === "atividade") agendar();
+      if (!origem || origem === "atividade" || origem === "nutricao") agendar();
     });
     const removerRascunhos = assinarRascunhos((origem) => {
       if (origem === "atividade") agendar();

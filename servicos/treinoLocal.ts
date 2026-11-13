@@ -101,6 +101,7 @@ export type FotoModeloPendente = {
   exercicioId: string;
   origem: string;
   destino: string;
+  falha?: { motivo: "conexao" | "origem" | "permissao" | "outro"; etapa: "conferir" | "copiar" | "vincular"; tentativas: number; tentarEm: number };
 };
 
 function prefixoFotosModelo(usuarioId: string) {
@@ -123,7 +124,9 @@ export async function guardarFotosModelo(local: TreinoRascunho) {
     };
     return [[`${prefixo}${foto.sessaoId}:${foto.exercicioId}`, JSON.stringify(foto)] as const];
   });
-  if (fotos.length) await Promise.all(fotos.map(([id, foto]) => AsyncStorage.setItem(id, foto)));
+  await Promise.all(fotos.map(async ([id, foto]) => {
+    if (!(await AsyncStorage.getItem(id))) await AsyncStorage.setItem(id, foto);
+  }));
 }
 
 export async function listarFotosModelo(usuarioId: string) {
@@ -136,6 +139,10 @@ export async function listarFotosModelo(usuarioId: string) {
       return { id, foto: null };
     }
   }));
+}
+
+export function guardarFalhaFotoModelo(id: string, foto: FotoModeloPendente) {
+  return AsyncStorage.setItem(id, JSON.stringify(foto));
 }
 
 export function confirmarFotoModelo(id: string) {
@@ -626,7 +633,11 @@ export async function listarRascunhos(
 export async function lerResumoTreinoAtivo(
   usuarioId: string,
 ): Promise<ResumoTreinoAtivo | null> {
-  const rascunho = (await listarRascunhos(usuarioId)).find(
+  return resumirRascunhosTreino(await listarRascunhos(usuarioId));
+}
+
+export function resumirRascunhosTreino(rascunhos: TreinoRascunho[]): ResumoTreinoAtivo | null {
+  const rascunho = rascunhos.find(
     (item) => !item.encerradaNoServidor && !item.exclusaoSolicitada,
   );
   return rascunho

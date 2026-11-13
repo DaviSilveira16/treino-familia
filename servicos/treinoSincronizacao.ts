@@ -603,7 +603,10 @@ async function enviar(
               ? encerrar.is("status", null)
               : encerrar.eq("status", remota!.status);
         } else encerrar = encerrar.eq("status", "em_andamento");
-        const { data, error } = await medir("treino.confirmarConclusao", () => encerrar.select("id").maybeSingle());
+        const tipo = reparar ? "recuperada" : finalizacao.modelo?.modo ?? "sessao";
+        const { data, error } = await medir(`treino.confirmarConclusao.${tipo}`, () =>
+          encerrar.select("id").maybeSingle(),
+        );
         if (error) throw error;
         if (!data)
           throw new ConflitoTreino(

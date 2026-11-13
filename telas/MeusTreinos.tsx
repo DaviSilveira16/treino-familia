@@ -428,7 +428,7 @@ export default function MeusTreinos({
         usuarioId,
         `meus-treinos-exercicios:${plano.id}`,
       ),
-    );
+    ).slice(0, 12);
     if (planosPendentes.length === 0) return;
     const identificador = `${usuarioId}:${planosPendentes.map((plano) => plano.id).join(",")}`;
     const prefetchTreinos = prefetchTreinosRef.current;
@@ -438,22 +438,28 @@ export default function MeusTreinos({
     prefetchControllerRef.current = controlador;
     const revisaoPrefetch = obterRevisaoDeDados();
 
-    void medir("meusTreinos.exerciciosPrefetch", () =>
-      supabase
-        .from("exercises")
-        .select("id, plan_id, name, sets_goal, reps_goal, position, photo_path")
-        .eq("user_id", usuarioId)
-        .in("plan_id", planosPendentes.map((plano) => plano.id))
-        .order("position")
-        .abortSignal(controlador.signal),
-    ).then((resposta) => {
+    void medir("meusTreinos.exerciciosPrefetch", async () => {
+      const exercicios: Exercicio[] = [];
+      const tamanhoPagina = 200;
+      for (let inicio = 0; ; inicio += tamanhoPagina) {
+        const resposta = await supabase.from("exercises")
+          .select("id, plan_id, name, sets_goal, reps_goal, position, photo_path")
+          .eq("user_id", usuarioId)
+          .in("plan_id", planosPendentes.map((plano) => plano.id))
+          .order("position").order("id").range(inicio, inicio + tamanhoPagina - 1)
+          .abortSignal(controlador.signal);
+        if (resposta.error) throw resposta.error;
+        const pagina = (resposta.data ?? []) as Exercicio[];
+        exercicios.push(...pagina);
+        if (pagina.length < tamanhoPagina) return exercicios;
+      }
+    }).then((exercicios) => {
       if (
         controlador.signal.aborted ||
-        resposta.error ||
         revisaoPrefetch !== obterRevisaoDeDados()
       ) return;
       const porTreino = new Map<string, Exercicio[]>();
-      for (const exercicio of (resposta.data ?? []) as Exercicio[]) {
+      for (const exercicio of exercicios) {
         const lista = porTreino.get(exercicio.plan_id) ?? [];
         lista.push(exercicio);
         porTreino.set(exercicio.plan_id, lista);
@@ -589,7 +595,8 @@ export default function MeusTreinos({
         const ultimaSessao = semReferencia.length ? await medir("meusTreinos.ultimaSessao", async () => {
           const { data, error } = await supabase.from("workout_sessions").select("id")
             .eq("plan_id", treinoId).eq("user_id", usuarioId).eq("status", "concluido")
-            .not("finished_at", "is", null).order("finished_at", { ascending: false })
+            .not("finished_at", "is", null).order("started_at", { ascending: false })
+            .order("finished_at", { ascending: false }).order("id", { ascending: false })
             .limit(1).abortSignal(controlador.signal).maybeSingle();
           if (error) throw error;
           return data;
@@ -1011,32 +1018,12 @@ export default function MeusTreinos({
       return;
     }
     try {
-      const { error: erroPreservarHistorico } = await supabase
-        .from("workout_sets")
-        .update({ exercise_id: null })
-        .eq("user_id", usuarioId)
-        .eq("exercise_id", exercicio.id);
-
-      if (erroPreservarHistorico) {
-        mostrarMensagem(
-          "Histórico preservado",
-          `Não foi possível proteger os registros anteriores. O exercício não foi excluído: ${erroPreservarHistorico.message}`,
-        );
-        return;
-      }
-
-      const { error } = await supabase
-        .from("exercises")
-        .delete()
-        .eq("id", exercicio.id)
-        .eq("plan_id", exercicio.plan_id)
-        .eq("user_id", usuarioId);
-
+      const { error } = await supabase.rpc("tf_delete_own_exercise", {
+        p_plan_id: exercicio.plan_id,
+        p_exercise_id: exercicio.id,
+      });
       if (error) {
-        mostrarMensagem(
-          "Erro",
-          `Não foi possível excluir o exercício: ${error.message}`,
-        );
+        mostrarMensagem("Erro ao excluir exercício", mensagemOperacaoTreino(error));
         return;
       }
 

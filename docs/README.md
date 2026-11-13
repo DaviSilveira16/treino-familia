@@ -9,6 +9,7 @@
 - [Minhas famílias](guias/GUIA-MINHAS-FAMILIAS.md)
 - [Atualização 1.1.0](guias/GUIA-ATUALIZACAO-1.1.0.md)
 - [Passo a passo](guias/passoApasso.txt)
+- [Banco de dados, publicação e validação](guias/GUIA-BANCO-E-VALIDACAO.md)
 
 Execute os comandos dos guias na raiz do projeto, onde está o `package.json`.
 

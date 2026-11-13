@@ -15,10 +15,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
+      - run: npm run test:sql
       - run: npm run build:web
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:ui
@@ -35,3 +36,7 @@ jobs:
           SMOKE_PHOTO_RETRY_ONLY: '1'
       - name: Diário de nutrição
         run: npm run test:nutricao:ui
+      - name: Paginação e rolagem de Meus treinos
+        run: npm run test:ui
+        env:
+          SMOKE_SCROLLS_ONLY: '1'

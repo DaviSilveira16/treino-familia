@@ -53,15 +53,19 @@ function serializar<T>(usuarioId: string, tarefa: () => Promise<T>): Promise<T> 
   return proxima;
 }
 async function ler(usuarioId: string): Promise<BancoLocal> {
-  const texto = await AsyncStorage.getItem(chave(usuarioId));
+  const texto = await medir("nutricao.armazenamento.ler", () => AsyncStorage.getItem(chave(usuarioId)));
   if (!texto) return vazio(usuarioId);
-  const banco = JSON.parse(texto) as BancoLocal;
+  const banco = await medir("nutricao.armazenamento.interpretar", () =>
+    Promise.resolve(JSON.parse(texto) as BancoLocal),
+  );
   if (banco.versao !== 1 || banco.usuarioId !== usuarioId || !banco.entradas)
     throw new Error("O arquivo local de nutrição não pôde ser identificado. Ele foi preservado neste aparelho.");
   return { ...banco, alimentos: banco.alimentos ?? {}, copias: banco.copias ?? [], sincronizadoAte: banco.sincronizadoAte ?? {} };
 }
 async function gravar(banco: BancoLocal) {
-  await AsyncStorage.setItem(chave(banco.usuarioId), JSON.stringify(banco));
+  await medir("nutricao.armazenamento.gravar", () =>
+    AsyncStorage.setItem(chave(banco.usuarioId), JSON.stringify(banco)),
+  );
 }
 function idRecurso(tipo: Tipo, documento: Documento, usuarioId: string): string {
   if (tipo === "preferences") return "preferences";
@@ -173,7 +177,7 @@ async function salvar(tipo: Tipo, usuarioId: string, documento: Documento) {
     if (tipo === "food") banco.alimentos[canonico] = dados as AlimentoNutricao;
     await gravar(banco);
   });
-  registrarMudancaDeDados();
+  registrarMudancaDeDados(undefined, "nutricao");
   if (!offline()) void sincronizarNutricao(usuarioId).catch(() => {});
 }
 
@@ -225,7 +229,7 @@ export function sincronizarNutricao(usuarioId: string): Promise<{ pendencias: nu
             banco.erro = null;
             await gravar(banco);
           });
-          registrarMudancaDeDados();
+          registrarMudancaDeDados(undefined, "nutricao");
         }
         if (tentativa === 300) {
           await serializar(usuarioId, async () => {
@@ -282,7 +286,7 @@ export async function resolverConflitoNutricao(usuarioId: string, recursoId: str
     banco.erro = null;
     await gravar(banco);
   });
-  registrarMudancaDeDados();
+  registrarMudancaDeDados(undefined, "nutricao");
   return sincronizarNutricao(usuarioId);
 }
 export function listarCopiasConflitosNutricao(usuarioId: string): Promise<Copia[]> {

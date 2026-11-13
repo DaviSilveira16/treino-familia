@@ -325,7 +325,8 @@ function filtered(table, search) {
       offlineReports = 0;
     const cancelledRequests = new Set(),
       nativeFetchReports = [],
-      fetchFailures = [];
+      fetchFailures = [],
+      leiturasResumo = [];
     await context.exposeBinding("__smokeCancelledFetch", (_, url) => {
       cancelledRequests.add(url);
     });
@@ -375,6 +376,14 @@ function filtered(table, search) {
       console.error("PAGE ERROR", phase, error.stack || error.message);
     });
     page.on("dialog", (dialog) => dialog.accept());
+    page.on("response", (response) => {
+      if (!response.ok()) return;
+      const url = new URL(response.url());
+      const tabela = url.pathname.split("/").pop();
+      if (url.origin === backendOrigin && ["workout_sessions", "cardio_sessions"].includes(tabela) &&
+          url.searchParams.get("select")?.includes("duration_minutes,active_calories"))
+        leiturasResumo.push({ tabela, at: Date.now() });
+    });
     page.on("requestfailed", (request) => {
       const reason = request.failure()?.errorText || "";
       if (/cancelled|canceled|ERR_ABORTED/i.test(reason))
@@ -843,7 +852,19 @@ function filtered(table, search) {
       for (let indice = 1; indice <= 30; indice++) tables.workout_plans.push({
         id: `scroll-plan-${indice}`, user_id: uid, name: `Plano ${String(indice).padStart(2, "0")}`, created_at: new Date(now).toISOString(),
       });
+      for (let indice = 0; indice < 205; indice++) tables.exercises.push({
+        id: `prefetch-${String(indice).padStart(3, "0")}`,
+        user_id: uid,
+        plan_id: `scroll-plan-${Math.floor(indice / 21) + 1}`,
+        name: `Exercício de paginação ${indice}`, position: indice, sets_goal: 2, reps_goal: "10",
+      });
+      const segundaPagina = page.waitForResponse((resposta) => {
+        const url = new URL(resposta.url());
+        return url.pathname.endsWith("/exercises") &&
+          url.searchParams.get("plan_id")?.startsWith("in.") && url.searchParams.get("offset") === "200";
+      });
       await page.getByText("Meus treinos", { exact: true }).click();
+      assert.equal((await segundaPagina).ok(), true, "O pré-carregamento busca a segunda página");
       await page.getByRole("button", { name: "Abrir treino ZZ treino de rolagem", exact: true }).click();
       const esperarDestino = async (id) => page.waitForFunction((alvo) => {
         const elemento = document.querySelector(`[data-testid="${alvo}"]`);
@@ -935,8 +956,13 @@ function filtered(table, search) {
       assert.equal(tables.workout_sessions.find((s) => s.id === sid).plan_id, novo.id);
       if (testarReenvio) {
         assert.equal(tables.exercises.filter((e) => e.plan_id === novo.id && e.photo_path).length, 0);
+        await page.waitForFunction(() =>
+          Object.keys(localStorage).filter((key) => key.includes(":fotos-modelo:v1:") &&
+            JSON.parse(localStorage.getItem(key))?.falha?.motivo === "conexao").length === 2,
+        );
         await page.reload();
         await page.getByText("2 fotos aguardando envio", { exact: true }).waitFor();
+        await page.getByText("Conexão instável.", { exact: true }).waitFor();
         await page.getByText("Meus treinos", { exact: true }).filter({ visible: true }).first().click();
         await botao("Abrir treino Plano teste").click();
         await page.getByText("▶ Iniciar treino com cronômetro", { exact: true }).click();
@@ -947,7 +973,8 @@ function filtered(table, search) {
         }, draftKey);
         assert.ok(tables.workout_sessions.some((sessao) => sessao.id !== sid && sessao.status === "em_andamento"));
         falharCopiaFoto = false;
-        await page.evaluate(() => window.dispatchEvent(new Event("online")));
+        await page.getByText("‹ Voltar", { exact: true }).filter({ visible: true }).click();
+        await botao("Tentar enviar fotos").click();
       }
       await page.waitForFunction(() => !Object.keys(localStorage).some((key) => key.includes(":fotos-modelo:v1:")));
       for (const [nome, origem] of [["Agachamento teste", fotoOriginal], [avulso, fotoAvulsa]]) {
@@ -2504,6 +2531,13 @@ function filtered(table, search) {
       (report) =>
         !report.offline &&
         !cancelledRequests.has(report.url) &&
+        // A RPC é opcional. Confirma que as duas leituras do fallback
+        // realmente responderam antes de aceitar esta falha do WebKit.
+        !(report.url.endsWith("/rpc/tf_resumo_semanal") &&
+          ["workout_sessions", "cardio_sessions"].every((tabela) =>
+            leiturasResumo.some((leitura) => leitura.tabela === tabela &&
+              leitura.at >= report.at && leitura.at - report.at < 3000),
+          )) &&
         !fetchFailures.some(
           (failure) =>
             failure.url === report.url &&

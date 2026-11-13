@@ -1,5 +1,5 @@
 let revisao = 0;
-type OrigemMudanca = "plano" | "atividade" | "foto" | "rascunho";
+type OrigemMudanca = "plano" | "atividade" | "foto" | "rascunho" | "nutricao";
 type Ouvinte = (planoAlterado?: string, origem?: OrigemMudanca) => void;
 const ouvintes = new Set<Ouvinte>();
 

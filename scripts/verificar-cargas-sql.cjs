@@ -45,6 +45,8 @@ async function cargas(ex = e1) {
   await sessao(10, "2026-10-26"); await serie(100, 10, e1, 1, 80); await concluir(10, "2026-10-26");
   const migration = fs.readFileSync(path.join(__dirname, "../supabase/migrations/202610290001_ultimas_cargas_treino.sql"), "utf8");
   await db.exec(migration); await db.exec(migration);
+  const correcao = fs.readFileSync(path.join(__dirname, "../supabase/migrations/202611130001_ordem_cargas_ultima_sessao.sql"), "utf8");
+  await db.exec(correcao); await db.exec(correcao);
   assert.deepEqual((await cargas()).map((s) => s.weight_kg), [70, 80, 90]);
   assert.equal((await db.query("select count(*)::int as n from exercise_load_default_sources")).rows[0].n, 0);
   for (const table of ["workout_plans", "exercises", "workout_sessions", "workout_sets", "exercise_load_defaults"]) {

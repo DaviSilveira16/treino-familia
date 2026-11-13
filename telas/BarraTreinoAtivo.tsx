@@ -3,14 +3,14 @@ import { AppState, StyleSheet, Text, TouchableOpacity, View } from "react-native
 import NetInfo from "@react-native-community/netinfo";
 import {
   assinarRascunhos,
-  lerResumoTreinoAtivo,
+  resumirRascunhosTreino,
   listarRascunhos,
   listarExclusoesPendentes,
   listarFotosModelo,
   type ResumoTreinoAtivo,
 } from "../servicos/treinoLocal";
 import { sincronizarTreinosPendentes } from "../servicos/treinoSincronizacao";
-import { assinarMudancasDeDados } from "../servicos/revisaoDados";
+import { assinarMudancasDeDados, registrarMudancaDeDados } from "../servicos/revisaoDados";
 import { sincronizarFotosModelo } from "../servicos/fotosModeloTreino";
 
 type BarraProps = {
@@ -58,6 +58,8 @@ function Barra({
 }: BarraProps) {
   const [resumo, setResumo] = useState<ResumoTreinoAtivo | null>(null);
   const [fotosPendentes, setFotosPendentes] = useState(0);
+  const [avisoFotos, setAvisoFotos] = useState("");
+  const [enviandoFotos, setEnviandoFotos] = useState(false);
   const [pendenciasNutricao, setPendenciasNutricao] = useState(0);
   const [erroNutricao, setErroNutricao] = useState<string | null>(null);
   const [sincronizando, setSincronizando] = useState(false);
@@ -65,36 +67,46 @@ function Barra({
   useEffect(() => {
     let ativo = true;
     let versao = 0;
+    let versaoNutricao = 0;
     let haRascunhos = false;
     let haFotos = false;
 
     const atualizar = async () => {
       const pedido = ++versao;
       try {
-        const [rascunhos, exclusoes, atual, nutricao] = await Promise.all([
+        const [rascunhos, exclusoes] = await Promise.all([
           listarRascunhos(usuarioId),
           listarExclusoesPendentes(usuarioId),
-          lerResumoTreinoAtivo(usuarioId),
-          import("../servicos/nutricaoRepositorio")
-            .then((modulo) => modulo.lerEstadoNutricaoLocal(usuarioId))
-            .catch(() => null),
         ]);
         if (!ativo || pedido !== versao) return;
         haRascunhos = rascunhos.length > 0 || exclusoes.length > 0;
-        setResumo(atual);
-        setPendenciasNutricao(nutricao?.pendencias ?? 0);
-        setErroNutricao(nutricao?.erro ?? null);
+        setResumo(resumirRascunhosTreino(rascunhos));
       } catch {
         // Preserva o último estado conhecido; nunca descarta rascunhos locais.
       }
     };
 
+    const atualizarNutricao = async () => {
+      const pedido = ++versaoNutricao;
+      const estado = await import("../servicos/nutricaoRepositorio")
+        .then((modulo) => modulo.lerEstadoNutricaoLocal(usuarioId)).catch(() => null);
+      if (!ativo || pedido !== versaoNutricao || !estado) return;
+      setPendenciasNutricao(estado.pendencias);
+      setErroNutricao(estado.erro);
+    };
     const atualizarFotos = async () => {
       const fotos = await listarFotosModelo(usuarioId).catch(() => null);
       if (!ativo || !fotos) return;
       const quantidade = fotos.filter(({ foto }) => Boolean(foto)).length;
       haFotos = quantidade > 0;
       setFotosPendentes(quantidade);
+      const motivo = fotos.find(({ foto }) => foto?.falha)?.foto?.falha?.motivo;
+      setAvisoFotos(motivo ? {
+        conexao: "Conexão instável.",
+        origem: "Uma foto original não está disponível.",
+        permissao: "O servidor recusou o acesso a uma foto.",
+        outro: "Ainda não foi possível confirmar o envio.",
+      }[motivo] : "");
     };
     const tentarFotos = () => {
       void atualizarFotos();
@@ -106,8 +118,9 @@ function Barra({
     };
     const cancelarRascunhos = assinarRascunhos(atualizar);
     const cancelarMudancas = assinarMudancasDeDados((_plano, origem) => {
-      void atualizar();
-      if (origem === "atividade") tentarFotos();
+      if (!origem || origem === "rascunho" || origem === "atividade") void atualizar();
+      if (origem === "nutricao") void atualizarNutricao();
+      if (origem === "atividade" || origem === "foto") tentarFotos();
     });
     const rede = NetInfo.addEventListener((estado) => {
       if (estado.isConnected && estado.isInternetReachable !== false)
@@ -116,6 +129,7 @@ function Barra({
     const foco = AppState.addEventListener("change", (estado) => {
       if (estado === "active") {
         void atualizar();
+        void atualizarNutricao();
         tentarTreinos();
       }
     });
@@ -133,6 +147,7 @@ function Barra({
       window.addEventListener("focus", tentar);
     }
     void atualizar();
+    void atualizarNutricao();
     tentarTreinos();
 
     return () => {
@@ -161,6 +176,19 @@ function Barra({
       setErroNutricao("Não foi possível confirmar a sincronização. Tente novamente.");
     } finally {
       setSincronizando(false);
+    }
+  }
+
+  async function tentarFotosAgora() {
+    if (enviandoFotos) return;
+    setEnviandoFotos(true);
+    try {
+      await sincronizarFotosModelo(usuarioId, true);
+    } catch {
+      setAvisoFotos("Ainda não foi possível confirmar o envio.");
+    } finally {
+      setEnviandoFotos(false);
+      registrarMudancaDeDados(undefined, "foto");
     }
   }
 
@@ -205,6 +233,12 @@ function Barra({
           <Text style={estilos.detalhes}>
             {fotosPendentes === 1 ? "1 foto aguardando envio" : `${fotosPendentes} fotos aguardando envio`}
           </Text>
+          {avisoFotos ? <Text style={estilos.detalhes}>{avisoFotos}</Text> : null}
+          <TouchableOpacity accessibilityRole="button" disabled={enviandoFotos} onPress={() => void tentarFotosAgora()}>
+            <Text style={[estilos.detalhes, { color: corTema }]}>
+              {enviandoFotos ? "Enviando fotos…" : "Tentar enviar fotos"}
+            </Text>
+          </TouchableOpacity>
         </View>
       ) : null}
 
