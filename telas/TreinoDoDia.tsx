@@ -15,6 +15,7 @@ type Props = {
   onAbrirProgramacao: () => void;
   onAbrirTreino: (plano?: { planId: string; planName: string }) => void;
   corTema?: string;
+  proximo?: { planId: string; planName: string; data: Date } | null;
 };
 
 type TreinoHoje = {
@@ -48,6 +49,7 @@ export default function TreinoDoDia({
   onAbrirProgramacao,
   onAbrirTreino,
   corTema = "#35D07F",
+  proximo,
 }: Props) {
   const [treino, setTreino] = useState<TreinoHoje | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -73,6 +75,7 @@ export default function TreinoDoDia({
       if (anterior && (anterior.origemLocal || await sessaoFoiEncerrada(id, anterior.sessaoId))
         && usuarioRef.current === id && continuarRef.current === anterior) setContinuar(null);
     }
+    return resumo;
   }, [setContinuar]);
   useEffect(() => assinarRascunhos(() => { void atualizarLocal().catch(() => {}); }), [atualizarLocal]);
 
@@ -90,8 +93,7 @@ export default function TreinoDoDia({
         return;
       }
       usuarioRef.current = usuarioData.user.id;
-      await atualizarLocal();
-      const local = await lerResumoTreinoAtivo(usuarioData.user.id);
+      const local = await atualizarLocal();
       if (!local) {
         const { data: ativa, error: erroAtiva } = await supabase.from("workout_sessions")
           .select("id, plan_id").eq("user_id", usuarioData.user.id).eq("status", "em_andamento")
@@ -199,10 +201,10 @@ export default function TreinoDoDia({
       <View style={estilos.topo}>
         <View style={estilos.textos}>
           <Text style={[estilos.rotulo, { color: corTema }]}>
-            {continuar ? "SEU TREINO" : "TREINO DE HOJE"}
+            {continuar ? "SEU TREINO" : proximo ? "PRÓXIMO TREINO" : "TREINO DE HOJE"}
           </Text>
 
-          <Text style={estilos.dia}>{nomesDias[new Date().getDay()]}</Text>
+          <Text style={estilos.dia}>{nomesDias[(continuar ? new Date() : proximo?.data ?? new Date()).getDay()]}</Text>
         </View>
 
         <Text style={estilos.emoji}>{treino?.definido ? "💪" : "🏋️"}</Text>
@@ -221,6 +223,14 @@ export default function TreinoDoDia({
         </>
       ) : carregando ? (
         <ActivityIndicator color={corTema} style={estilos.carregando} />
+      ) : proximo ? (
+        <>
+          <Text style={estilos.titulo}>{proximo.planName}</Text>
+          <TouchableOpacity accessibilityRole="button" onPress={() => onAbrirTreino({ planId: proximo.planId, planName: proximo.planName })}
+            style={[estilos.botaoPrincipal, { backgroundColor: corTema }]}>
+            <Text style={estilos.textoBotaoPrincipal}>Abrir treino programado</Text>
+          </TouchableOpacity>
+        </>
       ) : treino?.definido ? (
         <>
           <Text style={estilos.titulo}>{treino.nome}</Text>
@@ -230,16 +240,20 @@ export default function TreinoDoDia({
           </Text>
 
           <TouchableOpacity
+            accessibilityRole="button"
             style={[estilos.botaoPrincipal, { backgroundColor: corTema }]}
             onPress={() => onAbrirTreino()}
             activeOpacity={0.8}
           >
-            <Text style={estilos.textoBotaoPrincipal}>Abrir meus treinos</Text>
+            <Text style={estilos.textoBotaoPrincipal}>Iniciar treino</Text>
           </TouchableOpacity>
         </>
       ) : (
         <>
-          <Text style={estilos.titulo}>Qual treino você fez hoje?</Text>
+          <Text style={estilos.titulo}>Pronto para treinar?</Text>
+          <TouchableOpacity accessibilityRole="button" onPress={() => onAbrirTreino()} style={[estilos.botaoPrincipal, { backgroundColor: corTema }]}>
+            <Text style={estilos.textoBotaoPrincipal}>Iniciar treino</Text>
+          </TouchableOpacity>
 
           <Text style={estilos.descricao}>
             Registre o treino realizado no calendário e acompanhe sua

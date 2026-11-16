@@ -16,7 +16,7 @@ const { pg_trgm } = require("@electric-sql/pglite/contrib/pg_trgm");
   };
   try {
     await db.exec(`
-      create role anon; create role authenticated;
+      create role anon; create role authenticated; create role service_role;
       create schema auth; create schema storage; create schema extensions;
       create table auth.users(id uuid primary key, raw_user_meta_data jsonb);
       create function auth.uid() returns uuid language sql stable as
@@ -76,6 +76,48 @@ const { pg_trgm } = require("@electric-sql/pglite/contrib/pg_trgm");
     await db.query("select tf_delete_own_workout_plan($1)", [plano]);
     assert.deepEqual((await db.query("select plan_id from weekly_workout_schedule")).rows, [{ plan_id: null }]);
     assert.deepEqual((await db.query("select plan_id from workout_sessions")).rows, [{ plan_id: null }]);
+    await db.query("select tf_salvar_programacao(1::smallint,null,true)");
+    await db.query("select tf_salvar_programacao(1::smallint,null,true)");
+    assert.deepEqual((await db.query("select is_rest_day from weekly_workout_schedule")).rows, [{ is_rest_day: true }]);
+    await db.query("select tf_salvar_programacao(1::smallint,null,false)");
+    assert.deepEqual((await db.query("select day_of_week from weekly_workout_schedule")).rows, []);
+    const indicadores = await db.query("select tf_indicadores_painel('America/Sao_Paulo') as resultado");
+    assert.deepEqual(indicadores.rows[0].resultado, { sequencia: 0, carga: null });
+    await assert.rejects(db.query("select tf_excluir_dados_conta($1)", [outro]), { code: "42501" });
+    await conta(outro);
+    await db.query("select entrar_na_familia_por_codigo($1)", [familia.invite_code]);
+    const planoAlheio = id(8);
+    await db.query("insert into workout_plans(id,user_id,name) values($1,$2,'Alheio')", [planoAlheio,outro]);
+    await db.query("select tf_salvar_programacao(1::smallint,$1,false)", [planoAlheio]);
+    const exercicioAlheio = id(9);
+    const sessoesAlheias = [id(10), id(11), id(12)];
+    await db.query("insert into exercises(id,user_id,plan_id,name) values($1,$2,$3,'Agachamento')", [exercicioAlheio,outro,planoAlheio]);
+    for (const [indice, sessaoAlheia] of sessoesAlheias.entries()) {
+      await db.query(`insert into workout_sessions(id,user_id,plan_id,started_at,finished_at,status)
+        values($1,$2,$3,date_trunc('day',now(),'America/Sao_Paulo') - ($4::int * interval '1 day') + interval '10 hours',
+                     date_trunc('day',now(),'America/Sao_Paulo') - ($4::int * interval '1 day') + interval '11 hours','concluido')`,
+        [sessaoAlheia,outro,planoAlheio,indice === 0 ? 1 : 0]);
+      await db.query(`insert into workout_sets(user_id,session_id,exercise_id,exercise_name,set_number,reps,weight_kg)
+        values($1,$2,$3,'Agachamento',$4,8,$5)`, [outro,sessaoAlheia,exercicioAlheio,indice === 2 ? 2 : 1,40 + indice * 5]);
+    }
+    assert.deepEqual((await db.query("select tf_indicadores_painel('America/Sao_Paulo') as resultado")).rows[0].resultado,
+      { sequencia: 2, carga: { exercicio: "Agachamento", serie: 1, anterior: 40, atual: 45 } });
+    await conta(dono);
+    await assert.rejects(db.query("select tf_salvar_programacao(1::smallint,$1,false)", [planoAlheio]), { code: "42501" });
+    assert.deepEqual((await db.query("select day_of_week from weekly_workout_schedule")).rows, []);
+    await db.exec("reset role");
+    assert.equal((await db.query("select has_function_privilege('service_role','public.tf_excluir_dados_conta(uuid)','EXECUTE') as permitido")).rows[0].permitido, true);
+    assert.deepEqual((await db.query("select * from tf_arquivos_proprios_conta($1)", [dono])).rows,
+      [{ bucket: "community-photos", caminho: foto }]);
+    assert.deepEqual((await db.query("select * from tf_arquivos_proprios_conta($1)", [outro])).rows, []);
+    await assert.rejects(db.query("select tf_excluir_dados_conta($1)", [dono]), /TF_FAMILIA_COMPARTILHADA/);
+    await conta(outro);
+    await db.query("select sair_da_familia($1)", [familia.id]);
+    await db.exec("reset role");
+    await db.query("select tf_excluir_dados_conta($1)", [dono]);
+    await db.query("select tf_excluir_dados_conta($1)", [dono]);
+    assert.deepEqual((await db.query("select id from workout_plans")).rows, [{ id: planoAlheio }]);
+    assert.deepEqual((await db.query("select id from workout_sessions order by id")).rows.map((r) => r.id), sessoesAlheias);
     console.log("OK — instalação do zero, permissões, buckets, ordem e exclusões transacionais");
   } finally {
     await db.close();

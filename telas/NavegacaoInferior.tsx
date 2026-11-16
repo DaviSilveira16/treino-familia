@@ -20,7 +20,8 @@ export default function NavegacaoInferior({
   const corIconeComunidade = comunidadeAtiva ? corTema : "#A3ACA5";
 
   return (
-    <View nativeID="navegacao-inferior" style={estilos.barra}>
+    <View nativeID="navegacao-inferior">
+      <View style={estilos.barra}>
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel="Abrir comunidade da família"
@@ -132,6 +133,7 @@ export default function NavegacaoInferior({
         </View>
         <Text style={[estilos.rotulo, nutricaoAtiva && { color: corTema }]}>Nutrição</Text>
       </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -140,7 +142,7 @@ const estilos = StyleSheet.create({
   barra: {
     height: 50,
     minHeight: 50,
-    backgroundColor: "#111612",
+    backgroundColor: "#101312",
     borderTopWidth: 1,
     borderTopColor: "#2A2F2B",
     flexDirection: "row",

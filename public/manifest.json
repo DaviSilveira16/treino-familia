@@ -7,8 +7,8 @@
   "scope": "/",
   "display": "fullscreen",
   "orientation": "portrait",
-  "theme_color": "#111613",
-  "background_color": "#111613",
+  "theme_color": "#101312",
+  "background_color": "#101312",
   "icons": [
     {
       "src": "/treino-familia-icon-192-v2.png",

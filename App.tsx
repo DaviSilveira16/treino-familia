@@ -3,9 +3,7 @@ import {
   ActivityIndicator,
   BackHandler,
   AppState,
-  Image,
   KeyboardAvoidingView,
-  Linking,
   Platform,
   ScrollView,
   StatusBar,
@@ -17,34 +15,31 @@ import {
 } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
 import {
-  avisarAtualizacao,
-  verificarAtualizacao,
-} from "./servicos/atualizacao";
-import {
   CommonActions,
   createNavigationContainerRef,
   NavigationContainer,
 } from "@react-navigation/native";
 import {
   CardStyleInterpolators,
-  createStackNavigator,
 } from "@react-navigation/stack";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import { criarAcoesAutenticacao, type ModoAutenticacao } from "./servicos/acoesAutenticacao";
 import { Alert } from "./servicos/alerta";
 import { fecharModalAtivo, temRetornoInternoAtivo } from "./servicos/voltarModal";
 import {
-  prepararAuthAndroid,
-  abrirGoogleAndroid,
-  cancelarAuthAndroid,
   processarRetornoAndroid,
 } from "./servicos/authAndroid";
 import BarraTreinoAtivo from "./telas/BarraTreinoAtivo";
+import PainelInicial from "./telas/PainelInicial";
+import NavegacaoInferior from "./telas/NavegacaoInferior";
+import NavegacaoVoltarGlobal from "./telas/NavegacaoVoltarGlobal";
+import LimiteDeErro from "./telas/LimiteDeErro";
+import { Pilha, ROTAS_COM_BOTAO_VOLTAR, type Rotas } from "./telas/rotasAplicativo";
 // Importado apenas quando o usuário abre a respectiva tela.
 const Perfil = React.lazy(() => import("./telas/Perfil"));
 // Importado apenas quando o usuário abre a respectiva tela.
 const Frequencia = React.lazy(() => import("./telas/Frequencia"));
-import TreinoDoDia from "./telas/TreinoDoDia";
 // Importado apenas quando o usuário abre a respectiva tela.
 const MeusTreinos = React.lazy(() => import("./telas/MeusTreinos"));
 // Importado apenas quando o usuário abre a respectiva tela.
@@ -57,42 +52,9 @@ const HistoricoTreinos = React.lazy(() => import("./telas/HistoricoTreinos"));
 const TreinoAtivo = React.lazy(() => import("./telas/TreinoAtivo"));
 // Importado apenas quando o usuário abre a respectiva tela.
 const EvolucaoTreinos = React.lazy(() => import("./telas/EvolucaoTreinos"));
-import ResumoSemanal from "./telas/ResumoSemanal";
 // Importado apenas quando o usuário abre a respectiva tela.
 const ComunidadeFamilia = React.lazy(() => import("./telas/ComunidadeFamilia"));
 const Nutricao = React.lazy(() => import("./telas/Nutricao"));
-import NavegacaoInferior from "./telas/NavegacaoInferior";
-import NavegacaoVoltarGlobal from "./telas/NavegacaoVoltarGlobal";
-import LimiteDeErro from "./telas/LimiteDeErro";
-
-type ModoAutenticacao = "login" | "cadastro" | "recuperar";
-
-type Rotas = {
-  Inicio: undefined;
-  perfil: undefined;
-  treinos: undefined;
-  cardios: undefined;
-  evolucao: undefined;
-  historico: undefined;
-  frequencia: { cardioId?: string } | undefined;
-  evolucaoTreinos: undefined;
-  treinoAtivo: { planId: string; planName: string };
-  comunidade: undefined;
-  nutricao: undefined;
-};
-
-const Pilha = createStackNavigator<Rotas>();
-// A Comunidade é uma aba principal; apenas as páginas abaixo têm voltar.
-const ROTAS_COM_BOTAO_VOLTAR = new Set<keyof Rotas>([
-  "perfil",
-  "treinos",
-  "cardios",
-  "evolucao",
-  "historico",
-  "frequencia",
-  "evolucaoTreinos",
-  "treinoAtivo",
-]);
 
 function modoTelaInicialSafari() {
   if (Platform.OS !== "web" || typeof window === "undefined") return false;
@@ -127,45 +89,6 @@ function obterCorTema(valor: unknown): string {
   return COR_PADRAO;
 }
 
-const telas = [
-  {
-    id: "treinos",
-    titulo: "Meus treinos",
-    descricao: "Acesse seus treinos e exercícios",
-    emoji: "🏋️",
-  },
-  {
-    id: "cardios",
-    titulo: "Meus Cardios",
-    descricao: "Cadastre e acompanhe seus cardios",
-    emoji: "🏃",
-  },
-  {
-    id: "evolucao",
-    titulo: "Evolução física",
-    descricao: "Acompanhe seu peso e suas medidas",
-    emoji: "📈",
-  },
-  {
-    id: "evolucaoTreinos",
-    titulo: "Evolução dos treinos",
-    descricao: "Compare cargas, repetições e volume por exercício",
-    emoji: "📊",
-  },
-  {
-    id: "historico",
-    titulo: "Histórico",
-    descricao: "Consulte seus treinos anteriores",
-    emoji: "📋",
-  },
-  {
-    id: "frequencia",
-    titulo: "Frequência",
-    descricao: "Veja sua frequência de treinamento",
-    emoji: "📅",
-  },
-] as const;
-
 function TelaCarregando({ cor }: { cor: string }) {
   return (
     <View
@@ -182,8 +105,6 @@ function TelaCarregando({ cor }: { cor: string }) {
 }
 
 function AppConteudo() {
-  const versaoAvisada = useRef<string | null>(null);
-  const verificacaoEmAndamento = useRef(false);
   const toqueInicialWeb = useRef<{ x: number; y: number } | null>(null);
 
   const [sessao, setSessao] = useState<Session | null>(null);
@@ -476,257 +397,14 @@ function AppConteudo() {
     };
   }, []);
 
-  useEffect(() => {
-    let componenteAtivo = true;
-    let conectadoAoWifi = false;
+  useEffect(() => NetInfo.addEventListener((estado) => {
+    setSemInternet(estado.isConnected === false || estado.isInternetReachable === false);
+  }), []);
 
-    async function consultarAtualizacao() {
-      // O site no Safari já recebe a nova versão no próximo carregamento;
-      // verificar links de instalação nativa em cada retorno não ajuda na web.
-      if (
-        Platform.OS === "web" ||
-        !componenteAtivo ||
-        verificacaoEmAndamento.current
-      ) {
-        return;
-      }
-
-      verificacaoEmAndamento.current = true;
-
-      try {
-        const atualizacao = await verificarAtualizacao();
-
-        if (
-          componenteAtivo &&
-          atualizacao &&
-          versaoAvisada.current !== atualizacao.versao
-        ) {
-          versaoAvisada.current = atualizacao.versao;
-
-          avisarAtualizacao(
-            atualizacao.versao,
-            atualizacao.url,
-            atualizacao.mensagem,
-          );
-        }
-      } catch {
-      } finally {
-        verificacaoEmAndamento.current = false;
-      }
-    }
-
-    const cancelarMonitoramento = NetInfo.addEventListener((estado) => {
-      if (componenteAtivo) {
-        setSemInternet(
-          estado.isConnected === false || estado.isInternetReachable === false,
-        );
-      }
-      const estaNoWifi = estado.type === "wifi" && estado.isConnected === true;
-
-      if (estaNoWifi && !conectadoAoWifi) {
-        consultarAtualizacao();
-      }
-
-      if (!estaNoWifi) {
-        versaoAvisada.current = null;
-      }
-
-      conectadoAoWifi = estaNoWifi;
-    });
-
-    const monitorarAplicativo = AppState.addEventListener(
-      "change",
-      (estado) => {
-        if (estado === "active") {
-          consultarAtualizacao();
-        }
-      },
-    );
-
-    NetInfo.fetch()
-      .then((estado) => {
-        if (componenteAtivo) {
-          setSemInternet(
-            estado.isConnected === false ||
-              estado.isInternetReachable === false,
-          );
-        }
-        if (estado.type === "wifi" && estado.isConnected === true) {
-          conectadoAoWifi = true;
-          consultarAtualizacao();
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      componenteAtivo = false;
-      cancelarMonitoramento();
-      monitorarAplicativo.remove();
-    };
-  }, []);
-
-  function validarEmail(valor: string) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim());
-  }
-
-  async function entrar() {
-    if (!validarEmail(email)) {
-      Alert.alert("Atenção", "Digite um e-mail válido.");
-      return;
-    }
-
-    if (!senha) {
-      Alert.alert("Atenção", "Digite sua senha.");
-      return;
-    }
-
-    setEnviando(true);
-
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password: senha,
-      });
-
-      if (error) {
-        Alert.alert("Não foi possível entrar", error.message);
-      }
-    } catch {
-      Alert.alert("Erro", "Não foi possível conectar ao serviço.");
-    } finally {
-      setEnviando(false);
-    }
-  }
-
-  async function entrarComGoogle() {
-    setEnviando(true);
-
-    try {
-      const pedido = await prepararAuthAndroid("google");
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: pedido?.redirectTo ?? URL_APLICATIVO,
-          skipBrowserRedirect: !!pedido || Platform.OS !== "web",
-        },
-      });
-
-      if (error) {
-        await cancelarAuthAndroid().catch(() => {});
-        Alert.alert("Não foi possível entrar com Google", error.message);
-        return;
-      }
-
-      if (pedido && data.url) {
-        await abrirGoogleAndroid(data.url, pedido.state);
-      } else if (Platform.OS !== "web" && data.url) {
-        await Linking.openURL(data.url);
-      }
-    } catch (erro) {
-      await cancelarAuthAndroid().catch(() => {});
-      Alert.alert(
-        "Erro",
-        erro instanceof Error
-          ? erro.message
-          : "Não foi possível iniciar o login com Google.",
-      );
-    } finally {
-      setEnviando(false);
-    }
-  }
-
-  async function cadastrar() {
-    if (!nome.trim()) {
-      Alert.alert("Atenção", "Digite seu nome.");
-      return;
-    }
-
-    if (!validarEmail(email)) {
-      Alert.alert("Atenção", "Digite um e-mail válido.");
-      return;
-    }
-
-    if (senha.length < 6) {
-      Alert.alert("Atenção", "A senha deve ter pelo menos 6 caracteres.");
-      return;
-    }
-
-    setEnviando(true);
-
-    try {
-      const pedido = await prepararAuthAndroid("signup");
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password: senha,
-        options: {
-          emailRedirectTo: pedido?.redirectTo ?? URL_APLICATIVO,
-          data: {
-            nome: nome.trim(),
-            tema_cor: COR_PADRAO,
-          },
-        },
-      });
-
-      if (error) {
-        await cancelarAuthAndroid().catch(() => {});
-        Alert.alert("Não foi possível cadastrar", error.message);
-        return;
-      }
-
-      if (data.session) {
-        await cancelarAuthAndroid().catch(() => {});
-        Alert.alert("Cadastro realizado", "Sua conta foi criada com sucesso.");
-      } else {
-        setModo("login");
-        setSenha("");
-
-        Alert.alert(
-          "Confira seu e-mail",
-          "Sua conta foi cadastrada. Se a confirmação de e-mail estiver habilitada, abra a mensagem enviada pelo Supabase e confirme sua conta antes de entrar.",
-        );
-      }
-    } catch {
-      Alert.alert("Erro", "Não foi possível conectar ao serviço.");
-    } finally {
-      setEnviando(false);
-    }
-  }
-
-  async function recuperarSenha() {
-    if (!validarEmail(email)) {
-      Alert.alert("Atenção", "Digite o e-mail da sua conta.");
-      return;
-    }
-
-    setEnviando(true);
-
-    try {
-      const pedido = await prepararAuthAndroid("recovery");
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        email.trim(),
-        {
-          redirectTo: pedido?.redirectTo ?? URL_APLICATIVO,
-        },
-      );
-
-      if (error) {
-        await cancelarAuthAndroid().catch(() => {});
-        Alert.alert("Não foi possível enviar", error.message);
-        return;
-      }
-
-      Alert.alert(
-        "Solicitação enviada",
-        "Se o endereço estiver cadastrado, você receberá as instruções para redefinir sua senha.",
-      );
-
-      setModo("login");
-    } catch {
-      Alert.alert("Erro", "Não foi possível conectar ao serviço.");
-    } finally {
-      setEnviando(false);
-    }
-  }
+  const { entrar, entrarComGoogle, cadastrar, recuperarSenha } = criarAcoesAutenticacao({
+    nome, email, senha, corPadrao: COR_PADRAO, urlAplicativo: URL_APLICATIVO,
+    setEnviando, setModo, setSenha,
+  });
 
   async function sair() {
     const { error } = await supabase.auth.signOut();
@@ -1091,137 +769,12 @@ function AppConteudo() {
         >
           <Pilha.Screen name="Inicio">
             {({ navigation }) => (
-              <View style={estilos.container}>
-                <ScrollView
-                  contentContainerStyle={estilos.conteudoHome}
-                  showsVerticalScrollIndicator={false}
-                >
-                  <View style={estilos.topoHome}>
-                    <View style={estilos.informacoesUsuario}>
-                      <Text style={[estilos.marcaPequena, { color: corTema }]}>
-                        TREINO FAMÍLIA
-                      </Text>
-
-                      <Text
-                        style={estilos.tituloHome}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                      >
-                        Olá, {nomeUsuario}!
-                      </Text>
-
-                      <Text style={estilos.subtituloHome}>
-                        Vamos treinar hoje?
-                      </Text>
-                    </View>
-
-                    <TouchableOpacity
-                      style={[
-                        estilos.avatar,
-                        {
-                          backgroundColor: `${corTema}30`,
-                          borderColor: corTema,
-                        },
-                      ]}
-                      onPress={() => navigation.navigate("perfil")}
-                      activeOpacity={0.8}
-                    >
-                      {fotoUrl ? (
-                        <Image
-                          source={{ uri: fotoUrl }}
-                          style={estilos.imagemAvatar}
-                        />
-                      ) : (
-                        <Text style={[estilos.avatarTexto, { color: corTema }]}>
-                          {nomeUsuario.charAt(0).toUpperCase()}
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-
-                  <View
-                    style={[
-                      estilos.banner,
-                      {
-                        backgroundColor: `${corTema}18`,
-                        borderColor: `${corTema}70`,
-                      },
-                    ]}
-                  >
-                    <Text style={estilos.bannerEmoji}>🔥</Text>
-
-                    <View style={estilos.bannerTextoContainer}>
-                      <Text style={estilos.bannerTitulo}>
-                        Sua evolução começa aqui
-                      </Text>
-
-                      <Text style={estilos.bannerDescricao}>
-                        Mantenha a consistência e supere seus limites.
-                      </Text>
-                    </View>
-                  </View>
-
-                  <TreinoDoDia
-                    onAbrirProgramacao={() => navigation.navigate("frequencia")}
-                    onAbrirTreino={(plano) =>
-                      plano
-                        ? navigation.navigate("treinoAtivo", plano)
-                        : navigation.navigate("treinos")
-                    }
-                    corTema={corTema}
-                  />
-
-                  <ResumoSemanal corTema={corTema} />
-
-                  <Text style={estilos.tituloSecao}>Seu espaço de treino</Text>
-
-                  <View style={estilos.listaCartoes}>
-                    {telas.map((tela) => (
-                      <TouchableOpacity
-                        key={tela.id}
-                        style={estilos.cartaoHome}
-                        onPress={() => navigation.navigate(tela.id)}
-                        activeOpacity={0.8}
-                      >
-                        <View
-                          style={[
-                            estilos.iconeCartao,
-                            { backgroundColor: `${corTema}20` },
-                          ]}
-                        >
-                          <Text style={estilos.emojiCartao}>{tela.emoji}</Text>
-                        </View>
-
-                        <View style={estilos.textoCartao}>
-                          <Text style={estilos.tituloCartao}>
-                            {tela.titulo}
-                          </Text>
-
-                          <Text style={estilos.descricaoCartao}>
-                            {tela.descricao}
-                          </Text>
-                        </View>
-
-                        <Text style={[estilos.setaCartao, { color: corTema }]}>
-                          ›
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <TouchableOpacity
-                    style={estilos.botaoSair}
-                    onPress={sair}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={estilos.textoBotaoSair}>Sair da conta</Text>
-                  </TouchableOpacity>
-
-                  <Text style={estilos.rodapeHome}>
-                    Treino Família · Evoluindo juntos
-                  </Text>
-                </ScrollView>
-              </View>
+              <PainelInicial
+                key={sessao.user.id} usuarioId={sessao.user.id}
+                nomeUsuario={nomeUsuario} fotoUrl={fotoUrl} corTema={corTema}
+                onSair={sair} onNavegar={(rota) => navigation.navigate(rota)}
+                onAbrirTreino={(plano) => navigation.navigate("treinoAtivo", plano)}
+              />
             )}
           </Pilha.Screen>
 
@@ -1618,155 +1171,5 @@ const estilos = StyleSheet.create({
     textAlign: "center",
     marginTop: 26,
   },
-  conteudoHome: {
-    paddingHorizontal: 22,
-    paddingTop: 64,
-    paddingBottom: 30,
-  },
-  topoHome: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 28,
-    gap: 12,
-  },
-  informacoesUsuario: {
-    flex: 1,
-    minWidth: 0,
-  },
-  marcaPequena: {
-    color: COR_PADRAO,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 2,
-    marginBottom: 8,
-  },
-  tituloHome: {
-    color: "#F0F3F1",
-    fontSize: 27,
-    fontWeight: "800",
-  },
-  subtituloHome: {
-    color: "#A4ADA7",
-    fontSize: 14,
-    marginTop: 7,
-  },
-  avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: "#244C36",
-    borderWidth: 1,
-    borderColor: COR_PADRAO,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    overflow: "hidden",
-  },
-  imagemAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-  },
-  avatarTexto: {
-    color: COR_PADRAO,
-    fontSize: 22,
-    fontWeight: "800",
-  },
-  banner: {
-    backgroundColor: "#1B3024",
-    borderWidth: 1,
-    borderColor: "#2C593E",
-    borderRadius: 18,
-    padding: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 32,
-  },
-  bannerEmoji: {
-    fontSize: 34,
-    marginRight: 14,
-  },
-  bannerTextoContainer: {
-    flex: 1,
-  },
-  bannerTitulo: {
-    color: "#F0F3F1",
-    fontSize: 16,
-    fontWeight: "800",
-  },
-  bannerDescricao: {
-    color: "#B4C5B9",
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 6,
-  },
-  tituloSecao: {
-    color: "#F0F3F1",
-    fontSize: 19,
-    fontWeight: "800",
-    marginBottom: 16,
-  },
-  listaCartoes: {
-    gap: 12,
-  },
-  cartaoHome: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#191E1B",
-    borderWidth: 1,
-    borderColor: "#2B332E",
-    borderRadius: 16,
-    padding: 16,
-  },
-  iconeCartao: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: "#25382C",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 14,
-  },
-  emojiCartao: {
-    fontSize: 23,
-  },
-  textoCartao: {
-    flex: 1,
-  },
-  tituloCartao: {
-    color: "#F0F3F1",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  descricaoCartao: {
-    color: "#A4ADA7",
-    fontSize: 12,
-    marginTop: 5,
-    lineHeight: 17,
-  },
-  setaCartao: {
-    color: COR_PADRAO,
-    fontSize: 28,
-    marginLeft: 8,
-  },
-  botaoSair: {
-    borderWidth: 1,
-    borderColor: "#454D48",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 28,
-  },
-  textoBotaoSair: {
-    color: "#D6DDD8",
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  rodapeHome: {
-    color: "#6F7972",
-    fontSize: 12,
-    textAlign: "center",
-    marginTop: 22,
-  },
+
 });

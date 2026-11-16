@@ -73,6 +73,7 @@ const oldSession = {
   finished_at: new Date(now - 85800000).toISOString(),
 };
 const tables = {
+  weekly_workout_schedule: [],
   workout_plans: [
     {
       id: pid,
@@ -188,6 +189,7 @@ let holdDetailsSid = null,
   releaseDetails;
 let falharCopiaFoto = false;
 let denyWorkoutDelete = false;
+let revisaoHtml = "1";
 let releasePost,
   releaseFeed,
   holdPost = false,
@@ -219,6 +221,11 @@ const server = http.createServer((req, res) => {
       ".png": "image/png",
       ".ico": "image/x-icon",
     }[path.extname(target)] || "text/html";
+  if (target === path.join(dist, "index.html") && process.env.SMOKE_PAINEL_ONLY) {
+    res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-cache, max-age=0, must-revalidate" });
+    res.end(fs.readFileSync(target, "utf8").replace("</head>", `<meta name="revisao-smoke" content="${revisaoHtml}"></head>`));
+    return;
+  }
   res.writeHead(200, { "Content-Type": type });
   fs.createReadStream(target).pipe(res);
 });
@@ -539,6 +546,16 @@ function filtered(table, search) {
           headers,
         });
       }
+      if (url.pathname.endsWith("/rpc/tf_salvar_programacao")) {
+        const { p_dia, p_plano, p_descanso } = request.postDataJSON();
+        tables.weekly_workout_schedule = tables.weekly_workout_schedule.filter((item) => item.day_of_week !== p_dia);
+        if (p_plano || p_descanso) tables.weekly_workout_schedule.push({
+          user_id: uid, day_of_week: p_dia, plan_id: p_plano, is_rest_day: p_descanso,
+        });
+        return route.fulfill({ json: null, headers });
+      }
+      if (url.pathname.endsWith("/rpc/tf_indicadores_painel"))
+        return route.fulfill({ json: { sequencia: 2, carga: null }, headers });
       if (url.pathname.includes("/rpc/"))
         return route.fulfill({
           json: url.pathname.endsWith("tf_resumo_semanal")
@@ -739,6 +756,42 @@ function filtered(table, search) {
     await page
       .getByText("Olá, Conta de!", { exact: true })
       .waitFor({ timeout: 15000 });
+    if (process.env.SMOKE_PAINEL_ONLY) {
+      await page.getByText("Sequência atual · 2 dia(s)", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Programação e lembretes", exact: true }).click();
+      const dia = await page.evaluate(() => ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"][new Date().getDay()]);
+      await page.getByRole("button", { name: `${dia} · Sem programação`, exact: true }).click();
+      await page.getByRole("button", { name: "Plano teste", exact: true }).click();
+      await page.getByRole("button", { name: `${dia} · Plano teste`, exact: true }).waitFor();
+      await page.getByRole("textbox", { name: "Meta de treinos por semana" }).fill("5");
+      await page.getByRole("switch", { name: "Treinos programados" }).click();
+      await page.getByRole("textbox", { name: "Horário local do treino" }).fill("00:00");
+      await page.getByRole("button", { name: "Salvar meta e lembretes" }).click();
+      await page.getByText("Preferências salvas.", { exact: true }).waitFor();
+      const aviso = page.getByRole("button", { name: /Hoje está programado Plano teste/ });
+      await aviso.click();
+      const continuar = page.getByRole("button", { name: "Continuar Plano teste", exact: true });
+      await continuar.waitFor();
+      await page.waitForFunction(() => window.treinoFamiliaPerf.relatorio().some((r) => r.operacao === "painel.carregar"));
+      const medidas = await page.evaluate(() => window.treinoFamiliaPerf.relatorio());
+      assert.ok(medidas.some((r) => r.operacao === "painel.carregar" && r.amostras > 0));
+      const rascunho = await page.evaluate((key) => localStorage.getItem(key), draftKey);
+      assert.ok(rascunho);
+      revisaoHtml = "2";
+      assert.equal(await page.locator('meta[name="revisao-smoke"]').getAttribute("content"), "1");
+      await page.reload();
+      await page.getByText("Meta de 5 treinos", { exact: true }).waitFor();
+      await continuar.waitFor();
+      assert.equal(await page.locator('meta[name="revisao-smoke"]').getAttribute("content"), "2");
+      assert.equal(await page.evaluate((key) => localStorage.getItem(key), draftKey), rascunho);
+      assert.equal(await aviso.count(), 0);
+      await page.getByRole("button", { name: "Abrir perfil" }).click();
+      const baixar = page.waitForEvent("download");
+      await page.getByText("Baixar CSV · Histórico", { exact: true }).click();
+      assert.match((await baixar).suggestedFilename(), /historico.*\.csv$/);
+      console.log("OK UI — painel, programação, lembrete, CSV e reabertura em nova versão com treino ativo preservado");
+      return;
+    }
     const choosePhoto = async (button, files = photoFixture) => {
       await button.scrollIntoViewIfNeeded();
       assert.equal(await button.isVisible(), true);
@@ -1564,13 +1617,8 @@ function filtered(table, search) {
     await page.reload();
     await page.waitForFunction((key) => !localStorage.getItem(key), draftKey);
     await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
-    assert.equal(
-      await page
-        .getByRole("button", { name: /Conclusão pendente: Plano teste/ })
-        .count(),
-      0,
-      "Conclusão remota dispensa recuperação manual",
-    );
+    await page.getByRole("button", { name: /Conclusão pendente: Plano teste/ })
+      .waitFor({ state: "hidden" });
     assert.equal(
       JSON.stringify(tables),
       serverBefore,
@@ -2296,6 +2344,14 @@ function filtered(table, search) {
     assert.equal(tables.cardio_sessions.length, 1);
     assert.equal(tables.cardio_sessions[0].weight_kg_snapshot, 80);
     await page.getByText("‹", { exact: true }).click();
+    const tituloMesRegistro = await page.getByText(/^\p{L}+ \d{4}$/u).textContent();
+    const abrirDiaDoRegistro = async () => {
+      const mesRegistro = page.getByText(tituloMesRegistro, { exact: true });
+      await page.getByText("‹", { exact: true }).waitFor();
+      if (!(await mesRegistro.isVisible())) await page.getByText("‹", { exact: true }).click();
+      await mesRegistro.waitFor();
+      await page.getByText("15", { exact: true }).click();
+    };
     await page.getByText("15", { exact: true }).click();
     await page.getByText("Plano teste", { exact: true }).filter({ visible: true }).first().click();
     await page
@@ -2443,7 +2499,7 @@ function filtered(table, search) {
     );
     await page.getByRole("button", { name: "Ir para treinos" }).click();
     await page.getByText("Frequência", { exact: true }).click();
-    await page.getByText("15", { exact: true }).click();
+    await abrirDiaDoRegistro();
     assert.equal(
       await page.getByText("Excluir treino", { exact: true }).count(),
       0,
@@ -2459,7 +2515,7 @@ function filtered(table, search) {
     await page.getByText("Olá, Conta de!", { exact: true }).waitFor();
     await page.waitForFunction((key) => !localStorage.getItem(key), draftKey);
     await page.getByText("Frequência", { exact: true }).click();
-    await page.getByText("15", { exact: true }).click();
+    await abrirDiaDoRegistro();
     assert.equal(
       await page.getByText("Excluir treino", { exact: true }).count(),
       0,

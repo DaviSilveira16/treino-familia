@@ -19,6 +19,8 @@ import * as FileSystem from "expo-file-system/legacy";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
 import Acompanhamento from "../componentes/Acompanhamento";
+import ExcluirConta from "../componentes/ExcluirConta";
+import { baixarCsv, montarCsv } from "../servicos/exportarCsv";
 
 const estiloRolagemWeb =
   Platform.OS === "web"
@@ -46,16 +48,20 @@ type RegistroExportacao = Record<string, any>;
 async function buscarTodosOsRegistros(
   tabela: string,
   idUsuario: string,
+  periodo?: { campo: "started_at" | "measured_at"; inicio: string; fim: string },
 ): Promise<RegistroExportacao[]> {
   const resultado: RegistroExportacao[] = [];
   const tamanhoPagina = 500;
   let inicio = 0;
 
   while (true) {
-    const resposta = await (supabase as any)
+    const consulta = supabase
       .from(tabela)
       .select("*")
-      .eq("user_id", idUsuario)
+      .eq("user_id", idUsuario);
+    const resposta = await (periodo
+      ? consulta.gte(periodo.campo, periodo.inicio).lt(periodo.campo, periodo.fim)
+      : consulta)
       .order("id", { ascending: true })
       .range(inicio, inicio + tamanhoPagina - 1);
 
@@ -92,7 +98,7 @@ async function buscarSeriesDasSessoes(
         .select("*")
         .eq("user_id", idUsuario)
         .in("session_id", grupoIds)
-        .order("set_number", { ascending: true })
+        .order("set_number", { ascending: true }).order("id")
         .range(inicio, inicio + tamanhoPagina - 1);
 
       if (resposta.error) {
@@ -541,6 +547,83 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
     } finally {
       setSalvandoDadosCalorias(false);
     }
+  }
+
+  async function exportarCsv(tipo: "historico" | "series" | "medidas" | "frequencia") {
+    if (exportandoRelatorio || exportandoBackup || Platform.OS !== "web") return;
+    const inicio = converterDataCampo(dataInicioRelatorio);
+    const fim = converterDataCampo(dataFimRelatorio);
+    if (!inicio || !fim || inicio > fim || fim > (converterDataCampo(dataPadraoRelatorio(0)) ?? new Date())) {
+      Alert.alert("Período inválido", "Confira as datas inicial e final do relatório.");
+      return;
+    }
+    setExportandoRelatorio(true);
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data.user) throw new Error("Entre novamente para exportar seus registros.");
+      const id = data.user.id;
+      let conteudo: string;
+      const numero = (valor: unknown) => valor == null || valor === "" ? null : Number(valor);
+      const dataBr = (valor: unknown) => formatarDataRelatorio(valor);
+      const noPeriodo = (valor: unknown) => registroNoIntervalo(valor, inicio, fim);
+      const diaSeguinte = new Date(fim);
+      diaSeguinte.setDate(diaSeguinte.getDate() + 1);
+      const faixaSessoes = { campo: "started_at" as const, inicio: inicio.toISOString(), fim: diaSeguinte.toISOString() };
+      const dataLocalIso = (data: Date) => [data.getFullYear(), String(data.getMonth() + 1).padStart(2, "0"),
+        String(data.getDate()).padStart(2, "0")].join("-");
+      if (tipo === "medidas") {
+        const linhas = await buscarTodosOsRegistros("physical_measurements", id, {
+          campo: "measured_at", inicio: dataLocalIso(inicio), fim: dataLocalIso(diaSeguinte),
+        });
+        conteudo = montarCsv(["Data", "Peso (kg)", "Gordura (%)", "Peito (cm)", "Cintura (cm)", "Quadril (cm)", "Braço (cm)", "Coxa (cm)", "Observações"],
+          linhas.filter((r) => noPeriodo(r.measured_at)).map((r) => [dataBr(r.measured_at), numero(r.weight_kg), numero(r.body_fat_percentage),
+            numero(r.chest_cm), numero(r.waist_cm), numero(r.hip_cm), numero(r.arm_cm), numero(r.thigh_cm), r.notes]));
+      } else {
+        const [treinos, planos, cardios] = await Promise.all([
+          buscarTodosOsRegistros("workout_sessions", id, faixaSessoes),
+          tipo === "frequencia" ? [] : buscarTodosOsRegistros("workout_plans", id),
+          tipo === "series" ? [] : buscarTodosOsRegistros("cardio_sessions", id, faixaSessoes),
+        ]);
+        const concluidos = treinos.filter((r) => r.status !== "em_andamento" && noPeriodo(r.started_at));
+        const fichas = new Map(planos.map((r) => [r.id, r.name]));
+        if (tipo === "series") {
+          const sessoes = new Map(concluidos.map((r) => [r.id, r]));
+          const series = await buscarSeriesDasSessoes(id, [...sessoes.keys()]);
+          conteudo = montarCsv(["Data", "Treino", "Exercício", "Série", "Repetições", "Carga (kg)"],
+            series.map((r) => {
+              const sessao = sessoes.get(r.session_id);
+              return [dataBr(sessao?.started_at), fichas.get(sessao?.plan_id) ?? "Treino removido", r.exercise_name,
+                numero(r.set_number), numero(r.reps), numero(r.weight_kg)];
+            }));
+        } else {
+          const atividades = [
+            ...concluidos.map((r) => ({ ...r, tipo: "Musculação", titulo: fichas.get(r.plan_id) ?? "Treino removido" })),
+            ...cardios.filter((r) => noPeriodo(r.started_at)).map((r) => ({ ...r, tipo: "Cardio", titulo: r.activity_name })),
+          ] as RegistroExportacao[];
+          atividades.sort((a, b) => String(a.started_at).localeCompare(String(b.started_at)));
+          if (tipo === "frequencia") {
+            const dias = new Map<string, { treino: number; cardio: number }>();
+            for (const r of atividades) {
+              const data = dataBr(r.started_at);
+              const dia = dias.get(data) ?? { treino: 0, cardio: 0 };
+              if (r.tipo === "Musculação") dia.treino++;
+              else dia.cardio++;
+              dias.set(data, dia);
+            }
+            conteudo = montarCsv(["Data", "Treinos", "Cardios"], [...dias].map(([data, dia]) => [data, dia.treino, dia.cardio]));
+          } else {
+            conteudo = montarCsv(["Data", "Atividade", "Nome", "Duração (min)", "Calorias ativas (kcal)", "Calorias registradas no cardio (kcal)"],
+              atividades.map((r) => [dataBr(r.started_at), r.tipo, r.titulo, numero(r.duration_minutes),
+                numero(r.active_calories), r.tipo === "Cardio" ? numero(r.calories) : null]));
+          }
+        }
+      }
+      const { data: atual } = await supabase.auth.getSession();
+      if (atual.session?.user.id !== id) throw new Error("A conta mudou durante a exportação.");
+      baixarCsv(`treino-familia-${tipo}-${formatarDataCampoParaIso(dataInicioRelatorio)}.csv`, conteudo);
+    } catch (erro) {
+      Alert.alert("Erro ao exportar CSV", erro instanceof Error ? erro.message : "Tente novamente.");
+    } finally { setExportandoRelatorio(false); }
   }
 
   async function exportarRelatorioPdf() {
@@ -1465,6 +1548,16 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
             aplicativo instalado, use o menu para salvar/compartilhar ou cancele
             para voltar.
           </Text>
+          {Platform.OS === "web" ? (
+            <View style={{ gap: 8, marginTop: 12 }}>
+              {([["historico", "Histórico"], ["frequencia", "Frequência"], ["series", "Séries e cargas"], ["medidas", "Evolução física"]] as const).map(([tipo, rotulo]) => (
+                <TouchableOpacity key={tipo} accessibilityRole="button" disabled={exportandoRelatorio || exportandoBackup}
+                  onPress={() => void exportarCsv(tipo)} style={[estilos.botaoPrincipal, { backgroundColor: corTema }]}>
+                  <Text style={estilos.textoBotaoPrincipal}>Baixar CSV · {rotulo}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         <View style={estilos.cartao}>
@@ -1500,6 +1593,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
             dados da conta conectada.
           </Text>
         </View>
+        {Platform.OS === "web" ? <ExcluirConta key={usuario.id} usuarioId={usuario.id} email={usuario.email} exportar={exportarBackup} /> : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );

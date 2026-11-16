@@ -1,5 +1,11 @@
 name: Verificar projeto web
 on:
+  workflow_dispatch:
+    inputs:
+      publicar:
+        description: Publicar esta revisão na Vercel depois dos testes
+        type: boolean
+        default: false
   pull_request:
   push:
     branches: [main]
@@ -36,7 +42,38 @@ jobs:
           SMOKE_PHOTO_RETRY_ONLY: '1'
       - name: Diário de nutrição
         run: npm run test:nutricao:ui
+      - name: Painel, programação, lembretes e CSV
+        run: npm run test:ui
+        env:
+          SMOKE_PAINEL_ONLY: '1'
+      - name: Painel e reabertura no WebKit
+        run: npm run test:ui
+        env:
+          SMOKE_BROWSER: webkit
+          SMOKE_PAINEL_ONLY: '1'
       - name: Paginação e rolagem de Meus treinos
         run: npm run test:ui
         env:
           SMOKE_SCROLLS_ONLY: '1'
+  publicar:
+    needs: verificar
+    if: github.event_name == 'workflow_dispatch' && inputs.publicar && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: vercel-production
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Publicar revisão validada
+        run: |
+          test -n "$VERCEL_TOKEN"
+          test -n "$VERCEL_ORG_ID"
+          test -n "$VERCEL_PROJECT_ID"
+          npx --yes vercel@65.16.0 deploy --prod --yes --token "$VERCEL_TOKEN"
