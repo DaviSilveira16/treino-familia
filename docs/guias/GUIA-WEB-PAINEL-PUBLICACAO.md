@@ -10,7 +10,7 @@
 
 ## Lembretes
 
-O painel usa o horário local e guarda configurações e avisos lidos na conta deste navegador. A programação semanal sincroniza via Supabase. Envio em segundo plano depende de Service Worker, armazenamento de inscrições por conta e aparelho, chaves VAPID no servidor, agendamento e revogação no logout. Só então peça permissão em resposta à escolha do usuário. No iPhone, valide o pedido de permissão pelo app instalado na tela inicial. Use texto genérico nos avisos familiares.
+O painel usa o horário local e guarda configurações e avisos lidos na conta deste navegador. Envio em segundo plano depende de Service Worker, armazenamento de inscrições por conta e aparelho, chaves VAPID no servidor, agendamento e revogação no logout. Só então peça permissão em resposta à escolha do usuário. No iPhone, valide o pedido de permissão pelo app instalado na tela inicial. Use texto genérico nos avisos familiares.
 
 ## Publicação e validação
 

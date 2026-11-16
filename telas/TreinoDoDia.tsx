@@ -12,10 +12,9 @@ import { obterRevisaoDeDados } from "../servicos/revisaoDados";
 import { assinarRascunhos, lerResumoTreinoAtivo, sessaoFoiEncerrada } from "../servicos/treinoLocal";
 
 type Props = {
-  onAbrirProgramacao: () => void;
+  onAbrirFrequencia: () => void;
   onAbrirTreino: (plano?: { planId: string; planName: string }) => void;
   corTema?: string;
-  proximo?: { planId: string; planName: string; data: Date } | null;
 };
 
 type TreinoHoje = {
@@ -46,10 +45,9 @@ function obterInicioDoProximoDia() {
 }
 
 export default function TreinoDoDia({
-  onAbrirProgramacao,
+  onAbrirFrequencia,
   onAbrirTreino,
   corTema = "#35D07F",
-  proximo,
 }: Props) {
   const [treino, setTreino] = useState<TreinoHoje | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -201,10 +199,10 @@ export default function TreinoDoDia({
       <View style={estilos.topo}>
         <View style={estilos.textos}>
           <Text style={[estilos.rotulo, { color: corTema }]}>
-            {continuar ? "SEU TREINO" : proximo ? "PRÓXIMO TREINO" : "TREINO DE HOJE"}
+            {continuar ? "SEU TREINO" : "TREINO DE HOJE"}
           </Text>
 
-          <Text style={estilos.dia}>{nomesDias[(continuar ? new Date() : proximo?.data ?? new Date()).getDay()]}</Text>
+          <Text style={estilos.dia}>{nomesDias[new Date().getDay()]}</Text>
         </View>
 
         <Text style={estilos.emoji}>{treino?.definido ? "💪" : "🏋️"}</Text>
@@ -223,14 +221,6 @@ export default function TreinoDoDia({
         </>
       ) : carregando ? (
         <ActivityIndicator color={corTema} style={estilos.carregando} />
-      ) : proximo ? (
-        <>
-          <Text style={estilos.titulo}>{proximo.planName}</Text>
-          <TouchableOpacity accessibilityRole="button" onPress={() => onAbrirTreino({ planId: proximo.planId, planName: proximo.planName })}
-            style={[estilos.botaoPrincipal, { backgroundColor: corTema }]}>
-            <Text style={estilos.textoBotaoPrincipal}>Abrir treino programado</Text>
-          </TouchableOpacity>
-        </>
       ) : treino?.definido ? (
         <>
           <Text style={estilos.titulo}>{treino.nome}</Text>
@@ -256,16 +246,14 @@ export default function TreinoDoDia({
           </TouchableOpacity>
 
           <Text style={estilos.descricao}>
-            Registre o treino realizado no calendário e acompanhe sua
-            frequência. Você escolhe o treino no próprio dia, sem precisar
-            programar a semana.
+            Registre o treino realizado no calendário e acompanhe sua frequência.
           </Text>
         </>
       )}
 
       <TouchableOpacity
         style={estilos.botaoSecundario}
-        onPress={onAbrirProgramacao}
+        onPress={onAbrirFrequencia}
         activeOpacity={0.8}
       >
         <Text style={[estilos.textoBotaoSecundario, { color: corTema }]}>

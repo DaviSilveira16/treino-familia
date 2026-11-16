@@ -42,7 +42,7 @@ jobs:
           SMOKE_PHOTO_RETRY_ONLY: '1'
       - name: Diário de nutrição
         run: npm run test:nutricao:ui
-      - name: Painel, programação, lembretes e CSV
+      - name: Painel, lembretes e CSV
         run: npm run test:ui
         env:
           SMOKE_PAINEL_ONLY: '1'

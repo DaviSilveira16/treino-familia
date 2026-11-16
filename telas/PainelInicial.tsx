@@ -5,7 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import TreinoDoDia from "./TreinoDoDia";
 import ResumoSemanal from "./ResumoSemanal";
 import PreferenciasPainel, { preferenciasIniciais, type Preferencias } from "../componentes/PreferenciasPainel";
-import { chaveDiaPainel, proximoTreino, type DiaProgramado, type PlanoPainel } from "../servicos/painelSemanal";
+import { chaveDiaPainel } from "../servicos/painelSemanal";
 import { supabase } from "../supabase";
 import { medir } from "../servicos/performance";
 
@@ -60,56 +60,44 @@ type Props = {
   onAbrirTreino: (plano: { planId: string; planName: string }) => void;
 };
 
-type Indicadores = { sequencia: number; carga: { exercicio: string; serie: number; atual: number; anterior: number } | null };
-type Aviso = { id: string; texto: string; rota?: "comunidade" | "evolucao" };
+type Indicadores = { carga: { exercicio: string; serie: number; atual: number; anterior: number } | null };
+type Aviso = { id: string; texto: string; rota: "comunidade" | "evolucao" };
 
 export default function PainelInicial({ usuarioId, nomeUsuario, fotoUrl, corTema, onSair, onNavegar, onAbrirTreino }: Props) {
   const chave = `@treino-familia:painel:v1:${usuarioId}`;
   const [prefs, setPrefs] = useState(preferenciasIniciais);
-  const [planos, setPlanos] = useState<PlanoPainel[]>([]);
-  const [programacao, setProgramacao] = useState<DiaProgramado[]>([]);
   const [indicadores, setIndicadores] = useState<Indicadores | null>(null);
   const [avisos, setAvisos] = useState<Aviso[]>([]);
   const [erro, setErro] = useState("");
   const [agora, setAgora] = useState(() => new Date());
   const [revisao, setRevisao] = useState(0);
-  const proximo = proximoTreino(programacao, planos, agora);
 
   useFocusEffect(useCallback(() => {
     let ativo = true;
     setAgora(new Date());
     const cancelador = new AbortController();
     const ler = async () => {
-      const [preferencias, agenda, fichas, metricas] = await Promise.all([
+      const [preferencias, metricas] = await Promise.all([
         AsyncStorage.getItem(chave),
-        supabase.from("weekly_workout_schedule").select("day_of_week, plan_id, is_rest_day")
-          .eq("user_id", usuarioId).order("updated_at", { ascending: false }).order("id").limit(100).abortSignal(cancelador.signal),
-        supabase.from("workout_plans").select("id, name").eq("user_id", usuarioId).order("name").abortSignal(cancelador.signal),
         supabase.rpc("tf_indicadores_painel", { p_fuso: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" }).abortSignal(cancelador.signal),
       ]);
       if (!ativo) return;
       if (preferencias) {
         try { setPrefs({ ...preferenciasIniciais, ...JSON.parse(preferencias) }); } catch {}
       }
-      if (agenda.data) setProgramacao([...new Map(agenda.data.slice().reverse().map((item) => [item.day_of_week, item])).values()]);
-      if (fichas.data) setPlanos(fichas.data);
       if (!metricas.error && metricas.data) setIndicadores(metricas.data as Indicadores);
-      setErro(agenda.error || fichas.error ? "Não foi possível atualizar a programação." : "");
+      setErro("");
     };
     void medir("painel.carregar", ler).catch(() => { if (ativo) setErro("Não foi possível atualizar o painel."); });
     const timer = setInterval(() => setAgora(new Date()), 60_000);
     return () => { ativo = false; cancelador.abort(); clearInterval(timer); };
-  }, [chave, usuarioId, revisao]));
+  }, [chave, revisao]));
 
   const diaAtual = chaveDiaPainel(agora);
-  const lembreteTreino = prefs.treino && agora.toTimeString().slice(0, 5) >= prefs.hora && proximo?.dias === 0
-    ? proximo.planName : null;
   useFocusEffect(useCallback(() => {
     let ativo = true;
     const verificar = async () => {
       const novos: Aviso[] = [];
-      if (lembreteTreino)
-        novos.push({ id: `treino:${diaAtual}`, texto: `Hoje está programado ${lembreteTreino}.` });
       if (prefs.medidas) {
         const { data, error } = await supabase.from("physical_measurements").select("measured_at")
           .eq("user_id", usuarioId).order("measured_at", { ascending: false }).limit(1).maybeSingle();
@@ -136,15 +124,8 @@ export default function PainelInicial({ usuarioId, nomeUsuario, fotoUrl, corTema
     };
     void verificar().catch(() => {});
     return () => { ativo = false; };
-  }, [chave, usuarioId, prefs.medidas, prefs.intervalo, prefs.comunidade, lembreteTreino, diaAtual]));
+  }, [chave, usuarioId, prefs.medidas, prefs.intervalo, prefs.comunidade, diaAtual]));
 
-  async function agendar(dia: DiaProgramado) {
-    const { error } = await supabase.rpc("tf_salvar_programacao", {
-      p_dia: dia.day_of_week, p_plano: dia.plan_id, p_descanso: dia.is_rest_day,
-    });
-    if (error) throw new Error(error.code === "PGRST202" ? "A programação precisa da atualização do banco." : "Não foi possível salvar a programação.");
-    setProgramacao((itens) => [...itens.filter((item) => item.day_of_week !== dia.day_of_week), dia]);
-  }
   return (
     <View style={estilos.container}>
       <ScrollView
@@ -197,8 +178,7 @@ export default function PainelInicial({ usuarioId, nomeUsuario, fotoUrl, corTema
         </View>
 
         <TreinoDoDia
-          proximo={proximo}
-          onAbrirProgramacao={() => onNavegar("frequencia")}
+          onAbrirFrequencia={() => onNavegar("frequencia")}
           onAbrirTreino={(plano) =>
             plano
               ? onAbrirTreino(plano)
@@ -210,7 +190,7 @@ export default function PainelInicial({ usuarioId, nomeUsuario, fotoUrl, corTema
         <ResumoSemanal corTema={corTema} metaSemanal={prefs.meta} />
         {indicadores ? (
           <View style={[estilos.cartaoHome, { flexDirection: "column", alignItems: "flex-start", marginBottom: 16 }]}>
-            <Text style={estilos.tituloCartao}>Sequência atual · {indicadores.sequencia} dia(s)</Text>
+            <Text style={estilos.tituloCartao}>Evolução de carga</Text>
             {indicadores.carga ? <Text style={estilos.descricaoCartao}>
               {indicadores.carga.exercicio} · série {indicadores.carga.serie}: {indicadores.carga.anterior} → {indicadores.carga.atual} kg
             </Text> : <Text style={estilos.descricaoCartao}>Registre a mesma série em dois treinos para comparar suas cargas.</Text>}
@@ -225,7 +205,7 @@ export default function PainelInicial({ usuarioId, nomeUsuario, fotoUrl, corTema
             onPress={() => {
               void AsyncStorage.setItem(`${chave}:lido:${aviso.id.split(":")[0]}`, aviso.id)
                 .then(() => setAvisos((itens) => itens.filter((item) => item.id !== aviso.id))).catch(() => {});
-              if (aviso.rota) onNavegar(aviso.rota);
+              onNavegar(aviso.rota);
             }}>
             <Text style={estilos.tituloCartao}>{aviso.texto}</Text>
           </TouchableOpacity>
@@ -233,8 +213,8 @@ export default function PainelInicial({ usuarioId, nomeUsuario, fotoUrl, corTema
         {erro ? <TouchableOpacity accessibilityRole="button" onPress={() => setRevisao((valor) => valor + 1)}>
           <Text style={estilos.descricaoCartao}>{erro} Tentar novamente</Text>
         </TouchableOpacity> : null}
-        <PreferenciasPainel atual={prefs} planos={planos} programacao={programacao} cor={corTema}
-          agendar={agendar} salvar={async (novo) => { await AsyncStorage.setItem(chave, JSON.stringify(novo)); setPrefs(novo); }} />
+        <PreferenciasPainel atual={prefs}
+          salvar={async (novo) => { await AsyncStorage.setItem(chave, JSON.stringify(novo)); setPrefs(novo); }} />
 
         <Text style={estilos.tituloSecao}>Seu espaço de treino</Text>
 

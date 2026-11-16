@@ -73,7 +73,6 @@ const oldSession = {
   finished_at: new Date(now - 85800000).toISOString(),
 };
 const tables = {
-  weekly_workout_schedule: [],
   workout_plans: [
     {
       id: pid,
@@ -546,14 +545,6 @@ function filtered(table, search) {
           headers,
         });
       }
-      if (url.pathname.endsWith("/rpc/tf_salvar_programacao")) {
-        const { p_dia, p_plano, p_descanso } = request.postDataJSON();
-        tables.weekly_workout_schedule = tables.weekly_workout_schedule.filter((item) => item.day_of_week !== p_dia);
-        if (p_plano || p_descanso) tables.weekly_workout_schedule.push({
-          user_id: uid, day_of_week: p_dia, plan_id: p_plano, is_rest_day: p_descanso,
-        });
-        return route.fulfill({ json: null, headers });
-      }
       if (url.pathname.endsWith("/rpc/tf_indicadores_painel"))
         return route.fulfill({ json: { sequencia: 2, carga: null }, headers });
       if (url.pathname.includes("/rpc/"))
@@ -757,19 +748,19 @@ function filtered(table, search) {
       .getByText("Olá, Conta de!", { exact: true })
       .waitFor({ timeout: 15000 });
     if (process.env.SMOKE_PAINEL_ONLY) {
-      await page.getByText("Sequência atual · 2 dia(s)", { exact: true }).waitFor();
-      await page.getByRole("button", { name: "Programação e lembretes", exact: true }).click();
-      const dia = await page.evaluate(() => ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"][new Date().getDay()]);
-      await page.getByRole("button", { name: `${dia} · Sem programação`, exact: true }).click();
-      await page.getByRole("button", { name: "Plano teste", exact: true }).click();
-      await page.getByRole("button", { name: `${dia} · Plano teste`, exact: true }).waitFor();
+      await page.getByText("Evolução de carga", { exact: true }).waitFor();
+      assert.equal(await page.getByText(/Sequência atual/i).count(), 0);
+      await page.getByRole("button", { name: "Meta e lembretes", exact: true }).click();
+      assert.equal(await page.getByText(/Programação semanal|Treinos programados/i).count(), 0);
       await page.getByRole("textbox", { name: "Meta de treinos por semana" }).fill("5");
-      await page.getByRole("switch", { name: "Treinos programados" }).click();
-      await page.getByRole("textbox", { name: "Horário local do treino" }).fill("00:00");
+      await page.getByRole("switch", { name: "Registrar medidas" }).click();
+      await page.getByRole("textbox", { name: "Intervalo entre medições" }).fill("1");
       await page.getByRole("button", { name: "Salvar meta e lembretes" }).click();
       await page.getByText("Preferências salvas.", { exact: true }).waitFor();
-      const aviso = page.getByRole("button", { name: /Hoje está programado Plano teste/ });
+      const aviso = page.getByRole("button", { name: /É hora de registrar suas medidas/ });
       await aviso.click();
+      await page.waitForFunction((id) => Boolean(localStorage.getItem(`@treino-familia:painel:v1:${id}:lido:medidas`)), uid);
+      await page.getByRole("button", { name: "Ir para treinos" }).click();
       const continuar = page.getByRole("button", { name: "Continuar Plano teste", exact: true });
       await continuar.waitFor();
       await page.waitForFunction(() => window.treinoFamiliaPerf.relatorio().some((r) => r.operacao === "painel.carregar"));
@@ -789,7 +780,7 @@ function filtered(table, search) {
       const baixar = page.waitForEvent("download");
       await page.getByText("Baixar CSV · Histórico", { exact: true }).click();
       assert.match((await baixar).suggestedFilename(), /historico.*\.csv$/);
-      console.log("OK UI — painel, programação, lembrete, CSV e reabertura em nova versão com treino ativo preservado");
+      console.log("OK UI — painel sem sequência nem agenda, lembrete, CSV e reabertura em nova versão com treino ativo preservado");
       return;
     }
     const choosePhoto = async (button, files = photoFixture) => {
