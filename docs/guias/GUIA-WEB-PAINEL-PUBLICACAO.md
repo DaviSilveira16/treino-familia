@@ -14,7 +14,8 @@ O painel usa o horário local e guarda configurações e avisos lidos na conta d
 
 ## Publicação e validação
 
-- A integração Git da Vercel fica desativada para a branch `main` por `vercel.json`. Na configuração do GitHub, crie o ambiente `production`, adicione `VERCEL_TOKEN` em Secrets e os IDs `VERCEL_ORG_ID` e `VERCEL_PROJECT_ID` em Variables. A execução manual do workflow com `publicar` ativado depende da conclusão de `verificar`. Revise outros caminhos que tenham permissão de produção, como deploy hooks, para que não contornem esse fluxo.
+- Depois do push para `main`, o GitHub Actions publica automaticamente na Vercel se o job `verificar` passar e a revisão ainda for a mais recente da branch. O workflow também pode ser repetido manualmente em `main` com `publicar` ativado.
+- No ambiente `Production` do GitHub, adicione `VERCEL_TOKEN` em Secrets e os IDs `VERCEL_ORG_ID` e `VERCEL_PROJECT_ID` em Variables. A integração Git direta da Vercel para `main` fica desativada em `vercel.json` para que a publicação passe pelos testes.
 - Em homologação, provoque uma falha de teste e confira que o trabalho de publicação fica bloqueado e que o alias não muda. Depois valide a revisão aprovada. Confira os cabeçalhos do HTML e de um asset versionado.
 - Em Android e iPhone, reabra o app instalado após trocar a versão de homologação. Faça isso com treino ativo, atualização de Nutrição ainda pendente e foto em fila. Verifique retorno, rolagem, teclado e área segura com a barra do navegador expandida e recolhida.
 - Use `treinoFamiliaPerf.relatorio()` antes e depois, em sessão simples, criação de ficha e recuperação offline. Registre chamadas, mediana e p95 para abrir painel, abrir Meus treinos e finalizar. Compare amostras no mesmo dispositivo e condições de rede.

@@ -57,23 +57,32 @@ jobs:
           SMOKE_SCROLLS_ONLY: '1'
   publicar:
     needs: verificar
-    if: github.event_name == 'workflow_dispatch' && inputs.publicar && github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' ||
+       (github.event_name == 'workflow_dispatch' && inputs.publicar))
     runs-on: ubuntu-latest
-    environment: production
+    environment: Production
     concurrency:
       group: vercel-production
-    env:
-      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      queue: max
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
       - name: Publicar revisão validada
+        env:
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          test -n "$VERCEL_TOKEN"
-          test -n "$VERCEL_ORG_ID"
-          test -n "$VERCEL_PROJECT_ID"
+          main_remota=$(git ls-remote --exit-code origin refs/heads/main)
+          if [[ "${main_remota%%$'\t'*}" != "$GITHUB_SHA" ]]; then
+            echo "A main já tem uma revisão mais recente. Publicação ignorada."
+            exit 0
+          fi
+          : "${VERCEL_TOKEN:?Configure o secret VERCEL_TOKEN no ambiente Production do GitHub}"
+          : "${VERCEL_ORG_ID:?Configure a variável VERCEL_ORG_ID no ambiente Production do GitHub}"
+          : "${VERCEL_PROJECT_ID:?Configure a variável VERCEL_PROJECT_ID no ambiente Production do GitHub}"
           npx --yes vercel@65.16.0 deploy --prod --yes --token "$VERCEL_TOKEN"
