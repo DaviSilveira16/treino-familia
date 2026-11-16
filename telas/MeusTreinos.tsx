@@ -159,6 +159,17 @@ export default function MeusTreinos({
   const [recarregar, setRecarregar] = useState(0);
   const [revisaoFotos, setRevisaoFotos] = useState(0);
   const [carregandoExercicios, setCarregandoExercicios] = useState(false);
+  const usuarioFotosAluno = aluno?.usuarioId ?? "";
+  const consultaAluno = useMemo(
+    () => focado && apiAluno && treinoSelecionado
+      ? { api: apiAluno, treino: treinoSelecionado, revisao: recarregar, usuarioFotos: usuarioFotosAluno }
+      : null,
+    [focado, apiAluno, treinoSelecionado, recarregar, usuarioFotosAluno],
+  );
+  const [consultaAlunoConcluida, setConsultaAlunoConcluida] = useState<typeof consultaAluno>(null);
+  const carregandoListaExercicios = apiAluno
+    ? consultaAluno !== null && consultaAluno !== consultaAlunoConcluida
+    : carregandoExercicios;
   const [carregandoCargas, setCarregandoCargas] = useState(false);
   const prefetchTreinosRef = useRef(new Set<string>());
   const prefetchControllerRef = useRef<AbortController | null>(null);
@@ -267,12 +278,12 @@ export default function MeusTreinos({
 
   async function alterarTreinoAluno(acao: string, dados: Record<string, unknown>, planoId?: string): Promise<boolean> {
     if (!apiAluno || operacaoAluno.current) return false;
-    leituraAluno.current += 1;
     operacaoAluno.current = true; setSalvando(true); setErroAluno("");
     try {
       let atual = snapshotAluno.current;
       if (planoId && atual?.plan.id !== planoId) atual = await apiAluno.ler(planoId);
       const resultado = await apiAluno.alterar(acao, { ...dados, ...(planoId ? { plan_id: planoId, version: atual?.version } : {}) });
+      leituraAluno.current += 1;
       if (resultado.snapshot) aplicarSnapshotAluno(resultado.snapshot);
       else {
         snapshotAluno.current = null;
@@ -283,7 +294,7 @@ export default function MeusTreinos({
     } catch (erro) {
       mostrarMensagem("Não foi possível salvar", erro instanceof Error ? erro.message : "Confira a conexão e tente novamente.");
       return false;
-    } finally { operacaoAluno.current = false; setSalvando(false); setCarregandoExercicios(false); }
+    } finally { operacaoAluno.current = false; setSalvando(false); }
   }
 
   function alinharDestinoSolicitado() {
@@ -402,24 +413,24 @@ export default function MeusTreinos({
   }, [focado, apiAluno, aluno, recarregar]);
 
   useEffect(() => {
-    if (!focado || !apiAluno || !treinoSelecionado) return;
-    const id = treinoSelecionado.id;
+    if (!consultaAluno) return;
+    const { api, treino, usuarioFotos } = consultaAluno;
     let ativo = true;
     const pedido = ++leituraAluno.current;
-    setCarregandoExercicios(true);
-    void apiAluno.ler(id).then(async snapshot => {
-      if (!ativo || pedido !== leituraAluno.current) return;
+    const pedidoAtual = () => ativo && pedido === leituraAluno.current;
+    void api.ler(treino.id).then(async snapshot => {
+      if (!pedidoAtual()) return;
       setErroAluno("");
       snapshotAluno.current = snapshot;
       setExercicios(snapshot.exercises);
       setMaioresCargas(Object.fromEntries(snapshot.exercises.map(ex => [ex.id, Math.max(0, ...ex.loads.map(c => Number(c.weight_kg)))])));
-      const fotos = await obterFotosAssinadas("exercise-photos", snapshot.exercises.map(ex => ex.photo_path), 60, aluno?.usuarioId ?? "");
-      if (ativo && pedido === leituraAluno.current) setExercicios(snapshot.exercises.map(ex => ({ ...ex, photo_url: ex.photo_path ? fotos.get(ex.photo_path) : null })));
+      const fotos = await obterFotosAssinadas("exercise-photos", snapshot.exercises.map(ex => ex.photo_path), 60, usuarioFotos);
+      if (pedidoAtual()) setExercicios(snapshot.exercises.map(ex => ({ ...ex, photo_url: ex.photo_path ? fotos.get(ex.photo_path) : null })));
     }).catch(erro => {
-      if (ativo && pedido === leituraAluno.current) { setExercicios([]); snapshotAluno.current = null; setErroAluno(erro instanceof Error ? erro.message : "Não foi possível abrir o treino."); }
-    }).finally(() => { if (ativo && pedido === leituraAluno.current) setCarregandoExercicios(false); });
+      if (pedidoAtual()) { setExercicios([]); snapshotAluno.current = null; setErroAluno(erro instanceof Error ? erro.message : "Não foi possível abrir o treino."); }
+    }).finally(() => { if (pedidoAtual()) setConsultaAlunoConcluida(consultaAluno); });
     return () => { ativo = false; };
-  }, [focado, apiAluno, treinoSelecionado, recarregar, aluno?.usuarioId]);
+  }, [consultaAluno]);
 
   useEffect(() => {
     if (!focado || apiAluno || !usuarioId || treinos.length === 0) return;
@@ -1556,7 +1567,7 @@ export default function MeusTreinos({
               <Text style={estilos.tituloSecao}>
                 Exercícios cadastrados ({exercicios.length})
               </Text>
-              {carregandoExercicios ? (
+              {carregandoListaExercicios ? (
                 <ActivityIndicator
                   size="large"
                   color={corTema}
