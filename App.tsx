@@ -770,7 +770,7 @@ function AppConteudo() {
           <Pilha.Screen name="Inicio">
             {({ navigation }) => (
               <PainelInicial
-                key={sessao.user.id} usuarioId={sessao.user.id}
+                key={sessao.user.id}
                 nomeUsuario={nomeUsuario} fotoUrl={fotoUrl} corTema={corTema}
                 onSair={sair} onNavegar={(rota) => navigation.navigate(rota)}
                 onAbrirTreino={(plano) => navigation.navigate("treinoAtivo", plano)}

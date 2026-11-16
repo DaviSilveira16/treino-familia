@@ -743,44 +743,37 @@ function filtered(table, search) {
         start: active.started_at,
       },
     );
+    if (process.env.SMOKE_PAINEL_ONLY) {
+      await page.evaluate((id) => localStorage.setItem(`@treino-familia:painel:v1:${id}`,
+        JSON.stringify({ meta: 5, treino: true, medidas: true, comunidade: true, hora: "00:00", intervalo: 1 })), uid);
+    }
     await page.reload();
     await page
       .getByText("Olá, Conta de!", { exact: true })
       .waitFor({ timeout: 15000 });
     if (process.env.SMOKE_PAINEL_ONLY) {
-      await page.getByText("Evolução de carga", { exact: true }).waitFor();
-      assert.equal(await page.getByText(/Sequência atual/i).count(), 0);
-      await page.getByRole("button", { name: "Meta e lembretes", exact: true }).click();
-      assert.equal(await page.getByText(/Programação semanal|Treinos programados/i).count(), 0);
-      await page.getByRole("textbox", { name: "Meta de treinos por semana" }).fill("5");
-      await page.getByRole("switch", { name: "Registrar medidas" }).click();
-      await page.getByRole("textbox", { name: "Intervalo entre medições" }).fill("1");
-      await page.getByRole("button", { name: "Salvar meta e lembretes" }).click();
-      await page.getByText("Preferências salvas.", { exact: true }).waitFor();
-      const aviso = page.getByRole("button", { name: /É hora de registrar suas medidas/ });
-      await aviso.click();
-      await page.waitForFunction((id) => Boolean(localStorage.getItem(`@treino-familia:painel:v1:${id}:lido:medidas`)), uid);
-      await page.getByRole("button", { name: "Ir para treinos" }).click();
+      const itensRemovidos = page.getByText(/Sequência atual|Programação semanal|Programação e lembretes|Meta e lembretes|Meta de \d+ treinos|Evolução de carga|Treinos programados|É hora de registrar suas medidas|Há uma novidade na comunidade/i);
+      await page.getByText("Seu resumo semanal", { exact: true }).waitFor();
+      await page.getByText("Kcal estimadas", { exact: true }).waitFor();
+      assert.equal(await itensRemovidos.count(), 0);
       const continuar = page.getByRole("button", { name: "Continuar Plano teste", exact: true });
       await continuar.waitFor();
-      await page.waitForFunction(() => window.treinoFamiliaPerf.relatorio().some((r) => r.operacao === "painel.carregar"));
-      const medidas = await page.evaluate(() => window.treinoFamiliaPerf.relatorio());
-      assert.ok(medidas.some((r) => r.operacao === "painel.carregar" && r.amostras > 0));
       const rascunho = await page.evaluate((key) => localStorage.getItem(key), draftKey);
       assert.ok(rascunho);
       revisaoHtml = "2";
       assert.equal(await page.locator('meta[name="revisao-smoke"]').getAttribute("content"), "1");
       await page.reload();
-      await page.getByText("Meta de 5 treinos", { exact: true }).waitFor();
+      await page.getByText("Seu resumo semanal", { exact: true }).waitFor();
+      await page.getByText("Kcal estimadas", { exact: true }).waitFor();
       await continuar.waitFor();
       assert.equal(await page.locator('meta[name="revisao-smoke"]').getAttribute("content"), "2");
       assert.equal(await page.evaluate((key) => localStorage.getItem(key), draftKey), rascunho);
-      assert.equal(await aviso.count(), 0);
+      assert.equal(await itensRemovidos.count(), 0);
       await page.getByRole("button", { name: "Abrir perfil" }).click();
       const baixar = page.waitForEvent("download");
       await page.getByText("Baixar CSV · Histórico", { exact: true }).click();
       assert.match((await baixar).suggestedFilename(), /historico.*\.csv$/);
-      console.log("OK UI — painel sem sequência nem agenda, lembrete, CSV e reabertura em nova versão com treino ativo preservado");
+      console.log("OK UI — painel sem sequência, agenda, meta, lembretes ou evolução de carga, CSV e treino ativo preservado");
       return;
     }
     const choosePhoto = async (button, files = photoFixture) => {

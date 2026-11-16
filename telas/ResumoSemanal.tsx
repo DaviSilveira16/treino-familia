@@ -16,7 +16,7 @@ import {
 } from "../servicos/cacheConsultas";
 import { medir, registrarTempo } from "../servicos/performance";
 
-type Props = { corTema?: string; metaSemanal?: number };
+type Props = { corTema?: string };
 type DadosSemana = {
   treinos: number;
   cardios: number;
@@ -43,7 +43,7 @@ function formatarMinutos(minutos: number) {
   return h ? `${h}h ${m} min` : `${m} min`;
 }
 
-export default function ResumoSemanal({ corTema = "#35D07F", metaSemanal }: Props) {
+export default function ResumoSemanal({ corTema = "#35D07F" }: Props) {
   const [dados, setDados] = useState<DadosSemana>({
     treinos: 0,
     cardios: 0,
@@ -261,7 +261,7 @@ export default function ResumoSemanal({ corTema = "#35D07F", metaSemanal }: Prop
             <View style={estilos.indicador}>
               <Text style={estilos.emoji}>🏋️</Text>
               <Text style={estilos.numero}>{dados.treinos}</Text>
-              <Text style={estilos.rotulo}>{metaSemanal ? `Meta de ${metaSemanal} treinos` : "Treinos"}</Text>
+              <Text style={estilos.rotulo}>Treinos</Text>
             </View>
             <View style={estilos.indicador}>
               <Text style={estilos.emoji}>🏃</Text>
