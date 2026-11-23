@@ -1,15 +1,19 @@
-import React from "react";
+import React, { useRef } from "react";
 import { Image, Modal, Platform, Text, TouchableOpacity, View } from "react-native";
 import type { ExercicioComFoto } from "./useFotoExercicio";
+import { useFocoModalWeb } from "../../servicos/useFocoModalWeb";
 
-export default function ModalFotoExercicio({ origemFotoAberta, fotoCarregandoId, corTema, escolherFonteFoto, onFechar, onExcluir }: {
+export default function ModalFotoExercicio({ origemFotoAberta, focoOrigemRef, fotoCarregandoId, corTema, escolherFonteFoto, onFechar, onExcluir }: {
   origemFotoAberta: ExercicioComFoto | null;
+  focoOrigemRef?: React.RefObject<HTMLElement | null>;
   fotoCarregandoId: string | null;
   corTema: string;
   escolherFonteFoto: (fonte: "biblioteca" | "camera") => void;
   onFechar: () => void;
   onExcluir?: () => void;
 }) {
+  const container = useRef<React.ComponentRef<typeof View> | null>(null);
+  useFocoModalWeb(Boolean(origemFotoAberta), container, focoOrigemRef);
   return (
     <Modal
         transparent
@@ -18,7 +22,7 @@ export default function ModalFotoExercicio({ origemFotoAberta, fotoCarregandoId,
         onRequestClose={onFechar}
         statusBarTranslucent
       >
-        <View
+        <View ref={container} accessibilityViewIsModal
           style={{
             flex: 1,
             backgroundColor: "#000D",
@@ -156,7 +160,7 @@ export default function ModalFotoExercicio({ origemFotoAberta, fotoCarregandoId,
             <TouchableOpacity
               accessibilityRole="button"
               onPress={onFechar}
-              style={{ minHeight: 40, justifyContent: "center" }}
+              style={{ minHeight: 44, justifyContent: "center" }}
             >
               <Text style={{ color: "#A4ADA7", textAlign: "center" }}>
                 Fechar visualização

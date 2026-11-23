@@ -93,8 +93,10 @@ import { obterFotosAssinadas } from "../servicos/fotosAssinadas";
 import { EntradaGaleriaWeb } from "../componentes/fotos/SeletorGaleriaWeb";
 import ModalFotoExercicio from "../componentes/fotos/ModalFotoExercicio";
 import { useFotoExercicio } from "../componentes/fotos/useFotoExercicio";
+import { proximoExercicioAberto } from "../servicos/avancoExercicio";
 
 const CHAVE_PREFERENCIA_DESCANSO = "@treino-familia:descanso-segundos:v1";
+const DESTINO_REVISAO = "revisao-final";
 
 type PerfilTreino = PerfilCalculoTreino;
 
@@ -150,7 +152,7 @@ export default function TreinoAtivo({
   const [perfil, setPerfil] = useState<PerfilTreino | null>(null);
   const [exercicios, setExercicios] = useState<PlanoExercicio[]>([]);
   const [fotos, setFotos] = useState<Record<string, string>>({});
-  const { origemFotoAberta, setOrigemFotoAberta, fotoCarregandoId, fotoEmEnvioRef, adicionarOuTrocarFoto, escolherFonteFoto, confirmarExclusaoFoto } = useFotoExercicio<PlanoExercicio & {
+  const { origemFotoAberta, setOrigemFotoAberta, focoOrigemRef, fotoCarregandoId, fotoEmEnvioRef, adicionarOuTrocarFoto, escolherFonteFoto, confirmarExclusaoFoto } = useFotoExercicio<PlanoExercicio & {
     plan_id: string;
     sessaoId: string;
     photo_url?: string;
@@ -252,6 +254,21 @@ export default function TreinoAtivo({
   const bloqueioRef = useRef(false);
   const salvandoRef = useRef(false);
   const chaveSalvandoRef = useRef<string | null>(null);
+  const rolagemRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const conteudoRef = useRef<React.ComponentRef<typeof View>>(null);
+  const cartoesExerciciosRef = useRef(new Map<string, React.ComponentRef<typeof View>>());
+  const avancoPendenteRef = useRef<{
+    exercicioId: string;
+    destino: string;
+    sessaoId: string;
+    layoutConfirmado: boolean;
+    ultimoY: number | null;
+  } | null>(null);
+  const quadroAvancoRef = useRef<number | null>(null);
+  const emFocoRef = useRef(estaEmFoco);
+  useEffect(() => {
+    emFocoRef.current = estaEmFoco;
+  }, [estaEmFoco]);
   descansoRef.current = descanso;
   finalizacaoRef.current = finalizacao;
   bloqueioRef.current = bloqueioSessao;
@@ -263,6 +280,63 @@ export default function TreinoAtivo({
   usuarioRef.current = usuarioId;
   intensidadeRef.current = intensidade;
   esforcoRef.current = esforco;
+
+  const cancelarAvancoExercicio = useCallback(() => {
+    avancoPendenteRef.current = null;
+    if (quadroAvancoRef.current !== null) cancelAnimationFrame(quadroAvancoRef.current);
+    quadroAvancoRef.current = null;
+  }, []);
+
+  const agendarAvancoExercicio = useCallback(() => {
+    if (!avancoPendenteRef.current || quadroAvancoRef.current !== null) return;
+    quadroAvancoRef.current = requestAnimationFrame(() => {
+      quadroAvancoRef.current = null;
+      const pendente = avancoPendenteRef.current;
+      if (!pendente) return;
+      if (!emFocoRef.current || sessaoRef.current?.id !== pendente.sessaoId ||
+          finalizacaoRef.current || bloqueioRef.current) {
+        avancoPendenteRef.current = null;
+        return;
+      }
+      const destino = cartoesExerciciosRef.current.get(pendente.destino);
+      const conteudo = conteudoRef.current;
+      if (!pendente.layoutConfirmado || !destino || !conteudo) return;
+      // Na web, mover um cartão sem redimensioná-lo não dispara onLayout.
+      // Medimos novamente após o recolhimento, em relação ao conteúdo rolável.
+      destino.measureLayout(conteudo, (_x, y) => {
+        if (avancoPendenteRef.current !== pendente || !emFocoRef.current ||
+            sessaoRef.current?.id !== pendente.sessaoId || finalizacaoRef.current || bloqueioRef.current ||
+            !Number.isFinite(y) || !rolagemRef.current) return;
+        const posicao = Math.max(0, y - 12);
+        if (pendente.ultimoY !== null && Math.abs(pendente.ultimoY - posicao) < 1) return;
+        const primeiroAvanco = pendente.ultimoY === null;
+        pendente.ultimoY = posicao;
+        // A sincronização pode remover avisos acima do destino durante a animação.
+        // A correção imediata cancela a animação antiga e mantém o próximo título à vista.
+        rolagemRef.current.scrollTo({ y: posicao, animated: primeiroAvanco && Platform.OS !== "web" });
+      });
+    });
+  }, []);
+
+  const confirmarLayoutAvanco = useCallback(() => {
+    if (avancoPendenteRef.current) avancoPendenteRef.current.layoutConfirmado = true;
+    agendarAvancoExercicio();
+  }, [agendarAvancoExercicio]);
+
+  const aoRedimensionarExercicio = useCallback((id: string) => {
+    if (avancoPendenteRef.current?.exercicioId === id) confirmarLayoutAvanco();
+  }, [confirmarLayoutAvanco]);
+
+  const aoConcluirExercicio = useCallback((id: string) => {
+    if (avancoPendenteRef.current?.exercicioId === id) agendarAvancoExercicio();
+  }, [agendarAvancoExercicio]);
+
+  useEffect(() => {
+    agendarAvancoExercicio();
+  }, [sincronizando, agendarAvancoExercicio]);
+
+  useEffect(() => cancelarAvancoExercicio,
+    [estaEmFoco, sessao?.id, cancelarAvancoExercicio]);
 
   const retirarSessaoDaTela = useCallback((sessaoId: string) => {
     if (sessaoRef.current?.id !== sessaoId) return;
@@ -1226,6 +1300,7 @@ export default function TreinoAtivo({
         );
         return;
       }
+      cancelarAvancoExercicio();
       chaveSalvandoRef.current = serie.chave;
       setChaveEmSalvamento(serie.chave);
       const proximo: SerieAtiva = serie.concluida
@@ -1241,9 +1316,21 @@ export default function TreinoAtivo({
       const atualizadas = seriesRef.current.map((item) =>
         item.chave === serie.chave ? proximo : item,
       );
+      const sessaoId = sessaoRef.current.id;
       try {
         // Primeiro disco; só depois inicia a transmissão. Se falhar, não promete proteção.
         await salvarLocal(atualizadas);
+        if (sessaoRef.current?.id === sessaoId && !serie.concluida && atualizadas
+          .filter((item) => item.exercise_id === serie.exercise_id && !item.excluida)
+          .every((item) => item.concluida)) {
+          avancoPendenteRef.current = {
+            exercicioId: serie.exercise_id,
+            destino: proximoExercicioAberto(serie.exercise_id, exerciciosRef.current, atualizadas) ?? DESTINO_REVISAO,
+            sessaoId,
+            layoutConfirmado: false,
+            ultimoY: null,
+          };
+        }
         seriesRef.current = atualizadas;
         setSeries(atualizadas);
         setMensagem(
@@ -1267,7 +1354,7 @@ export default function TreinoAtivo({
       }
       void sincronizar();
     },
-    [iniciarDescanso, salvarLocal, sincronizar],
+    [cancelarAvancoExercicio, iniciarDescanso, salvarLocal, sincronizar],
   );
 
   const podeAdaptar = () =>
@@ -1715,11 +1802,18 @@ export default function TreinoAtivo({
     <View style={estilos.container}>
       <StatusBar hidden={true} barStyle="light-content" />
       <ScrollView
-        contentContainerStyle={estilos.conteudo}
+        ref={rolagemRef}
+        onContentSizeChange={confirmarLayoutAvanco}
+        onTouchStart={cancelarAvancoExercicio}
+        onPointerDown={cancelarAvancoExercicio}
+        onKeyDown={cancelarAvancoExercicio}
+        onScrollBeginDrag={Platform.OS === "web" ? undefined : cancelarAvancoExercicio}
+        {...(Platform.OS === "web" ? { onWheel: cancelarAvancoExercicio } : {})}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
+        <View ref={conteudoRef} collapsable={false} style={estilos.conteudo}>
         <TouchableOpacity onPress={onVoltar} style={estilos.voltar}>
           <Text style={[estilos.textoVoltar, { color: corTema }]}>
             ‹ Voltar
@@ -2055,12 +2149,18 @@ export default function TreinoAtivo({
                   key={`${usuarioId}:${sessao.id}:${exercicio.id}`}
                   chaveRecolhimento={`@treino-familia:cartao-exercicio:v1:${usuarioId}:${sessao.id}:${exercicio.id}`}
                   exercicio={exercicio}
+                  referencia={(elemento) => {
+                    if (elemento) cartoesExerciciosRef.current.set(exercicio.id, elemento);
+                    else cartoesExerciciosRef.current.delete(exercicio.id);
+                  }}
+                  onLayout={() => aoRedimensionarExercicio(exercicio.id)}
+                  onConcluido={aoConcluirExercicio}
                   acoesFoto={(
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                       {url ? (
                         <TouchableOpacity accessibilityRole="button"
                           accessibilityLabel={`Visualizar foto de ${exercicio.name}`}
-                          onPress={() => setOrigemFotoAberta(exercicioFoto)}>
+                          onPress={(evento) => setOrigemFotoAberta(exercicioFoto, evento.currentTarget)}>
                           <Image source={{ uri: url }} style={{ width: 64, height: 64, borderRadius: 10 }} />
                         </TouchableOpacity>
                       ) : null}
@@ -2073,7 +2173,7 @@ export default function TreinoAtivo({
                       ) : (
                         <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Escolher câmera ou fototeca de ${exercicio.name}`}
                           disabled={bloquearFoto} style={estilos.botaoSecundario}
-                          onPress={() => setOrigemFotoAberta(exercicioFoto)}>
+                          onPress={(evento) => setOrigemFotoAberta(exercicioFoto, evento.currentTarget)}>
                           <Text style={estilos.textoBotaoSecundario}>{fotoCarregandoId === exercicio.id ? "Enviando foto…" : "Foto"}</Text>
                         </TouchableOpacity>
                       )}
@@ -2097,7 +2197,11 @@ export default function TreinoAtivo({
                 />
                 );
               })}
-            <View style={estilos.cartao}>
+            <View style={estilos.cartao} collapsable={false}
+              ref={(elemento) => {
+                if (elemento) cartoesExerciciosRef.current.set(DESTINO_REVISAO, elemento);
+                else cartoesExerciciosRef.current.delete(DESTINO_REVISAO);
+              }}>
               <Text style={estilos.tituloCartao}>Encerrar e revisar</Text>
               <Text style={estilos.secundario}>
                 Confira duração, intensidade, calorias estimadas e escolha se
@@ -2139,6 +2243,7 @@ export default function TreinoAtivo({
             </Text>
           </TouchableOpacity>
         ) : null}
+        </View>
       </ScrollView>
       <Modal
         transparent
@@ -2226,7 +2331,7 @@ export default function TreinoAtivo({
           </ScrollView>
         </View>
       </Modal>
-      <ModalFotoExercicio
+      <ModalFotoExercicio focoOrigemRef={focoOrigemRef}
         origemFotoAberta={origemFotoAberta}
         fotoCarregandoId={fotoCarregandoId}
         corTema={corTema}

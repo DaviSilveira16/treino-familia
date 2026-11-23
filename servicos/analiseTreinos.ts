@@ -15,6 +15,7 @@ export type SerieHistorica = {
 };
 export type PontoEvolucao = {
   id: string;
+  nome: string;
   data: string;
   cargaMaxima: number;
   repsNaMaiorCarga: number;
@@ -75,7 +76,10 @@ export function analisarHistorico(
     const sessao = sessoesPorId.get(serie.session_id);
     if (!sessao) continue;
     const nome = serie.exercise_name?.trim() || "Exercício sem nome";
-    const chave = normalizarExercicio(nome);
+    // Sem FK não há evidência suficiente para unir sessões antigas.
+    const chave = serie.exercise_id
+      ? `exercicio:${serie.exercise_id}`
+      : `legado:${sessao.id}:${normalizarExercicio(nome)}`;
     const grupoId = `${chave}::${sessao.id}`;
     const grupo = grupos.get(grupoId) ?? { nome, chave, sessao, series: [] };
     grupo.series.push(serie);
@@ -107,6 +111,7 @@ export function analisarHistorico(
     );
     const ponto: PontoEvolucao = {
       id: grupo.sessao.id,
+      nome: grupo.nome,
       data: grupo.sessao.started_at,
       cargaMaxima: carga,
       repsNaMaiorCarga: reps,
@@ -116,6 +121,7 @@ export function analisarHistorico(
     if (!porExercicio[grupo.chave])
       porExercicio[grupo.chave] = { nome: grupo.nome, pontos: [] };
     porExercicio[grupo.chave].pontos.push(ponto);
+    porExercicio[grupo.chave].nome = grupo.nome;
     const anterior = melhores.get(grupo.chave);
     if (anterior) {
       if (carga > anterior.carga && carga > 0)
@@ -162,6 +168,16 @@ export function analisarHistorico(
       volume: Math.max(anterior?.volume ?? 0, volume),
       repsPorCarga: porCarga,
     });
+  }
+  const homonimos = new Map<string, string[]>();
+  for (const [chave, item] of Object.entries(porExercicio)) {
+    const nome = normalizarExercicio(item.nome);
+    homonimos.set(nome, [...(homonimos.get(nome) ?? []), chave]);
+  }
+  for (const [chave, item] of Object.entries(porExercicio)) {
+    const lista = homonimos.get(normalizarExercicio(item.nome)) ?? [];
+    if (chave.startsWith("legado:")) item.nome += ` · sem vínculo (${new Date(item.pontos[0].data).toLocaleDateString("pt-BR")})`;
+    else if (lista.length > 1) item.nome += ` · cadastro ${lista.indexOf(chave) + 1}`;
   }
   const limite30 = agora - 30 * 86400000;
   const limite60 = agora - 60 * 86400000;

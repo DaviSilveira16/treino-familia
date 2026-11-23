@@ -19,23 +19,30 @@ import {
   createNavigationContainerRef,
   NavigationContainer,
 } from "@react-navigation/native";
-import {
-  CardStyleInterpolators,
-} from "@react-navigation/stack";
+import { CardStyleInterpolators } from "@react-navigation/stack";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-import { criarAcoesAutenticacao, type ModoAutenticacao } from "./servicos/acoesAutenticacao";
-import { Alert } from "./servicos/alerta";
-import { fecharModalAtivo, temRetornoInternoAtivo } from "./servicos/voltarModal";
 import {
-  processarRetornoAndroid,
-} from "./servicos/authAndroid";
+  criarAcoesAutenticacao,
+  type ModoAutenticacao,
+} from "./servicos/acoesAutenticacao";
+import { Alert } from "./servicos/alerta";
+import {
+  fecharModalAtivo,
+  temRetornoInternoAtivo,
+} from "./servicos/voltarModal";
+import { processarRetornoAndroid } from "./servicos/authAndroid";
 import BarraTreinoAtivo from "./telas/BarraTreinoAtivo";
 import PainelInicial from "./telas/PainelInicial";
 import NavegacaoInferior from "./telas/NavegacaoInferior";
 import NavegacaoVoltarGlobal from "./telas/NavegacaoVoltarGlobal";
 import LimiteDeErro from "./telas/LimiteDeErro";
-import { Pilha, ROTAS_COM_BOTAO_VOLTAR, type Rotas } from "./telas/rotasAplicativo";
+import AtualizacaoAplicativo from "./componentes/AtualizacaoAplicativo";
+import {
+  Pilha,
+  ROTAS_COM_BOTAO_VOLTAR,
+  type Rotas,
+} from "./telas/rotasAplicativo";
 // Importado apenas quando o usuário abre a respectiva tela.
 const Perfil = React.lazy(() => import("./telas/Perfil"));
 // Importado apenas quando o usuário abre a respectiva tela.
@@ -159,14 +166,21 @@ function AppConteudo() {
     let ativo = true;
     const sincronizar = () => {
       void import("./servicos/nutricaoRepositorio")
-        .then((modulo) => ativo ? modulo.sincronizarNutricao(usuarioId) : undefined)
-        .catch(() => { /* As pendências ficam no disco e aparecem em Nutrição. */ });
+        .then((modulo) =>
+          ativo ? modulo.sincronizarNutricao(usuarioId) : undefined,
+        )
+        .catch(() => {
+          /* As pendências ficam no disco e aparecem em Nutrição. */
+        });
     };
     sincronizar();
     const assinatura = AppState.addEventListener("change", (estado) => {
       if (estado === "active") sincronizar();
     });
-    return () => { ativo = false; assinatura.remove(); };
+    return () => {
+      ativo = false;
+      assinatura.remove();
+    };
   }, [sessao?.user.id, semInternet]);
 
   // The existing APK emits this cancelable event before its compatibility fallback.
@@ -397,14 +411,27 @@ function AppConteudo() {
     };
   }, []);
 
-  useEffect(() => NetInfo.addEventListener((estado) => {
-    setSemInternet(estado.isConnected === false || estado.isInternetReachable === false);
-  }), []);
+  useEffect(
+    () =>
+      NetInfo.addEventListener((estado) => {
+        setSemInternet(
+          estado.isConnected === false || estado.isInternetReachable === false,
+        );
+      }),
+    [],
+  );
 
-  const { entrar, entrarComGoogle, cadastrar, recuperarSenha } = criarAcoesAutenticacao({
-    nome, email, senha, corPadrao: COR_PADRAO, urlAplicativo: URL_APLICATIVO,
-    setEnviando, setModo, setSenha,
-  });
+  const { entrar, entrarComGoogle, cadastrar, recuperarSenha } =
+    criarAcoesAutenticacao({
+      nome,
+      email,
+      senha,
+      corPadrao: COR_PADRAO,
+      urlAplicativo: URL_APLICATIVO,
+      setEnviando,
+      setModo,
+      setSenha,
+    });
 
   async function sair() {
     const { error } = await supabase.auth.signOut();
@@ -771,9 +798,14 @@ function AppConteudo() {
             {({ navigation }) => (
               <PainelInicial
                 key={sessao.user.id}
-                nomeUsuario={nomeUsuario} fotoUrl={fotoUrl} corTema={corTema}
-                onSair={sair} onNavegar={(rota) => navigation.navigate(rota)}
-                onAbrirTreino={(plano) => navigation.navigate("treinoAtivo", plano)}
+                nomeUsuario={nomeUsuario}
+                fotoUrl={fotoUrl}
+                corTema={corTema}
+                onSair={sair}
+                onNavegar={(rota) => navigation.navigate(rota)}
+                onAbrirTreino={(plano) =>
+                  navigation.navigate("treinoAtivo", plano)
+                }
               />
             )}
           </Pilha.Screen>
@@ -905,9 +937,15 @@ function AppConteudo() {
                 ativo={navigation.canGoBack()}
               >
                 <Suspense fallback={<TelaCarregando cor={corTema} />}>
-                  {sessao ? <Nutricao key={sessao.user.id} usuarioId={sessao.user.id}
-                    metadados={sessao.user.user_metadata} corTema={corTema}
-                    onAbrirPerfil={() => navigation.navigate("perfil")} /> : null}
+                  {sessao ? (
+                    <Nutricao
+                      key={sessao.user.id}
+                      usuarioId={sessao.user.id}
+                      metadados={sessao.user.user_metadata}
+                      corTema={corTema}
+                      onAbrirPerfil={() => navigation.navigate("perfil")}
+                    />
+                  ) : null}
                 </Suspense>
               </NavegacaoVoltarGlobal>
             )}
@@ -960,6 +998,10 @@ function AppConteudo() {
               if (referenciaNavegacao.isReady())
                 referenciaNavegacao.navigate("nutricao");
             }}
+            onAbrirSincronizacao={() => {
+              if (referenciaNavegacao.isReady())
+                referenciaNavegacao.navigate("perfil");
+            }}
           />
         ) : null}
         {semInternet ? (
@@ -981,10 +1023,7 @@ function AppConteudo() {
               const routes =
                 rota === "Inicio"
                   ? [{ name: "Inicio" as const }]
-                  : [
-                      { name: "Inicio" as const },
-                      { name: rota },
-                    ];
+                  : [{ name: "Inicio" as const }, { name: rota }];
               referenciaNavegacao.dispatch(
                 CommonActions.reset({ index: routes.length - 1, routes }),
               );
@@ -999,7 +1038,10 @@ function AppConteudo() {
 export default function App() {
   return (
     <LimiteDeErro>
-      <AppConteudo />
+      <View style={{ flex: 1, backgroundColor: "#101312" }}>
+        <AtualizacaoAplicativo />
+        <AppConteudo />
+      </View>
     </LimiteDeErro>
   );
 }
@@ -1171,5 +1213,4 @@ const estilos = StyleSheet.create({
     textAlign: "center",
     marginTop: 26,
   },
-
 });

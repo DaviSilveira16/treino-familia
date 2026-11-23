@@ -14,6 +14,7 @@ import {
   montarRegistroManual,
 } from "../servicos/registroTreinoManual";
 import RepetirCarga from "./RepetirCarga";
+import { proximoExercicioAberto } from "../servicos/avancoExercicio";
 import {
   repetirCargaNasSeries,
   acrescentarSerie,
@@ -36,6 +37,7 @@ export default function FormularioRegistroTreino({
   perfil,
   cor,
   onSalvo,
+  onRolarPara,
 }: {
   usuarioId: string;
   planId: string;
@@ -44,6 +46,7 @@ export default function FormularioRegistroTreino({
   perfil: PerfilCalculoTreino | null;
   cor: string;
   onSalvo: (pendente: boolean, mensagem?: string) => Promise<void>;
+  onRolarPara?: (y: number) => void;
 }) {
   const [exercicios, setExercicios] = useState<PlanoExercicio[]>([]),
     [series, setSeries] = useState<SerieRascunho[]>([]);
@@ -55,6 +58,76 @@ export default function FormularioRegistroTreino({
     [esforco, setEsforco] = useState<EsforcoPercebido>("nao_informado");
   const envio = useRef(false);
   const [aceitarZero, setAceitarZero] = useState(false);
+  const seriesRef = useRef(series);
+  const formularioRef = useRef<React.ComponentRef<typeof View>>(null);
+  const cartoesRef = useRef(new Map<string, React.ComponentRef<typeof View>>());
+  const formularioYRef = useRef(0);
+  const revisaoLayoutRef = useRef(0);
+  const revisoesRef = useRef(new Map<string, number>());
+  const avancoRef = useRef<{ destino: string; origem?: string; revisaoMinima: number } | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const rolarRef = useRef(onRolarPara);
+  useEffect(() => { rolarRef.current = onRolarPara; }, [onRolarPara]);
+
+  function tentarAvancar() {
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      const pedido = avancoRef.current;
+      const destino = pedido && cartoesRef.current.get(pedido.destino);
+      const formulario = formularioRef.current;
+      if (!pedido || !destino || !formulario || (pedido.origem &&
+        (revisoesRef.current.get(pedido.origem) ?? 0) <= pedido.revisaoMinima)) return;
+      // No navegador, mover o próximo cartão não dispara necessariamente onLayout.
+      // Medimos o destino depois que o cartão concluído mudou de tamanho.
+      destino.measureLayout(formulario, (_x, y) => {
+        if (avancoRef.current !== pedido || !Number.isFinite(y)) return;
+        avancoRef.current = null;
+        rolarRef.current?.(formularioYRef.current + y);
+      });
+    });
+  }
+
+  function registrarLayout(id: string) {
+    revisoesRef.current.set(id, ++revisaoLayoutRef.current);
+    if (avancoRef.current) tentarAvancar();
+  }
+
+  function guardarCartao(id: string, cartao: React.ComponentRef<typeof View> | null) {
+    if (cartao) cartoesRef.current.set(id, cartao);
+    else cartoesRef.current.delete(id);
+  }
+
+  function alterarSeries(
+    novas: SerieRascunho[],
+    exercicioConcluido?: string,
+    todas = false,
+  ) {
+    const anteriores = seriesRef.current;
+    seriesRef.current = novas;
+    avancoRef.current = null;
+    const seriesDoExercicio = novas.filter(
+      s => s.exercise_id === exercicioConcluido && !s.excluida,
+    );
+    const acabouDeConcluir = exercicioConcluido &&
+      anteriores.some(s => s.exercise_id === exercicioConcluido && !s.excluida && !s.concluida) &&
+      seriesDoExercicio.length > 0 && seriesDoExercicio.every(s => s.concluida);
+    if (onRolarPara && (todas || acabouDeConcluir)) {
+      avancoRef.current = {
+        destino: todas ? "resumo" : proximoExercicioAberto(exercicioConcluido!, exercicios, novas) ?? "resumo",
+        origem: todas ? undefined : exercicioConcluido,
+        // Uma conclusão aguarda as posições medidas depois do recolhimento.
+        revisaoMinima: revisaoLayoutRef.current,
+      };
+      tentarAvancar();
+    }
+    setSeries(novas);
+  }
+
+  useEffect(() => () => {
+    avancoRef.current = null;
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     let ativo = true;
@@ -116,6 +189,7 @@ export default function FormularioRegistroTreino({
         );
         if (ativo) {
           setExercicios(base);
+          seriesRef.current = abertas;
           setSeries(abertas);
         }
       } catch (e) {
@@ -184,7 +258,12 @@ export default function FormularioRegistroTreino({
       />
     );
   return (
-    <View style={s.grupo}>
+    <View
+      ref={formularioRef}
+      collapsable={false}
+      style={s.grupo}
+      onLayout={evento => { formularioYRef.current = evento.nativeEvent.layout.y; }}
+    >
       <Text style={s.ajuda}>
         Confira o que realmente realizou. As cargas do plano são sugestões
         editáveis e só entram no histórico depois de você marcar as séries. Este
@@ -197,9 +276,7 @@ export default function FormularioRegistroTreino({
             accessibilityLabel="Marcar todas as séries deste registro"
             disabled={salvando}
             onPress={() =>
-              setSeries((atuais) =>
-                atuais.map((s) => ({ ...s, concluida: true })),
-              )
+              alterarSeries(seriesRef.current.map(s => ({ ...s, concluida: true })), undefined, true)
             }
             style={s.botao}
           >
@@ -212,18 +289,19 @@ export default function FormularioRegistroTreino({
               key={e.id}
               exercicio={e}
               series={series.filter((s) => s.exercise_id === e.id)}
+              referencia={cartao => guardarCartao(e.id, cartao)}
+              onLayout={() => registrarLayout(e.id)}
+              onConcluido={tentarAvancar}
               cor={cor}
               bloqueado={salvando}
               chaveSalvando={null}
               onCopiar={() => {}}
               onRepetirCarga={(id, carga, anteriores) =>
-                setSeries((atuais) =>
-                  repetirCargaNasSeries(atuais, id, carga, anteriores),
-                )
+                alterarSeries(repetirCargaNasSeries(seriesRef.current, id, carga, anteriores))
               }
               onCampo={(chave, campo, valor) =>
-                setSeries((atuais) =>
-                  atuais.map((s) =>
+                alterarSeries(
+                  seriesRef.current.map((s) =>
                     s.chave === chave && !s.concluida
                       ? { ...s, [campo]: valor }
                       : s,
@@ -231,50 +309,54 @@ export default function FormularioRegistroTreino({
                 )
               }
               onAlternar={(serie) =>
-                setSeries((atuais) =>
-                  atuais.map((s) =>
+                alterarSeries(
+                  seriesRef.current.map((s) =>
                     s.chave === serie.chave
                       ? { ...s, concluida: !s.concluida }
                       : s,
                   ),
+                  serie.exercise_id ?? undefined,
                 )
               }
               onAdicionarSerie={() =>
-                setSeries((atuais) =>
-                  atuais.filter((s) => s.exercise_id === e.id).length < 20
-                    ? [...atuais, acrescentarSerie(e, atuais)]
-                    : atuais,
+                alterarSeries(
+                  seriesRef.current.filter((s) => s.exercise_id === e.id).length < 20
+                    ? [...seriesRef.current, acrescentarSerie(e, seriesRef.current)]
+                    : seriesRef.current,
                 )
               }
               onRetirarSerie={(serie) =>
-                setSeries((atuais) =>
-                  atuais.filter((s) => s.exercise_id === e.id).length > 1
-                    ? atuais.filter((s) => s.chave !== serie.chave)
-                    : atuais,
+                alterarSeries(
+                  seriesRef.current.filter((s) => s.exercise_id === e.id).length > 1
+                    ? seriesRef.current.filter((s) => s.chave !== serie.chave)
+                    : seriesRef.current,
+                  e.id,
                 )
               }
             />
           ))}
-          <ResumoRegistroTreino
-            perfil={perfil}
-            series={series
-              .filter((s) => s.concluida)
-              .map((s) => ({
-                exercise_id: s.exercise_id,
-                exercise_name: s.exercise_name,
-                set_number: s.set_number,
-                reps: Number(s.reps),
-                weight_kg: Number(s.weight_kg.replace(",", ".")),
-              }))}
-            duracao={duracao}
-            onDuracao={setDuracao}
-            intensidade={intensidade}
-            onIntensidade={setIntensidade}
-            esforco={esforco}
-            onEsforco={setEsforco}
-            cor={cor}
-            bloqueado={salvando}
-          />
+          <View ref={cartao => guardarCartao("resumo", cartao)} collapsable={false}>
+            <ResumoRegistroTreino
+              perfil={perfil}
+              series={series
+                .filter((s) => s.concluida)
+                .map((s) => ({
+                  exercise_id: s.exercise_id,
+                  exercise_name: s.exercise_name,
+                  set_number: s.set_number,
+                  reps: Number(s.reps),
+                  weight_kg: Number(s.weight_kg.replace(",", ".")),
+                }))}
+              duracao={duracao}
+              onDuracao={setDuracao}
+              intensidade={intensidade}
+              onIntensidade={setIntensidade}
+              esforco={esforco}
+              onEsforco={setEsforco}
+              cor={cor}
+              bloqueado={salvando}
+            />
+          </View>
           <Text style={s.ajuda}>
             O calendário usa meio-dia como referência da data escolhida e guarda
             a duração informada. O horário não representa uma medição por

@@ -164,6 +164,11 @@ export default function Frequencia({
   const ultimaConsultaRef = useRef(0);
   const ultimaRevisaoRef = useRef(-1);
   const dadosCarregadosRef = useRef(false);
+  const rolagemRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const registroYRef = useRef(0);
+  const rolarParaRegistro = useCallback((y: number) => {
+    rolagemRef.current?.scrollTo({ y: Math.max(0, registroYRef.current + y - 12), animated: true });
+  }, []);
   // Cada navegação mensal consulta apenas as sessões daquele mês.
   const chaveMes = `${mesAtual.getFullYear()}-${mesAtual.getMonth()}`;
   const mesCarregadoRef = useRef("");
@@ -814,8 +819,10 @@ export default function Frequencia({
   return (
     <View style={estilos.container}>
       <ScrollView
+        ref={rolagemRef}
         style={{ flex: 1, minHeight: 0 }}
         contentContainerStyle={estilos.conteudo}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <TouchableOpacity style={estilos.botaoVoltar} onPress={onVoltar}>
@@ -930,7 +937,7 @@ export default function Frequencia({
             <Text style={estilos.textoLegenda}>Dia com treino registrado</Text>
           </View>
         </View>
-        <View style={estilos.cartaoRegistro}>
+        <View style={estilos.cartaoRegistro} onLayout={evento => { registroYRef.current = evento.nativeEvent.layout.y; }}>
           <Text style={estilos.tituloRegistro}>Registrar treino</Text>
           <Text style={[estilos.dataRegistro, { color: corTema }]}>
             {new Date(`${dataSelecionada}T12:00:00`).toLocaleDateString(
@@ -1009,6 +1016,7 @@ export default function Frequencia({
                   }
                   cor={corTema}
                   onSalvo={aoRegistrarTreino}
+                  onRolarPara={rolarParaRegistro}
                 />
               ) : null}
             </>

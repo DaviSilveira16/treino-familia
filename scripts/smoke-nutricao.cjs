@@ -54,7 +54,7 @@ function filtrar(rows, params) {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browserType = process.env.SMOKE_BROWSER === "webkit" ? webkit : chromium;
   const browser = await browserType.launch({ headless: true, ...(process.env.SMOKE_BROWSER_CHANNEL ? { channel: process.env.SMOKE_BROWSER_CHANNEL } : {}) });
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "America/Sao_Paulo", isMobile: true, hasTouch: true, userAgent: browserType === webkit
+  const context = await browser.newContext({ serviceWorkers: "block", viewport: { width: 390, height: 844 }, timezoneId: "America/Sao_Paulo", isMobile: true, hasTouch: true, userAgent: browserType === webkit
     ? "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
     : "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36" });
   const page = await context.newPage();

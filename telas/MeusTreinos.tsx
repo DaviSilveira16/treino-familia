@@ -193,7 +193,7 @@ export default function MeusTreinos({
   const formularioExercicioRef = useRef<React.ComponentRef<typeof View> | null>(null);
   const formularioCargaRef = useRef<React.ComponentRef<typeof View> | null>(null);
   const rolagemFrameRef = useRef<number | null>(null);
-  const { origemFotoAberta, setOrigemFotoAberta, fotoCarregandoId, fotoEmEnvioRef, adicionarOuTrocarFoto, escolherFonteFoto, confirmarExclusaoFoto } = useFotoExercicio<Exercicio>({
+  const { origemFotoAberta, setOrigemFotoAberta, focoOrigemRef, fotoCarregandoId, fotoEmEnvioRef, adicionarOuTrocarFoto, escolherFonteFoto, confirmarExclusaoFoto } = useFotoExercicio<Exercicio>({
     usuarioId,
     avisar: mostrarMensagem,
     aoSalvar: (exercicio, caminho, url) => setExercicios((atuais) =>
@@ -1065,8 +1065,8 @@ export default function MeusTreinos({
     }
   }
 
-  function escolherOrigemFoto(exercicio: Exercicio) {
-    setOrigemFotoAberta(exercicio);
+  function escolherOrigemFoto(exercicio: Exercicio, acionador?: unknown) {
+    setOrigemFotoAberta(exercicio, acionador);
   }
 
   async function abrirRegistroCarga(exercicio: Exercicio) {
@@ -1590,12 +1590,13 @@ export default function MeusTreinos({
                     <View key={exercicio.id} style={estilos.cartaoExercicio}>
                       <TouchableOpacity
                         style={estilos.numeroExercicio}
-                        onPress={() => escolherOrigemFoto(exercicio)}
+                        onPress={(evento) => escolherOrigemFoto(exercicio, evento.currentTarget)}
                         disabled={
                           Boolean(fotoCarregandoId) ||
                           (Platform.OS === "web" && !exercicio.photo_url)
                         }
                         activeOpacity={0.8}
+                        accessibilityRole="button"
                         accessibilityLabel={`Visualizar foto de ${exercicio.name}`}
                       >
                         {exercicio.photo_url ? (
@@ -1700,7 +1701,7 @@ export default function MeusTreinos({
                         ) : (
                           <TouchableOpacity
                             style={estilos.botaoAcao}
-                            onPress={() => escolherOrigemFoto(exercicio)}
+                            onPress={(evento) => escolherOrigemFoto(exercicio, evento.currentTarget)}
                             disabled={Boolean(fotoCarregandoId)}
                             accessibilityRole="button"
                             accessibilityLabel="Escolher câmera ou fototeca"
@@ -1921,7 +1922,7 @@ export default function MeusTreinos({
           </View>
         </KeyboardAvoidingView>
       </Modal>
-      <ModalFotoExercicio
+      <ModalFotoExercicio focoOrigemRef={focoOrigemRef}
         origemFotoAberta={origemFotoAberta}
         fotoCarregandoId={fotoCarregandoId}
         corTema={corTema}

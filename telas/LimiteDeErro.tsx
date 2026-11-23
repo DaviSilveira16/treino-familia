@@ -1,11 +1,14 @@
 import React from "react";
 import {
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
 } from "react-native";
+
+import Diagnostico from "../componentes/Diagnostico";
+import { registrarDiagnostico } from "../servicos/diagnostico";
 
 type Props = { children: React.ReactNode };
 type Estado = { houveErro: boolean };
@@ -19,6 +22,7 @@ export default class LimiteDeErro extends React.Component<Props, Estado> {
   }
 
   componentDidCatch(erro: Error) {
+    registrarDiagnostico("interface", "FALHA");
     // Não envia dados de conta ou de saúde a serviços externos.
     console.error("Falha ao renderizar o Treino Família:", erro);
   }
@@ -27,7 +31,7 @@ export default class LimiteDeErro extends React.Component<Props, Estado> {
     if (!this.state.houveErro) return this.props.children;
 
     return (
-      <View style={estilos.tela}>
+      <ScrollView contentContainerStyle={[estilos.tela, { flexGrow: 1 }]}>
         <Text style={estilos.icone}>⚠️</Text>
         <Text style={estilos.titulo}>Não foi possível abrir esta tela</Text>
         <Text style={estilos.texto}>
@@ -41,6 +45,7 @@ export default class LimiteDeErro extends React.Component<Props, Estado> {
         >
           <Text style={estilos.textoBotao}>Tentar novamente</Text>
         </TouchableOpacity>
+        <Diagnostico />
         {Platform.OS === "web" && typeof window !== "undefined" ? (
           <TouchableOpacity
             accessibilityRole="button"
@@ -50,7 +55,7 @@ export default class LimiteDeErro extends React.Component<Props, Estado> {
             <Text style={estilos.textoSecundario}>Recarregar aplicativo</Text>
           </TouchableOpacity>
         ) : null}
-      </View>
+      </ScrollView>
     );
   }
 }

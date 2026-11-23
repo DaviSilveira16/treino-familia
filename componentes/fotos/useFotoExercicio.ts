@@ -36,7 +36,12 @@ export function useFotoExercicio<T extends ExercicioComFoto>({ usuarioId, avisar
   salvarVinculo?: (exercicio: T, caminho: string) => Promise<boolean>;
   salvarFotoLocal?: (exercicio: T, caminho: string | null) => Promise<boolean | undefined>;
 }) {
-  const [origemFotoAberta, setOrigemFotoAberta] = useState<T | null>(null);
+  const [origemFotoAberta, definirOrigemFotoAberta] = useState<T | null>(null);
+  const focoOrigemRef = useRef<HTMLElement | null>(null);
+  function setOrigemFotoAberta(exercicio: T | null, acionador?: unknown) {
+    if (exercicio && Platform.OS === "web") focoOrigemRef.current = acionador instanceof HTMLElement ? acionador : document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    definirOrigemFotoAberta(exercicio);
+  }
   const [fotoCarregandoId, setFotoCarregandoId] = useState<string | null>(null);
   const fotoEmEnvioRef = useRef(false);
 
@@ -141,5 +146,5 @@ export function useFotoExercicio<T extends ExercicioComFoto>({ usuarioId, avisar
     ]);
   }
 
-  return { origemFotoAberta, setOrigemFotoAberta, fotoCarregandoId, fotoEmEnvioRef, adicionarOuTrocarFoto, escolherFonteFoto, confirmarExclusaoFoto };
+  return { origemFotoAberta, setOrigemFotoAberta, focoOrigemRef, fotoCarregandoId, fotoEmEnvioRef, adicionarOuTrocarFoto, escolherFonteFoto, confirmarExclusaoFoto };
 }

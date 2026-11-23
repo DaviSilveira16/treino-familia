@@ -29,6 +29,7 @@ import {
 } from "../servicos/paginacaoHistorico";
 
 import MinhasFamilias from "../componentes/MinhasFamilias";
+import InteracoesPublicacao from "../componentes/InteracoesPublicacao";
 import {
   criarFamiliaComId,
   lerFamiliaPreferida,
@@ -181,6 +182,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   const [erro, setErro] = useState("");
   const [membros, setMembros] = useState<MembroResumo[]>([]);
   const [publicacoes, setPublicacoes] = useState<Publicacao[]>([]);
+  const [revisaoInteracoes, setRevisaoInteracoes] = useState(0);
   const cursorPostsRef = useRef<CursorData | null>(null);
   const controleConsultas = useRef(criarControleConsultas());
   const carregandoInicialRef = useRef(false);
@@ -465,6 +467,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
           ? { id: ultimo.id, data: ultimo.created_at }
           : null;
         setPublicacoes(postsComFotos);
+        setRevisaoInteracoes(revisao => revisao + 1);
         ultimaConsultaRef.current = Date.now();
         ultimaRevisaoRef.current = obterRevisaoDeDados();
         dadosCarregadosRef.current = true;
@@ -1178,6 +1181,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
   return (
     <>
       <FlatList
+        keyboardShouldPersistTaps="handled"
         style={estilos.tela}
         contentContainerStyle={estilos.conteudo}
         data={publicacoes}
@@ -1198,6 +1202,8 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
                 </Text>
               </View>
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Atualizar comunidade"
                 onPress={() => {
                   setAtualizando(true);
                   void carregar();
@@ -1624,6 +1630,7 @@ export default function ComunidadeFamilia({ corTema = "#35D07F" }: Props) {
                 ))}
               </View>
             ) : null}
+            <InteracoesPublicacao key={`${post.family_id}:${post.id}`} familiaId={post.family_id} postId={post.id} propria={post.user_id === usuarioId} revisaoAtualizacao={revisaoInteracoes} onRemovido={() => setPublicacoes(lista => lista.filter(p => p.id !== post.id))} />
           </View>
         )}
         ListEmptyComponent={

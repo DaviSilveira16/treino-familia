@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import RepetirCarga from "./RepetirCarga";
 import {
   ActivityIndicator,
+  type LayoutChangeEvent,
   StyleSheet,
   Text,
   TextInput,
@@ -35,6 +36,9 @@ type Props = {
   onRetirar?: (id: string) => void;
   onAdicionarSerie?: (id: string) => void;
   onRetirarSerie?: (serie: SerieRascunho) => void;
+  onLayout?: (evento: LayoutChangeEvent) => void;
+  onConcluido?: (exercicioId: string) => void;
+  referencia?: React.Ref<React.ComponentRef<typeof View>>;
 };
 
 const ControleSerie = memo(function ControleSerie({
@@ -167,6 +171,9 @@ export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
   onRetirar,
   onAdicionarSerie,
   onRetirarSerie,
+  onLayout,
+  onConcluido,
+  referencia,
 }: Props) {
   const concluidas = series.filter((serie) => serie.concluida).length;
   const completo = series.length > 0 && concluidas === series.length;
@@ -175,10 +182,16 @@ export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
     recolhido: boolean | null;
   }>({ completo, recolhido: null });
   const [preferenciaLida, setPreferenciaLida] = useState(false);
-  if (chaveRecolhimento && estadoCartao.completo !== completo) {
+  if (estadoCartao.completo !== completo) {
     setEstadoCartao({ completo, recolhido: null });
   }
-  const recolhido = estadoCartao.recolhido ?? Boolean(chaveRecolhimento && completo);
+  const recolhido = estadoCartao.recolhido ?? completo;
+  const completoAnterior = useRef(completo);
+  useEffect(() => {
+    const acabouDeConcluir = completo && !completoAnterior.current;
+    completoAnterior.current = completo;
+    if (acabouDeConcluir) onConcluido?.(exercicio.id);
+  }, [completo, exercicio.id, onConcluido]);
 
   useEffect(() => {
     if (!chaveRecolhimento) return;
@@ -209,7 +222,7 @@ export const CartaoExercicioTreino = memo(function CartaoExercicioTreino({
     else onCampo(chave, campo, valor);
   };
   return (
-    <View style={estilos.cartao}>
+    <View ref={referencia} collapsable={false} style={estilos.cartao} onLayout={onLayout}>
       <TouchableOpacity
         accessibilityRole="button"
         accessibilityLabel={`${recolhido ? "Expandir" : "Recolher"} ${exercicio.name}`}

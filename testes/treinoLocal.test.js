@@ -18,6 +18,11 @@ const draft = { versao: 1, usuarioId: "u1", planId: "p1", planName: "Plano", ses
   await local.gravarRascunho(draft);
   assert.equal(await local.lerResumoTreinoAtivo("u2"), null);
   const restaurado = await local.lerRascunho("u1", "p1");
+  const antes = notificacoes;
+  await local.atualizarRascunho("u1", "p1", atual => ({ ...atual, ultimaTentativaEm: "2026-11-16T12:00:00Z" }), false);
+  assert.equal(notificacoes, antes, "Metadados de tentativa não redesenham a sessão");
+  await local.gravarRascunho(draft);
+  assert.equal((await local.lerRascunho("u1", "p1")).ultimaTentativaEm, "2026-11-16T12:00:00Z");
   assert.equal(restaurado.descanso.fimEm, 11000);
   const originalOp = { ...serie, pendente: "salvar", registroId: "r1" };
   await local.gravarRascunho({ ...draft, series: [originalOp] });

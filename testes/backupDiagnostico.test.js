@@ -1,0 +1,17 @@
+const assert=require('node:assert/strict');
+const {carregar}=require('./suporte.cjs');
+const {validarBackup}=carregar('servicos/backup.ts',{}, {TextEncoder});
+const b={formato:'treino-familia-backup',versao:1,tabelas:{workout_plans:[{id:'00000000-0000-4000-8000-000000000001',name:'A'}]}};
+assert.equal(validarBackup(JSON.stringify(b)).versao,1);
+assert.throws(()=>validarBackup(JSON.stringify({...b,versao:99})));
+assert.throws(()=>validarBackup(JSON.stringify({...b,tabelas:{auth:[]}})));
+assert.throws(()=>validarBackup(JSON.stringify({...b,tabelas:{workout_plans:[...b.tabelas.workout_plans,...b.tabelas.workout_plans]}})));
+const d=carregar('servicos/diagnostico.ts',{'../package.json':{version:'1.3.0'}},{navigator:{onLine:false,userAgent:'Chrome/137.0.0.0 private@example.invalid'}});
+for(let i=0;i<80;i++)d.registrarDiagnostico('interface','FALHA');
+d.registrarDiagnostico('usuario-secreto','token-secreto');
+const diagnostico=d.gerarDiagnostico('web',{treinos:2,nutricao:1,fotos:0});
+assert.equal(JSON.parse(diagnostico).eventos.length,40);
+assert.ok(!diagnostico.includes('private@')&&!diagnostico.includes('secreto'));
+assert.equal(JSON.parse(diagnostico).conexao,'offline');
+assert.equal(d.codigoFalha({message:'senha-secreta',code:'XYZ'}),'OFFLINE');
+console.log('OK validação backup e diagnóstico com campos permitidos');

@@ -19,6 +19,7 @@ type BarraProps = {
   visivel: boolean;
   onRetomar: (plano: { planId: string; planName: string }) => void;
   onAbrirNutricao: () => void;
+  onAbrirSincronizacao: () => void;
 };
 
 function Contagem({
@@ -55,6 +56,7 @@ function Barra({
   visivel,
   onRetomar,
   onAbrirNutricao,
+  onAbrirSincronizacao,
 }: BarraProps) {
   const [resumo, setResumo] = useState<ResumoTreinoAtivo | null>(null);
   const [fotosPendentes, setFotosPendentes] = useState(0);
@@ -197,6 +199,9 @@ function Barra({
 
   return (
     <View style={estilos.grupo}>
+      {resumo?.pendencias || resumo?.finalizacaoPendente || mostrarNutricao || fotosPendentes ? (
+      <TouchableOpacity accessibilityRole="button" onPress={onAbrirSincronizacao} style={{ minHeight: 44, justifyContent: "center", paddingHorizontal: 16 }}><Text style={{ color: corTema, textAlign: "center" }}>Detalhes da sincronização no Perfil</Text></TouchableOpacity>
+      ) : null}
       {resumo ? (
         <TouchableOpacity
           style={[estilos.barra, { borderColor: `${corTema}70` }]}

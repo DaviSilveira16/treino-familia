@@ -53,6 +53,7 @@ export type TreinoRascunho = {
   salvoEm: string;
   descanso?: DescansoTreino;
   finalizacao?: FinalizacaoTreino;
+  ultimaTentativaEm?: string;
   erroSincronizacao?: string;
   conflitoSincronizacao?: boolean;
   conflitoSessao?: boolean;
@@ -101,6 +102,7 @@ export type FotoModeloPendente = {
   exercicioId: string;
   origem: string;
   destino: string;
+  ultimaTentativaEm?: string;
   falha?: { motivo: "conexao" | "origem" | "permissao" | "outro"; etapa: "conferir" | "copiar" | "vincular"; tentativas: number; tentarEm: number };
 };
 
@@ -222,6 +224,7 @@ export function gravarRascunho(rascunho: TreinoRascunho): Promise<void> {
       );
       const proximo = {
         ...rascunho,
+        ultimaTentativaEm: mesmaSessao?.ultimaTentativaEm ?? rascunho.ultimaTentativaEm,
         exercicios: rascunho.exercicios.map((item) =>
           fotosLocais.has(item.id) ? { ...item, photo_path: fotosLocais.get(item.id) } : item,
         ),
@@ -275,6 +278,7 @@ export function atualizarRascunho(
   usuarioId: string,
   planId: string,
   alterar: (atual: TreinoRascunho) => TreinoRascunho | null,
+  notificarMudanca = true,
 ): Promise<TreinoRascunho | null> {
   const tarefa = fila
     .catch(() => {})
@@ -302,7 +306,7 @@ export function atualizarRascunho(
         );
         await AsyncStorage.removeItem(chave(usuarioId, planId));
       }
-      notificar(atual.finalizacao || proximo?.finalizacao ? "atividade" : "edicao");
+      if (notificarMudanca) notificar(atual.finalizacao || proximo?.finalizacao ? "atividade" : "edicao");
       return proximo;
     });
   fila = tarefa.catch(() => {});

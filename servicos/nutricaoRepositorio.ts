@@ -12,7 +12,7 @@ type Documento = DiaNutricao | ModeloDieta | ConfiguracaoNutricional | Preferenc
 type Operacao = { id: string; documento: Documento };
 type Conflito = { id: string; revision: number; document: Documento | null };
 type Entrada = {
-  tipo: Tipo; id: string; documento: Documento; revision: number; fila: Operacao[]; conflito?: Conflito;
+  tipo: Tipo; id: string; documento: Documento; revision: number; fila: Operacao[]; conflito?: Conflito; ultimaTentativaEm?: string;
 };
 type Copia = { recursoId: string; data: string; documento: Documento; origem: "local" | "remoto" };
 type BancoLocal = {
@@ -202,6 +202,8 @@ export function sincronizarNutricao(usuarioId: string): Promise<{ pendencias: nu
             const banco = await ler(usuarioId);
             const recurso = Object.keys(banco.entradas).find((id) => banco.entradas[id].fila.length && !banco.entradas[id].conflito);
             if (!recurso) return null;
+            banco.entradas[recurso].ultimaTentativaEm = new Date().toISOString();
+            await gravar(banco);
             return { recurso, entrada: copiar(banco.entradas[recurso]), operacao: copiar(banco.entradas[recurso].fila[0]) };
           });
           if (!proxima) break;
@@ -270,7 +272,7 @@ export async function resolverConflitoNutricao(usuarioId: string, recursoId: str
     if (remoto.document) banco.copias.push({ recursoId, data: new Date().toISOString(), documento: copiar(remoto.document), origem: "remoto" });
     if (usar === "remoto") {
       if (!remoto.document) delete banco.entradas[recursoId];
-      else banco.entradas[recursoId] = { tipo: entrada.tipo, id: remoto.id, documento: remoto.document, revision: remoto.revision, fila: [] };
+      else banco.entradas[recursoId] = { tipo: entrada.tipo, id: remoto.id, documento: remoto.document, revision: remoto.revision, fila: [], ultimaTentativaEm: entrada.ultimaTentativaEm };
     } else {
       entrada.id = remoto.id;
       entrada.revision = remoto.revision;
@@ -317,7 +319,7 @@ function fundir(banco: BancoLocal, tipo: Tipo, linhas: LinhaRemota[]) {
     const recurso = idRecurso(tipo, linha.document, banco.usuarioId);
     const local = banco.entradas[recurso];
     if (local?.fila.length || local?.conflito || (local && local.revision > linha.revision)) continue;
-    banco.entradas[recurso] = { tipo, id: linha.id, documento: linha.document, revision: linha.revision, fila: [] };
+    banco.entradas[recurso] = { tipo, id: linha.id, documento: linha.document, revision: linha.revision, fila: [], ultimaTentativaEm: local?.ultimaTentativaEm };
     if (tipo === "food") banco.alimentos[linha.id] = linha.document as AlimentoNutricao;
   }
 }
@@ -419,4 +421,21 @@ export async function buscarAlimentosNutricao(usuarioId: string, busca: string, 
       return { alimentos: alimentos.slice(indice * 20, indice * 20 + 20), temMais: alimentos.length > (indice + 1) * 20, erro: mensagem(erro) };
     });
   }
+}
+
+export function listarPendenciasNutricao(usuarioId: string) {
+  return serializar(usuarioId, async () => {
+    const banco = await ler(usuarioId);
+    return Object.entries(banco.entradas).filter(([, e]) => e.fila.length || e.conflito).map(([id, e]) => ({
+      id, tipo: e.tipo, quantidade: e.fila.length, conflito: Boolean(e.conflito), ultimaTentativaEm: e.ultimaTentativaEm, erro: banco.erro,
+    }));
+  });
+}
+
+/** Cópia privada para exportação; não representa confirmação remota. */
+export function exportarNutricaoLocal(usuarioId: string) {
+  return serializar(usuarioId, async () => {
+    const banco = await ler(usuarioId);
+    return copiar({ entradas: banco.entradas, copias: banco.copias });
+  });
 }

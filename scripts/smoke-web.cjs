@@ -160,6 +160,16 @@ const tables = {
     body_fat_percentage: 15 + indice, notes: null,
   })),
 };
+if (process.env.SMOKE_AVANCO_ONLY) {
+  for (const [indice, name] of ["Remada avanço", "Elevação avanço"].entries()) {
+    const id = `33333333-3333-4333-8333-33333333333${indice + 4}`;
+    tables.exercises.push({ ...tables.exercises[0], id, name, position: indice + 2 });
+    tables.exercise_load_defaults.push(...[1, 2].map((set_number) => ({
+      id: `default-avanco-${indice}-${set_number}`, exercise_id: id,
+      user_id: uid, set_number, reps: 10, weight_kg: 20,
+    })));
+  }
+}
 const storedPhotos = new Map(),
   photoUploads = [];
 const photoFixture = path.join(root, "public", "treino-familia-icon-192-v2.png");
@@ -303,6 +313,7 @@ function filtered(table, search) {
   );
 }
 (async () => {
+  if(process.env.SMOKE_MELHORIAS_ONLY) tables.community_posts[0].user_id="outro-usuario";
   await new Promise((resolve) =>
     server.listen(fixturePort, "127.0.0.1", resolve),
   );
@@ -315,6 +326,7 @@ function filtered(table, search) {
   let activePage;
   try {
     const context = await browser.newContext({
+      serviceWorkers: "block", // Este harness intercepta o backend; SW tem teste dedicado com rede real local.
       viewport: { width: 390, height: 844 },
       isMobile: true,
       hasTouch: true,
@@ -545,6 +557,11 @@ function filtered(table, search) {
           headers,
         });
       }
+      if (url.pathname.endsWith("/rpc/tf_community_interaction")) { const p=request.postDataJSON(); if(p.p_action==="delete_post") {tables.community_posts=tables.community_posts.filter(post=>post.id!==p.p_post_id);return route.fulfill({json:{deleted:true},headers});} return route.fulfill({json:require("./cenarios-melhorias.cjs").interagir(p),headers}); }
+      if (process.env.SMOKE_MELHORIAS_ONLY && url.pathname.endsWith("/rpc/tf_restore_backup")) {
+        const p=request.postDataJSON();
+        return route.fulfill({json:{concluido:p.p_confirmar,tabelas:Object.entries(p.p_backup.tabelas).map(([tabela,linhas])=>({tabela,novos:linhas.length,preservados:0,recusados:0}))},headers});
+      }
       if (url.pathname.endsWith("/rpc/tf_indicadores_painel"))
         return route.fulfill({ json: { sequencia: 2, carga: null }, headers });
       if (url.pathname.includes("/rpc/"))
@@ -652,7 +669,7 @@ function filtered(table, search) {
     await page.screenshot({ path: path.join(output, "web-login.png") });
     const draftKey = `@treino-familia:rascunho:v1:${uid}:${pid}`;
     await context.addInitScript(
-      ({ key, auth, draftKey, uid, pid, sid, eid, start }) => {
+      ({ key, auth, draftKey, uid, pid, sid, eid, start, exerciciosAvanco }) => {
         Object.defineProperty(navigator, "standalone", {
           configurable: true,
           value: true,
@@ -701,7 +718,7 @@ function filtered(table, search) {
               planId: pid,
               planName: "Plano teste",
               sessao: { id: sid, plan_id: pid, started_at: start },
-              exercicios: [
+              exercicios: exerciciosAvanco ?? [
                 {
                   id: eid,
                   name: "Agachamento teste",
@@ -709,15 +726,15 @@ function filtered(table, search) {
                   reps_goal: "8-12",
                 },
               ],
-              series: [1, 2].map((set_number) => ({
-                chave: `${eid}:${set_number}`,
-                exercise_id: eid,
-                exercise_name: "Agachamento teste",
+              series: (exerciciosAvanco ?? [{ id: eid, name: "Agachamento teste" }]).flatMap((exercicio) => [1, 2].map((set_number) => ({
+                chave: `${exercicio.id}:${set_number}`,
+                exercise_id: exercicio.id,
+                exercise_name: exercicio.name,
                 set_number,
                 reps: "10",
                 weight_kg: "20",
                 concluida: false,
-              })),
+              }))),
               intensidade: "moderada",
               esforco: "adequado",
               salvoEm: start,
@@ -741,6 +758,9 @@ function filtered(table, search) {
         sid,
         eid,
         start: active.started_at,
+        exerciciosAvanco: process.env.SMOKE_AVANCO_ONLY
+          ? tables.exercises.map(({ id, name, sets_goal, reps_goal }) => ({ id, name, sets_goal, reps_goal }))
+          : null,
       },
     );
     if (process.env.SMOKE_PAINEL_ONLY) {
@@ -751,6 +771,13 @@ function filtered(table, search) {
     await page
       .getByText("Olá, Conta de!", { exact: true })
       .waitFor({ timeout: 15000 });
+    if (process.env.SMOKE_MELHORIAS_ONLY) { await require("./cenarios-melhorias.cjs").executar({page,context,uid,draftKey,output}); assert.deepEqual(errors, []); return; }
+    if (process.env.SMOKE_AVANCO_ONLY) {
+      await require("./cenarios-avanco-exercicios.cjs").executar({ page, tables, uid, sid, draftKey, output });
+      assert.deepEqual(errors, []);
+      await context.close();
+      return;
+    }
     if (process.env.SMOKE_PAINEL_ONLY) {
       const itensRemovidos = page.getByText(/Sequência atual|Programação semanal|Programação e lembretes|Meta e lembretes|Meta de \d+ treinos|Evolução de carga|Treinos programados|É hora de registrar suas medidas|Há uma novidade na comunidade/i);
       await page.getByText("Seu resumo semanal", { exact: true }).waitFor();
@@ -853,6 +880,20 @@ function filtered(table, search) {
       await page.getByText("Meus treinos", { exact: true }).click();
       await page.getByText("Plano teste", { exact: true }).filter({ visible: true }).first().click();
       await exercisePhotoRegression();
+      const abrirFoto = page.getByRole("button", { name: "Visualizar foto de Agachamento teste", exact: true });
+      await abrirFoto.focus();
+      await abrirFoto.click();
+      const fecharFoto = page.getByRole("button", { name: "Fechar visualização", exact: true });
+      await fecharFoto.waitFor();
+      await fecharFoto.focus();
+      await page.keyboard.press("Tab");
+      assert.equal(await page.getByRole("button", { name: "Excluir foto", exact: true }).evaluate(e => e === document.activeElement), true);
+      await page.keyboard.press("Shift+Tab");
+      assert.equal(await fecharFoto.evaluate(e => e === document.activeElement), true);
+      await fecharFoto.click();
+      await fecharFoto.waitFor({ state: "hidden" });
+      await page.waitForFunction(() => document.querySelector('[role="button"][aria-label^="Visualizar foto"]') === document.activeElement);
+      assert.equal(await abrirFoto.evaluate(e => e === document.activeElement), true, "O foco volta ao botão de origem");
       await page.getByRole("button", { name: "Abrir comunidade da família" }).click();
       await page.getByRole("button", { name: "Foto", exact: true }).click();
       const preview = await communityPhotoSelection({

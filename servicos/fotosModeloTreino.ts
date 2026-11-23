@@ -26,6 +26,8 @@ async function enviarFotos(usuarioId: string, manual: boolean) {
   const planosAlterados = new Set<string>();
   for (const { id, foto } of fotos) {
     if (!foto || (!manual && (foto.falha?.tentarEm ?? 0) > Date.now())) continue;
+    foto.ultimaTentativaEm = new Date().toISOString();
+    await guardarFalhaFotoModelo(id, foto);
     let etapa: NonNullable<FotoModeloPendente["falha"]>["etapa"] = "conferir";
     try {
       if (await lerExclusaoTreino(usuarioId, foto.sessaoId)) {

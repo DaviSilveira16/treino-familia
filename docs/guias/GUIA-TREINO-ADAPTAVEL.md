@@ -8,6 +8,12 @@
 4. Para corrigir valores de uma série concluída, desmarque-a, edite e marque novamente. Ao retirar uma série/exercício já realizado, o app pede confirmação e retira esses registros somente da sessão atual.
 5. Ao terminar, toque **Finalizar e salvar treino**. A tela de revisão mostra tempo, intensidade, esforço opcional, séries, repetições, volume e calorias ativas estimadas.
 
+Ao concluir a última série de um exercício, seu cartão se recolhe e a tela desce
+até o próximo exercício com séries abertas. A rolagem considera a posição depois
+do recolhimento. No último exercício, a tela apresenta a área de finalizar e
+revisar; a conclusão do treino continua dependendo da sua confirmação. É possível
+reabrir um cartão para conferir ou desmarcar séries.
+
 ### Escolha ao concluir
 
 - **Criar novo treino**: informe outro nome. Cria um plano com os exercícios visíveis e as referências de carga/repetições desta sessão. A conclusão fica vinculada ao novo plano; o original permanece preservado.
@@ -21,6 +27,12 @@ Exercícios avulsos ficam guardados com seu nome e valores no histórico. Para t
 ## Registrar musculação pela Frequência
 
 Selecione a data e o plano. Confira as cargas sugeridas e marque as séries que realmente fez. É possível usar **Marcar todas as séries do plano como realizadas**, ou selecionar individualmente. Para editar valores já marcados, desmarque a série antes.
+
+O registro pela Frequência também recolhe cada exercício quando suas séries estão
+concluídas e avança para o próximo. Ao marcar todas, os cartões concluídos se
+recolhem e a tela vai ao resumo para informar duração e intensidade. Desmarcar ou
+adicionar uma série reabre o exercício. Nada é registrado no histórico até tocar
+em **Confirmar treino realizado**.
 
 Use também **Adicionar série** ou **Retirar esta série** se a quantidade realizada foi diferente do plano. Esses ajustes pertencem ao registro do calendário, preservando o plano salvo.
 
@@ -55,5 +67,10 @@ npm run check
 npm run build:web
 npm run test:ui
 ```
+
+Para conferir somente o recolhimento e o avanço automático nos dois fluxos,
+execute `npm run test:ui` com `SMOKE_AVANCO_ONLY=1`. O mesmo cenário roda no
+WebKit com `SMOKE_BROWSER=webkit` e verifica também reabertura, desmarcação,
+séries adicionadas e a ausência de salvamento automático.
 
 Os testes cobrem exercícios avulsos e remoções, numeração de séries sem reutilizar itens pendentes, criação/reenvio de modelo sem duplicar, preservação do plano original, registro manual com duração/métricas e respostas perdidas. O roteiro de interface usa dados fictícios e testa edição, adaptação offline, recuperação, criação de plano, Frequência com calorias e os fluxos anteriores. Não foram realizadas gravações com uma conta real durante a implementação.

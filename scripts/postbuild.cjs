@@ -7,3 +7,5 @@ fs.copyFileSync(path.join(root, "public/.well-known/assetlinks.json"), path.join
 const links = JSON.parse(fs.readFileSync(path.join(directory, "assetlinks.json"), "utf8"));
 if (!links[0]?.target?.sha256_cert_fingerprints?.length) throw new Error("Vínculo Android ausente no pacote web.");
 console.log("App Links: assetlinks.json incluído e validado.");
+const { gerarOffline } = require("./gerar-offline.cjs");
+console.log(`Cache offline preparado: ${gerarOffline(path.join(root, "dist"))}`);

@@ -18,7 +18,7 @@ const estiloRolagemWeb =
     ? ({
         flex: 1,
         minHeight: 0,
-        touchAction: "pan-y",
+        touchAction: "pan-y pinch-zoom",
         WebkitOverflowScrolling: "touch",
       } as any)
     : { flex: 1, minHeight: 0 };

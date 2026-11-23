@@ -55,6 +55,30 @@ jobs:
         run: npm run test:ui
         env:
           SMOKE_SCROLLS_ONLY: '1'
+      - name: Comunidade, backup, diagnóstico e acessibilidade
+        run: npm run test:ui
+        env:
+          SMOKE_MELHORIAS_ONLY: '1'
+      - name: Melhorias no WebKit
+        run: npm run test:ui
+        env:
+          SMOKE_BROWSER: webkit
+          SMOKE_MELHORIAS_ONLY: '1'
+      - name: Avanço de exercícios no treino e Frequência
+        run: npm run test:ui
+        env:
+          SMOKE_AVANCO_ONLY: '1'
+      - name: Avanço de exercícios no WebKit
+        run: npm run test:ui
+        env:
+          SMOKE_BROWSER: webkit
+          SMOKE_AVANCO_ONLY: '1'
+      - name: Abertura offline e atualização entre versões
+        run: npm run test:offline
+      - name: Offline no WebKit
+        run: npm run test:offline
+        env:
+          SMOKE_BROWSER: webkit
   publicar:
     needs: verificar
     if: >-

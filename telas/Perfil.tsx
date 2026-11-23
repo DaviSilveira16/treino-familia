@@ -18,6 +18,10 @@ import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "../supabase";
+import Diagnostico from "../componentes/Diagnostico";
+import RestaurarBackup from "../componentes/RestaurarBackup";
+import { prepararBackup } from "../servicos/exportarBackup";
+import Sincronizacao from "../componentes/Sincronizacao";
 import Acompanhamento from "../componentes/Acompanhamento";
 import ExcluirConta from "../componentes/ExcluirConta";
 import { baixarCsv, montarCsv } from "../servicos/exportarCsv";
@@ -27,7 +31,7 @@ const estiloRolagemWeb =
     ? ({
         flex: 1,
         minHeight: 0,
-        touchAction: "pan-y",
+        touchAction: "pan-y pinch-zoom",
         WebkitOverflowScrolling: "touch",
       } as any)
     : { flex: 1, minHeight: 0 };
@@ -813,47 +817,7 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
       }
 
       const usuarioBackup = respostaUsuario.user;
-      const tabelas = [
-        "workout_plans",
-        "exercises",
-        "exercise_load_defaults",
-        "workout_sessions",
-        "workout_sets",
-        "cardio_activities",
-        "cardio_sessions",
-        "physical_measurements",
-      ] as const;
-      const dadosTabelas: Record<string, RegistroExportacao[]> = {};
-      for (const tabela of tabelas) {
-        dadosTabelas[tabela] = await buscarTodosOsRegistros(
-          tabela,
-          usuarioBackup.id,
-        );
-      }
-
-      const metadados = usuarioBackup.user_metadata ?? {};
-      const backup = {
-        aplicativo: "Treino Família",
-        formato: "treino-familia-backup",
-        versao: 1,
-        exportado_em: new Date().toISOString(),
-        usuario: {
-          id: usuarioBackup.id,
-          email: usuarioBackup.email ?? null,
-          perfil: {
-            nome: metadados.nome ?? null,
-            tema_cor: metadados.tema_cor ?? null,
-            foto_url: metadados.foto_url ?? null,
-            peso_kg: metadados.peso_kg ?? null,
-            altura_cm: metadados.altura_cm ?? null,
-            idade: metadados.idade ?? null,
-            sexo: metadados.sexo ?? null,
-          },
-        },
-        tabelas: dadosTabelas,
-        observacao:
-          "O arquivo contém registros e referências das fotos, mas não incorpora os arquivos de imagem armazenados no Supabase Storage. Não inclui senhas nem tokens.",
-      };
+      const backup = await prepararBackup(usuarioBackup);
 
       const conteudo = JSON.stringify(backup, null, 2);
       const agoraLocal = new Date();
@@ -1410,6 +1374,9 @@ export default function Perfil({ usuario, onVoltar, onTemaAlterado }: Props) {
         </View>
 
         <View style={estilos.cartao}>
+          <Diagnostico key={`diagnostico:${usuario.id}`} usuarioId={usuario.id} />
+          <Sincronizacao key={`sincronizacao:${usuario.id}`} usuarioId={usuario.id} />
+          <RestaurarBackup key={usuario.id} usuarioId={usuario.id} />
           <Text style={estilos.tituloSecao}>Meus dados</Text>
           <Text style={estilos.descricaoSecao}>
             Baixe um relatório fácil de ler para guardar ou compartilhar. O

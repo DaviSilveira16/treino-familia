@@ -152,6 +152,8 @@ async function enviar(
   if (!local) return { rascunho: null, concluido: false };
   const sessaoId = local.sessao.id;
   const inicioEnvio = Date.now();
+  local = await atualizarRascunho(usuarioId, planId, atual => atual?.sessao.id === sessaoId ? { ...atual, ultimaTentativaEm: new Date().toISOString() } : atual, false);
+  if (!local || local.sessao.id !== sessaoId) return { rascunho: local, concluido: false, adiado: true };
   const medirConclusao = Boolean(
     local.finalizacao && !local.encerradaNoServidor,
   );

@@ -15,7 +15,7 @@ const food = {
   id: "f1", usuarioId: "u1", nome: "Alimento da embalagem", marca: "", preparo: "", fonte: "Rótulo",
   baseGramas: 100, porcaoNome: "100 g", nutrientes: item.nutrientesBase,
 };
-function ambiente(storage = armazenamento()) {
+function ambiente(storage = armazenamento(), contexto = {}) {
   const online = { onLine: false };
   const db = Object.fromEntries(["days", "templates", "goals", "preferences", "foods"].map((name) => [`nutrition_${name}`, []]));
   const state = { user: "u1", writes: 0, missing: false, lose: false, after: null };
@@ -72,13 +72,51 @@ function ambiente(storage = armazenamento()) {
     "@react-native-async-storage/async-storage": storage,
     "../supabase": backend,
     "./revisaoDados": { registrarMudancaDeDados() {} },
-  }, { navigator: online });
+  }, { navigator: online, ...contexto });
   return { repo, storage, db, state, online, receipts };
 }
 
 (async () => {
+  // A tentativa pertence à operação realmente selecionada, inclusive quando
+  // autenticação/rede falham; consultas, offline e conflitos não mudam a data.
+  let agora = "2026-11-23T12:00:00.000Z";
+  class DataControlada extends Date {
+    constructor(valor) { super(arguments.length ? valor : agora); }
+  }
+  let a = ambiente(undefined, { Date: DataControlada });
+  await a.repo.salvarDiaNutricao(dia());
+  assert.equal((await a.repo.listarPendenciasNutricao("u1"))[0].ultimaTentativaEm, undefined);
+  await a.repo.sincronizarNutricao("u1");
+  assert.equal((await a.repo.listarPendenciasNutricao("u1"))[0].ultimaTentativaEm, undefined, "Offline não iniciou um envio");
+  a.online.onLine = true;
+  a.state.user = "u2";
+  assert.match((await a.repo.sincronizarNutricao("u1")).erro, /mesma conta/);
+  assert.equal((await a.repo.listarPendenciasNutricao("u1"))[0].ultimaTentativaEm, agora, "Falha de autenticação registra a tentativa");
+  assert.equal(a.state.writes, 0);
+  assert.equal((await a.repo.listarPendenciasNutricao("u2")).length, 0);
+  let reiniciado = ambiente(a.storage, { Date: DataControlada });
+  assert.equal((await reiniciado.repo.listarPendenciasNutricao("u1"))[0].ultimaTentativaEm, agora, "A data sobrevive ao reinício");
+  agora = "2026-11-23T12:05:00.000Z";
+  reiniciado.online.onLine = true;
+  reiniciado.state.missing = true;
+  await reiniciado.repo.sincronizarNutricao("u1");
+  assert.equal((await reiniciado.repo.listarPendenciasNutricao("u1"))[0].ultimaTentativaEm, agora, "Uma nova falha de envio atualiza a data");
+  reiniciado = ambiente(a.storage, { Date: DataControlada });
+  reiniciado.online.onLine = true;
+  agora = "2026-11-23T12:10:00.000Z";
+  assert.equal((await reiniciado.repo.sincronizarNutricao("u1")).pendencias, 0);
+  const bancoConfirmado = await reiniciado.repo.exportarNutricaoLocal("u1");
+  assert.equal(bancoConfirmado.entradas[`day:${inicio}`].ultimaTentativaEm, agora);
+  agora = "2026-11-23T12:15:00.000Z";
+  await reiniciado.repo.sincronizarNutricao("u1");
+  assert.equal((await reiniciado.repo.exportarNutricaoLocal("u1")).entradas[`day:${inicio}`].ultimaTentativaEm,
+    bancoConfirmado.entradas[`day:${inicio}`].ultimaTentativaEm, "Fila vazia não inventa uma tentativa");
+  await reiniciado.repo.carregarEstadoNutricao("u1", inicio, inicio);
+  assert.equal((await reiniciado.repo.exportarNutricaoLocal("u1")).entradas[`day:${inicio}`].ultimaTentativaEm,
+    bancoConfirmado.entradas[`day:${inicio}`].ultimaTentativaEm, "Leitura remota preserva o horário local da tentativa");
+
   // Exclusões são snapshots completos: uma confirmação antiga não ressuscita o item.
-  let a = ambiente();
+  a = ambiente();
   await a.repo.salvarDiaNutricao(dia());
   await a.repo.salvarDiaNutricao(dia("d1", []));
   assert.equal((await a.repo.lerEstadoNutricaoLocal("u1")).pendencias, 2);
@@ -116,7 +154,7 @@ function ambiente(storage = armazenamento()) {
   assert.equal(a.db.nutrition_days[0].revision, 2);
 
   // Leitura remota não sobrescreve uma edição offline e CAS não atropela outro aparelho.
-  a = ambiente();
+  a = ambiente(undefined, { Date: DataControlada });
   a.db.nutrition_days.push({ id: "d1", user_id: "u1", local_date: inicio, document: dia(), revision: 1 });
   a.online.onLine = true;
   await a.repo.carregarEstadoNutricao("u1", inicio, inicio);
@@ -131,6 +169,12 @@ function ambiente(storage = armazenamento()) {
   let estado = await a.repo.lerEstadoNutricaoLocal("u1");
   assert.equal(estado.conflitos.length, 1);
   assert.equal(estado.conflitos[0].remoto.refeicoes[0].itens[0].gramas, 175);
+  const tentativaConflito = (await a.repo.listarPendenciasNutricao("u1"))[0].ultimaTentativaEm;
+  assert.ok(tentativaConflito);
+  agora = "2026-11-23T12:20:00.000Z";
+  await a.repo.sincronizarNutricao("u1");
+  assert.equal((await a.repo.listarPendenciasNutricao("u1"))[0].ultimaTentativaEm, tentativaConflito,
+    "Conflito precisa de revisão, sem registrar reenvio que não aconteceu");
   await a.repo.resolverConflitoNutricao("u1", `day:${inicio}`, "local");
   assert.equal(a.db.nutrition_days[0].document.refeicoes[0].itens[0].gramas, 125);
   assert.equal((await a.repo.listarCopiasConflitosNutricao("u1")).length, 2);
@@ -152,10 +196,12 @@ function ambiente(storage = armazenamento()) {
   await a.repo.salvarDiaNutricao(dia("l", []));
   a.online.onLine = true;
   await a.repo.sincronizarNutricao("u1");
+  const tentativaAntesDeEscolherRemoto = (await a.repo.listarPendenciasNutricao("u1"))[0].ultimaTentativaEm;
   await a.repo.resolverConflitoNutricao("u1", `day:${inicio}`, "remoto");
   estado = await a.repo.lerEstadoNutricaoLocal("u1");
   assert.equal(estado.pendencias, 0);
   assert.equal(estado.dias[0].id, "r");
+  assert.equal((await a.repo.exportarNutricaoLocal("u1")).entradas[`day:${inicio}`].ultimaTentativaEm, tentativaAntesDeEscolherRemoto);
   assert.equal((await a.repo.listarCopiasConflitosNutricao("u1"))[0].documento.refeicoes[0].itens.length, 0);
 
   // Trocar de conta não envia dados privados da conta anterior.

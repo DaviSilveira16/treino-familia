@@ -2,6 +2,8 @@
 
 ## Guias
 
+- [Comunidade, backup, diagnóstico e abertura offline](guias/GUIA-MELHORIAS-COMUNIDADE-OFFLINE.md)
+
 - [Treino com cronômetro e adaptações](guias/GUIA-TREINO-ADAPTAVEL.md)
 - [Cargas da última sessão e recordes](guias/GUIA-CARGAS-ULTIMA-SESSAO.md)
 - [Nutrição](guias/GUIA-NUTRICAO.md)

@@ -47,6 +47,7 @@ type Serie = {
 };
 type Ponto = {
   id: string;
+  nome: string;
   data: string;
   cargaMaxima: number;
   repsNaMaiorCarga: number;
@@ -416,7 +417,7 @@ export default function EvolucaoTreinos({
                 style={estilos.linhaDetalhe}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={estilos.textoDetalhe}>{r.nome}</Text>
+                  <Text style={estilos.textoDetalhe}>{analise?.porExercicio[r.chave]?.nome ?? r.nome}</Text>
                   <Text style={estilos.secundario}>
                     {formatarData(r.data)} · {nomeRecorde(r.tipo)}
                   </Text>
@@ -745,6 +746,7 @@ export default function EvolucaoTreinos({
                         <Text style={estilos.textoDetalhe}>
                           {formatarData(ponto.data)}
                         </Text>
+                        <Text style={estilos.secundario}>{ponto.nome}</Text>
                         <Text style={estilos.secundario}>
                           {ponto.quantidadeSeries} séries ·{" "}
                           {ponto.repsNaMaiorCarga} reps na maior carga
