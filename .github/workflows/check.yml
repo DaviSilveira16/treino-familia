@@ -24,61 +24,9 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: npm run check
-      - run: npm run test:sql
-      - run: npm run build:web
       - run: npx playwright install --with-deps chromium webkit
-      - run: npm run test:ui
-      - run: npm run test:ui
-        env:
-          SMOKE_BROWSER: webkit
-      - name: Fotos ao salvar novo treino
-        run: npm run test:ui
-        env:
-          SMOKE_MODEL_PHOTOS_ONLY: '1'
-      - name: Próximo treino com foto pendente
-        run: npm run test:ui
-        env:
-          SMOKE_PHOTO_RETRY_ONLY: '1'
-      - name: Diário de nutrição
-        run: npm run test:nutricao:ui
-      - name: Painel e CSV
-        run: npm run test:ui
-        env:
-          SMOKE_PAINEL_ONLY: '1'
-      - name: Painel e reabertura no WebKit
-        run: npm run test:ui
-        env:
-          SMOKE_BROWSER: webkit
-          SMOKE_PAINEL_ONLY: '1'
-      - name: Paginação e rolagem de Meus treinos
-        run: npm run test:ui
-        env:
-          SMOKE_SCROLLS_ONLY: '1'
-      - name: Comunidade, backup, diagnóstico e acessibilidade
-        run: npm run test:ui
-        env:
-          SMOKE_MELHORIAS_ONLY: '1'
-      - name: Melhorias no WebKit
-        run: npm run test:ui
-        env:
-          SMOKE_BROWSER: webkit
-          SMOKE_MELHORIAS_ONLY: '1'
-      - name: Avanço de exercícios no treino e Frequência
-        run: npm run test:ui
-        env:
-          SMOKE_AVANCO_ONLY: '1'
-      - name: Avanço de exercícios no WebKit
-        run: npm run test:ui
-        env:
-          SMOKE_BROWSER: webkit
-          SMOKE_AVANCO_ONLY: '1'
-      - name: Abertura offline e atualização entre versões
-        run: npm run test:offline
-      - name: Offline no WebKit
-        run: npm run test:offline
-        env:
-          SMOKE_BROWSER: webkit
+      - name: Verificar antes de publicar
+        run: npm run check:ci
   publicar:
     needs: verificar
     if: >-

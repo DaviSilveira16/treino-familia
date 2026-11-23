@@ -1,0 +1,25 @@
+const assert = require("node:assert/strict");
+const { etapas, ambienteDeTeste, executar } = require("../scripts/verificar-ci.cjs");
+const original = { npm_execpath: "npm-cli.js", SMOKE_PAINEL_ONLY: "1", SMOKE_BROWSER_CHANNEL: "chrome", smoke_avanco_only: "1", expo_public_supabase_url: "https://real.invalid", EXPO_PUBLIC_SUPABASE_URL: "https://real.invalid" };
+const env = ambienteDeTeste(original, { SMOKE_BROWSER: "webkit" });
+assert.equal(env.EXPO_PUBLIC_SUPABASE_URL, "http://127.0.0.1:43119");
+assert.equal(env.SMOKE_PAINEL_ONLY, undefined);
+assert.equal(env.smoke_avanco_only, undefined);
+assert.equal(env.expo_public_supabase_url, undefined);
+assert.equal(env.SMOKE_BROWSER_CHANNEL, undefined);
+assert.equal(env.SMOKE_BROWSER, "webkit");
+assert.equal(original.SMOKE_PAINEL_ONLY, "1");
+const chamadas = [];
+const silencioso = { log() {}, error() {} };
+assert.equal(executar((_bin, args, options) => {
+  chamadas.push({ args, env: options.env });
+  return { status: 0 };
+}, original, silencioso), 0);
+assert.equal(chamadas.length, etapas.length);
+assert.equal(chamadas[3].env.SMOKE_BROWSER, undefined);
+assert.equal(chamadas[4].env.SMOKE_BROWSER, "webkit");
+let tentativas = 0;
+assert.equal(executar(() => ({ status: ++tentativas === 2 ? 7 : 0 }), original, silencioso), 7);
+assert.equal(tentativas, 2, "Falhar interrompe a bateria e bloqueia o push");
+assert.equal(executar(() => ({ error: new Error("Processo não iniciado"), status: null }), original, silencioso), 1);
+console.log("OK CI: bateria compartilhada, ambiente fictício, opções isoladas e interrupção em falhas");

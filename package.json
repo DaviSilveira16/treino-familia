@@ -54,7 +54,10 @@
     "test:ui": "node scripts/smoke-web.cjs",
     "test:nutricao:ui": "node scripts/smoke-nutricao.cjs",
     "build:web": "expo export --platform web && node scripts/postbuild.cjs",
-    "check": "npm run typecheck && npm run lint && npm test"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "check:ci": "node scripts/verificar-ci.cjs",
+    "test:browsers": "playwright install chromium webkit",
+    "publicar": "node scripts/commit-push.cjs"
   },
   "private": true
 }

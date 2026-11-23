@@ -2,6 +2,7 @@
 
 ## Guias
 
+- [Testes automáticos antes do push](guias/GUIA-TESTES-ANTES-DO-PUSH.md)
 - [Comunidade, backup, diagnóstico e abertura offline](guias/GUIA-MELHORIAS-COMUNIDADE-OFFLINE.md)
 
 - [Treino com cronômetro e adaptações](guias/GUIA-TREINO-ADAPTAVEL.md)

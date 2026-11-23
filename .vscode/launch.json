@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Commit e push com testes",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/commit-push.cjs",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": ["<node_internals>/**"],
+      "autoAttachChildProcesses": false
+    }
+  ]
+}

@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
+const { falhaNativaEsperada } = require("./falhas-fetch-smoke.cjs");
 const root = path.join(__dirname, "..");
 const output = path.join(
   root,
@@ -343,8 +344,7 @@ function filtered(table, search) {
       offlineReports = 0;
     const cancelledRequests = new Set(),
       nativeFetchReports = [],
-      fetchFailures = [],
-      leiturasResumo = [];
+      fetchFailures = [];
     await context.exposeBinding("__smokeCancelledFetch", (_, url) => {
       cancelledRequests.add(url);
     });
@@ -384,6 +384,7 @@ function filtered(table, search) {
       ) {
         nativeFetchReports.push({
           url: nativeUrl,
+          phase,
           // O WebKit pode despachar o erro da queda depois de reativar a rede.
           offline: forcedOffline || Date.now() - ultimaQuedaForcada < 1000,
           at: Date.now(),
@@ -394,14 +395,6 @@ function filtered(table, search) {
       console.error("PAGE ERROR", phase, error.stack || error.message);
     });
     page.on("dialog", (dialog) => dialog.accept());
-    page.on("response", (response) => {
-      if (!response.ok()) return;
-      const url = new URL(response.url());
-      const tabela = url.pathname.split("/").pop();
-      if (url.origin === backendOrigin && ["workout_sessions", "cardio_sessions"].includes(tabela) &&
-          url.searchParams.get("select")?.includes("duration_minutes,active_calories"))
-        leiturasResumo.push({ tabela, at: Date.now() });
-    });
     page.on("requestfailed", (request) => {
       const reason = request.failure()?.errorText || "";
       if (/cancelled|canceled|ERR_ABORTED/i.test(reason))
@@ -677,6 +670,13 @@ function filtered(table, search) {
         // Comprova cancelamento pelo sinal real, inclusive quando o WebKit não
         // emite requestfailed por ter cancelado antes de criar a requisição HTTP.
         const nativeFetch = window.fetch.bind(window);
+        // Ao recarregar, o WebKit pode rejeitar fetch com TypeError sem abortar
+        // o sinal nem emitir requestfailed. Registrar o ciclo real do documento
+        // permite distinguir esse cancelamento de uma falha online de CORS.
+        let unloading = false;
+        window.addEventListener("beforeunload", () => { unloading = true; });
+        window.addEventListener("pagehide", () => { unloading = true; });
+        window.addEventListener("pageshow", () => { unloading = false; });
         window.fetch = (input, init) => {
           const signal =
             init?.signal ||
@@ -700,6 +700,7 @@ function filtered(table, search) {
                   url,
                   offline: offlineAtStart || navigator.onLine === false,
                   aborted: Boolean(signal?.aborted),
+                  unloading,
                   at: Date.now(),
                   name: error.name,
                 })
@@ -2620,22 +2621,7 @@ function filtered(table, search) {
     await page.getByText("Gordura corporal · 3 medições · Variação: -2 p.p.", { exact: true }).waitFor();
 
     const unexpectedFetch = nativeFetchReports.filter(
-      (report) =>
-        !report.offline &&
-        !cancelledRequests.has(report.url) &&
-        // A RPC é opcional. Confirma que as duas leituras do fallback
-        // realmente responderam antes de aceitar esta falha do WebKit.
-        !(report.url.endsWith("/rpc/tf_resumo_semanal") &&
-          ["workout_sessions", "cardio_sessions"].every((tabela) =>
-            leiturasResumo.some((leitura) => leitura.tabela === tabela &&
-              leitura.at >= report.at && leitura.at - report.at < 3000),
-          )) &&
-        !fetchFailures.some(
-          (failure) =>
-            failure.url === report.url &&
-            (failure.offline || failure.aborted) &&
-            Math.abs(failure.at - report.at) < 1000,
-        ),
+      (report) => !falhaNativaEsperada(report, cancelledRequests, fetchFailures),
     );
     if (unexpectedFetch.length)
       console.error("NATIVE FETCH DIAGNOSTIC", {
@@ -2646,7 +2632,7 @@ function filtered(table, search) {
     assert.deepEqual(
       unexpectedFetch,
       [],
-      "Falhas nativas do WebKit só são esperadas offline ou em requisições canceladas",
+      "Falhas nativas do WebKit exigem evidência de offline, cancelamento ou descarregamento da página",
     );
     offlineReports = nativeFetchReports.filter(
       (report) => report.offline,
@@ -2665,7 +2651,7 @@ function filtered(table, search) {
         .screenshot({ path: path.join(output, "web-failure.png") })
         .catch(() => {});
       console.error(
-        (await activePage.locator("body").innerText()).slice(0, 2000),
+        (await activePage.locator("body").innerText().catch(() => "Página de diagnóstico já fechada.")).slice(0, 2000),
       );
     }
     throw error;
