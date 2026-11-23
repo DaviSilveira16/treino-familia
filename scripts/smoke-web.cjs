@@ -794,7 +794,18 @@ function filtered(table, search) {
       await page.getByText("Kcal estimadas", { exact: true }).waitFor();
       await continuar.waitFor();
       assert.equal(await page.locator('meta[name="revisao-smoke"]').getAttribute("content"), "2");
-      assert.equal(await page.evaluate((key) => localStorage.getItem(key), draftKey), rascunho);
+      const { ultimaTentativaEm: tentativaAntes, ...dadosAntes } = JSON.parse(rascunho);
+      const { ultimaTentativaEm: tentativaDepois, ...dadosDepois } = JSON.parse(
+        await page.evaluate((key) => localStorage.getItem(key), draftKey),
+      );
+      // Reabrir o app pode iniciar outra sincronização. Só seu horário pode
+      // mudar: séries, descanso, sessão e todos os demais campos são preservados.
+      assert.deepEqual(dadosDepois, dadosAntes);
+      assert.ok(Number.isFinite(Date.parse(tentativaDepois)), "A tentativa deve ter um horário válido");
+      if (tentativaAntes) assert.ok(
+        Date.parse(tentativaDepois) >= Date.parse(tentativaAntes),
+        "A última tentativa não pode retroceder ao reabrir o app",
+      );
       assert.equal(await itensRemovidos.count(), 0);
       await page.getByRole("button", { name: "Abrir perfil" }).click();
       const baixar = page.waitForEvent("download");
